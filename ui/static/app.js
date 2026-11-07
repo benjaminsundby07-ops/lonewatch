@@ -24,6 +24,7 @@ const kroner = (n) =>
 const RULE_TEXT = {
   unknown_recipient: "ukjent mottaker",
   amount_over_limit: "over beløpsgrensen",
+  recipient_total_over_limit: "flere beløp til samme mottaker",
   irreversible: "kan ikke angres",
   personal_data_external: "personopplysninger ut av huset",
   new_package: "ukjent tillegg",

@@ -30,7 +30,7 @@ Pek på kolonnen til høyre: **Går gjennom**. Der ligger kalenderoppdateringer,
 kjente mottakere, med agentnavn — Kundeservice, Innkjøp, Økonomi, HR, IT-hjelp — og agentens egen
 forklaring. Telleren ved siden av overskriften vokser mens du snakker.
 
-Si: *av de 40 forespørslene i demodataene går 34 gjennom uten å forstyrre et menneske. Det er poenget. En
+Si: *av de 40 forespørslene i demodataene går 32 gjennom uten å forstyrre et menneske. Det er poenget. En
 mellomstasjon som lyser rødt hele tiden blir slått av.*
 
 Pek så på overskriften til venstre: **Trenger et menneske**. Den er null eller nesten null nå.
@@ -171,6 +171,21 @@ finnes derimot i sandkassen, blir kjørt der, og blir **stoppet**.
 Kortene merkes «skrevet av deg», og havner i samme logg. Trykk **Sjekk loggen**
 etterpå: den stemmer fortsatt.
 
+## Hvis noen spør «har dere målt dette?» (ca. 20 s)
+
+Svar ja, og vær ærlig om hva målingen er verdt.
+
+En egen økt som ikke hadde sett reglene skrev 60 forespørsler med sin egen fasit.
+`python -m eval.measure` kjører dem. 20 av 21 farlige stoppes. Den ene som slapp gjennom er sletting av et
+helt kvartal i en delt kalender — reglene ser ikke *omfanget* av en handling, og vi har latt den stå i
+stedet for å tilpasse regelen til ett eksempel.
+
+Fire falske alarmer av 29 harmløse. To av dem er at vi sender en kunde kundens *egne* opplysninger og
+flagger det rødt, fordi regelen ikke kan se at mottakeren er den opplysningene gjelder.
+
+Si så det viktigste: *vi rettet to hull ut fra dette settet, så tallet er ikke uavhengig lenger. Neste
+måling må gjøres på et nytt sett.* Alt står i `docs/MALING.md`.
+
 ## Hvis du har 20 sekunder til overs
 
 Avslutt ærlig, med én av disse:
@@ -179,7 +194,8 @@ Avslutt ærlig, med én av disse:
   dem selv, og hullet står som `xfail` i testkjøringen i stedet for å være gjemt bort.
 - **Reglene stoler på feltene de får.** Setter en agent `recipient_known=True` på en ukjent konto, slipper
   den gjennom. Tilliten ligger ett hakk før oss.
-- **Målingen beviser lite.** 15 av 15 farlige fanget, men samme person skrev både reglene og testmengden.
+- **Målingen beviser lite.** Vår egen testmengde er skrevet av den som skrev reglene. Den uavhengige er
+  ærligere, men vi har rettet hull ut fra den, så den er ikke uavhengig lenger. Se `docs/MALING.md`.
 
 Alle tre står utfyllende i `gateway/LIMITS.md`, `vault/LIMITS.md` og `sandbox/LIMITS.md`.
 
@@ -189,6 +205,7 @@ Alle tre står utfyllende i `gateway/LIMITS.md`, `vault/LIMITS.md` og `sandbox/L
 python run_demo.py
 ```
 
-Skriver alle 40 forespørslene med avgjørelse, regler og konsekvenstekst, og avslutter med antall logglinjer
+Skriver alle 40 forespørslene med avgjørelse, regler og konsekvenstekst (32 `allow`, 7 `red`, 1 `block`),
+og avslutter med antall logglinjer
 og «Sjekk av logg: OK, ingen linjer er endret.» Menneskesvaret er hardkodet til *avvis* i denne varianten,
 så det går ikke å vise beløpsporten her.

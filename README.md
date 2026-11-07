@@ -26,7 +26,7 @@ personopplysninger, hvilket tillegg det er. Samme forespørsel gir samme svar hv
 AI-modell er involvert i å bestemme `allow`/`red`/`block`.
 
 Det andre problemet er at et varsel som lyser rødt hele tiden blir slått av. Derfor er demodataene med vilje
-skjeve: 40 forespørsler, 34 går gjennom uten å forstyrre noen. Hvor godt tersklene er valgt, er en åpen
+skjeve: 40 forespørsler, 32 går gjennom uten å forstyrre noen. Hvor godt tersklene er valgt, er en åpen
 sak — se [Hva Lonewatch IKKE gjør](#hva-lonewatch-ikke-gjør).
 
 ## Før / Under / Etter
@@ -52,8 +52,9 @@ fører aldri til at noe lastes ned eller startes; et navn som ikke finnes der gi
 
 ### Under — `gateway/` og `ui/`
 
-Fem risikoregler gir poeng (`gateway/config.py`): `amount_over_limit` (2), `unknown_recipient` (2),
-`personal_data_external` (3), `new_package` (2), `irreversible` (1). 0–1 poeng er `low` → `allow`,
+Seks risikoregler gir poeng (`gateway/config.py`): `amount_over_limit` (2),
+`recipient_total_over_limit` (2), `unknown_recipient` (2), `personal_data_external` (3),
+`new_package` (2), `irreversible` (1). 0–1 poeng er `low` → `allow`,
 2–3 er `medium`, 4+ er `high`; alt som ikke er `low` blir `red`. To blokkregler stopper noe helt, og ingen
 kan godkjenne det: `package_on_blocklist` og `transfer_over_hard_limit`. I tillegg `sandbox_blocked` fra
 Før-steget.
@@ -162,8 +163,8 @@ python run_demo.py
 ```
 
 Spiller de 40 demoforespørslene gjennom mellomstasjonen og skriver avgjørelse, regler og konsekvenstekst for
-hver. Med nøklene satt gir den 34 `allow`, 5 `red` og 1 `block`, og til slutt «Sjekk av logg: OK, ingen
-linjer er endret.» På en fersk logg blir det 87 linjer (40 forespørsler, 40 avgjørelser, 5 menneskesvar,
+hver. Med nøklene satt gir den 32 `allow`, 7 `red` og 1 `block`, og til slutt «Sjekk av logg: OK, ingen
+linjer er endret.» På en fersk logg blir det 89 linjer (40 forespørsler, 40 avgjørelser, 7 menneskesvar,
 2 sandkasserapporter); loggen bare vokser, så kjører du på nytt mot samme fil, blir den lengre.
 
 Det røde menneskesvaret er midlertidig hardkodet til *avvis* i terminaldemoen. Skal du svare selv, bruk
@@ -181,13 +182,23 @@ Se [docs/DEMO.md](docs/DEMO.md) for en demo på rundt to minutter.
 Bare én Lonewatch kan holde samme loggfil om gangen. Starter du en til, sier den fra og stopper uten å røre
 loggen; sett `LONEWATCH_LOG_PATH` til en annen fil hvis du vil kjøre to.
 
-### 4. Testene
+### 4. Måling mot et uavhengig sett
+
+```bash
+python -m eval.measure
+```
+
+Kjører 60 forespørsler skrevet av noen som ikke hadde sett reglene, med deres egen fasit, og skriver treff,
+bom og falske alarmer. Resultatet — og viktigere, hva det *ikke* beviser — står i
+[docs/MALING.md](docs/MALING.md).
+
+### 5. Testene
 
 ```bash
 pytest -q
 ```
 
-419 tester går gjennom, og én er `xfail`: `test_sperrene_kan_ikke_omgaas_via_globals` i
+450 tester går gjennom, og én er `xfail`: `test_sperrene_kan_ikke_omgaas_via_globals` i
 `tests/test_sandbox.py`. Den står som forventet feil med vilje, fordi hullet den beskriver ikke er lukket —
 se neste seksjon. Testene lager egne nøkler og skriver til en midlertidig mappe, så de krever ingen
 miljøvariabler og rører ikke loggen din.
@@ -246,11 +257,12 @@ Mellomstasjonen har ingen kontoliste, ingen leverandørregister og ingen skanner
 Setter en agent `recipient_known=True` på en ukjent konto, slipper den gjennom. Tilliten ligger ett hakk før
 oss, og det er det største hullet.
 
-Det finnes ingen hukommelse mellom forespørsler. Hver vurderes helt alene, så 100 overføringer på 49 999 kr
-rett etter hverandre gir 100 ganger `allow`. Vi ser ikke oppdeling av et stort beløp, en agent som plutselig
-gjør tusen ganger mer enn vanlig, samme ukjente konto om og om igjen, eller kjeden «les dokument med felle»
-→ «overfør penger». `source_doc_id` logges, men brukes ikke i noen regel: en felle i et dokument påvirker
-ikke avgjørelsen.
+Hukommelsen er én regel. `recipient_total_over_limit` summerer overføringer til **samme mottaker** innenfor
+24 timer (regnet fra forespørselens `ts`, ikke fra klokken) og blir rød når summen når beløpsgrensen — det
+lukker hullet der 100 betalinger på 49 999 kr gikk rett gjennom. Men beløp spredt over **mange** mottakere
+summeres ikke, historikken ligger i minnet og nullstilles ved omstart, og vi ser fortsatt ikke en agent som
+plutselig gjør tusen ganger mer enn vanlig, eller kjeden «les dokument med felle» → «overfør penger».
+`source_doc_id` logges, men brukes ikke i noen regel: en felle i et dokument påvirker ikke avgjørelsen.
 
 Vi leser aldri innholdet. En e-post til en kjent mottaker kan inneholde hele kundebasen og blir fortsatt
 `allow`. Tillegg vurderes bare på navn — et farlig tillegg som heter `nordlys-core` slipper rett gjennom, og
@@ -263,12 +275,15 @@ tillegg, ikke at den er ekte.
 
 Enkelthull vi kjenner: `requires_typed_amount` blir `True` også når `amount` mangler, og da har UI-et ikke
 noe tall å be om. `amount` brukes uansett handlingstype, så et stort beløp på en kalenderoppdatering gir
-rødt. Personopplysninger til en *kjent* mottaker gir aldri utslag — en kjent, men kompromittert partner er
-et blindpunkt. En ny handlingstype i `contracts` får konsekvenstekst, men ingen regler, og blir derfor
-`allow`.
+rødt. Personopplysninger til en mottaker på Nordlys' eget domene gir aldri utslag; alt annet regnes som ut
+av huset. Men reglene teller ikke: én bekreftelse til én kunde og en masseutsending til 8400 veier likt, og
+å sende en kunde kundens egne opplysninger blir derfor rødt. En ny handlingstype i `contracts` får
+konsekvenstekst, men ingen regler, og blir derfor `allow`.
 
-Målingen beviser lite. `python -m gateway.evaluation` viser 15 av 15 farlige fanget og 0 falske alarmer av
-43 syntetiske forespørsler, men samme person skrev både reglene og testmengden. Den måler at koden gjør det
+Målingen beviser lite. `python -m gateway.evaluation` viser 15 av 15 farlige fanget og 1 falsk alarm av
+43 syntetiske forespørsler, men samme person skrev både reglene og testmengden. Den uavhengige målingen i
+[docs/MALING.md](docs/MALING.md) er ærligere, men reglene er nå justert ut fra det settet, så den er ikke
+uavhengig lenger heller. Den måler at koden gjør det
 vi mente, ikke at vi mente det riktige. Et angrep ingen av oss har tenkt på, står ikke i listen og blir
 derfor heller ikke målt. I samme testmengde er 11 av 43 røde; i et ekte selskap med tusenvis av
 forespørsler per dag må tersklene opp, ellers slutter folk å lese varselet, og vi måler ikke hvor mange
@@ -353,7 +368,11 @@ lonewatch/
 ├── PROMPTS.md            Promptene prosjektet ble bygget med
 ├── README.md
 ├── docs/
-│   └── DEMO.md           Demofortelling på rundt to minutter
+│   ├── DEMO.md           Demofortelling på rundt to minutter
+│   ├── MALING.md         Måling mot et uavhengig blindsett, før og etter
+│   └── REDTEAM.md        Angrepstest med reproduserte funn
+├── eval/
+│   └── measure.py        python -m eval.measure
 ├── agents/               Simulerte agenter og demodata
 │   ├── scenarios.py      40 forespørsler fra fem agenter, 36 harmløse
 │   ├── story.py          Hovedscenarioet: 11 steg over 90 sekunder
@@ -391,5 +410,5 @@ lonewatch/
 │   ├── amount.py         Hvordan et skrevet beløp tolkes (fasiten)
 │   └── static/           index.html, app.js, amount.js, style.css
 ├── examples/             Eksempler på JSON for hver type i contracts
-└── tests/                419 tester + 1 xfail. test_contracts.py røres ikke
+└── tests/                450 tester + 1 xfail. test_contracts.py røres ikke
 ```
