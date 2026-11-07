@@ -571,3 +571,58 @@ def test_versjonsfeilen_sier_hva_som_er_galt_og_hva_man_gjoer():
     assert "sys.version_info < MIN_PYTHON" in kilde
     for del_av_meldingen in ("krever Python", "men kjoerer paa", "venv", "requirements.txt"):
         assert del_av_meldingen in kilde
+
+
+# ------------------------------- tillegg som aldri kom i gang
+
+def test_et_tillegg_som_krasjer_sier_IKKE_TESTET():
+    """Foer sa rapporten bare "Tillegget krasjet: ...", med verdict clean.
+
+    Verdiktet maa fortsatt vaere "clean": SandboxReport.verdict er
+    Literal["clean", "blocked"] i den laaste contracts.py. Men notatet - det et
+    menneske faktisk leser - sier naa at vi ikke fikk testet tillegget.
+    """
+    kilde = "def run():\n    raise RuntimeError('nei')\n"
+    kjoring = sandbox.run_in_box("krasjer", kilde, timeout_s=5)
+    assert kjoring.inconclusive is True
+    assert kjoring.report.notes.startswith("IKKE TESTET")
+    assert "vet ikke hva det ville gjort" in kjoring.report.notes
+    # Krasjet staar fortsatt der, etter advarselen.
+    assert "krasjet" in kjoring.report.notes
+
+
+def test_et_tillegg_uten_run_faar_ikke_lenger_full_klarering():
+    """Den farligste varianten: notatet sa "Ingen forsøk paa nettverk ...".
+
+    Det var sant, men bare fordi ingenting ble kjoert. Lest uten aa vite det,
+    saa det ut som tillegget var undersoekt og funnet rent.
+    """
+    kjoring = sandbox.run_in_box("mangler_run", "x = 1\n", timeout_s=5)
+    assert kjoring.inconclusive is True
+    assert kjoring.report.notes.startswith("IKKE TESTET")
+    assert "Ingen forsøk på nettverk" not in kjoring.report.notes
+
+
+def test_et_tillegg_som_kjoerer_ferdig_er_ikke_inconclusive():
+    kjoring = sandbox.run_in_box("virker", "def run():\n    return 1\n", timeout_s=5)
+    assert kjoring.inconclusive is False
+    assert kjoring.report.verdict == "clean"
+    assert "Ingen forsøk på nettverk" in kjoring.report.notes
+
+
+@pytest.mark.parametrize("navn", sorted(set(HARMLOSE) | set(MISTENKELIGE)))
+def test_demotilleggene_kommer_alle_i_gang(navn):
+    """Ingen av demotilleggene skal vaere "ikke testet"."""
+    kilde = sandbox.package_path(navn).read_text(encoding="utf-8")
+    assert sandbox.run_in_box(navn, kilde, timeout_s=15).inconclusive is False
+
+
+def test_en_tredje_status_krever_contracts():
+    """Dokumenterer hvorfor dette bare er et notat og ikke et verdikt.
+
+    Endres contracts.py til Literal["clean", "blocked", "not_tested"], kan
+    denne testen snus til aa kreve det nye verdiktet.
+    """
+    from contracts import SandboxReport
+
+    assert SandboxReport.model_fields["verdict"].annotation.__args__ == ("clean", "blocked")

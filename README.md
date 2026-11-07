@@ -63,9 +63,13 @@ Designet kom fra `design-handoff/`. Filene dashbordet trenger for å kjøre ligg
 
 ### Godkjenning — `gateway/` og `ui/`
 
-Seks risikoregler gir poeng (`gateway/config.py`): `amount_over_limit` (2),
+Åtte risikoregler gir poeng (`gateway/config.py`): `amount_over_limit` (2),
 `recipient_total_over_limit` (2), `unknown_recipient` (2), `personal_data_external` (3),
-`new_package` (2), `irreversible` (1). 0–1 poeng er `low` → `allow`,
+`new_package` (2), `destructive_change` (2), `incomplete_request` (2), `irreversible` (1).
+`destructive_change` fanger at noe slettes eller overskrives på en handling som ellers er
+harmløs — en «lesing» som ikke kan angres er ikke bare lesing.
+`incomplete_request` er fail-closed: alt reglene ikke klarer å vurdere går til et menneske
+i stedet for gjennom. 0–1 poeng er `low` → `allow`,
 2–3 er `medium`, 4+ er `high`; alt som ikke er `low` blir `red`. To blokkregler stopper noe helt, og ingen
 kan godkjenne det: `package_on_blocklist` og `transfer_over_hard_limit`. I tillegg `sandbox_blocked` fra
 Før-steget.
@@ -212,7 +216,7 @@ bom og falske alarmer. Resultatet — og viktigere, hva det *ikke* beviser — s
 pytest -q
 ```
 
-495 tester går gjennom, og én er `xfail`: `test_sperrene_kan_ikke_omgaas_via_globals` i
+535 tester går gjennom, og én er `xfail`: `test_sperrene_kan_ikke_omgaas_via_globals` i
 `tests/test_sandbox.py`. Den står som forventet feil med vilje, fordi hullet den beskriver ikke er lukket —
 se neste seksjon. Testene lager egne nøkler og skriver til en midlertidig mappe, så de krever ingen
 miljøvariabler og rører ikke loggen din.
@@ -294,7 +298,7 @@ av huset. Men reglene teller ikke: én bekreftelse til én kunde og en masseutse
 å sende en kunde kundens egne opplysninger blir derfor rødt. En ny handlingstype i `contracts` får
 konsekvenstekst, men ingen regler, og blir derfor `allow`.
 
-Målingen beviser lite. `python -m gateway.evaluation` viser 15 av 15 farlige fanget og 1 falsk alarm av
+Målingen beviser lite. `python -m gateway.evaluation` viser 15 av 15 farlige fanget og 2 falske alarmer av
 43 syntetiske forespørsler, men samme person skrev både reglene og testmengden. Den uavhengige målingen i
 [docs/MALING.md](docs/MALING.md) er ærligere, men reglene er nå justert ut fra det settet, så den er ikke
 uavhengig lenger heller. Den måler at koden gjør det
@@ -432,5 +436,5 @@ lonewatch/
 │   └── static/           index.html, app.js, amount.js, style.css,
 │                         dashboard/ (design-handoff + skrift), vendor/ (React, MIT)
 ├── examples/             Eksempler på JSON for hver type i contracts
-└── tests/                495 tester + 1 xfail. test_contracts.py røres ikke
+└── tests/                535 tester + 1 xfail. test_contracts.py røres ikke
 ```

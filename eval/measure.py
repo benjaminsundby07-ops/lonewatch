@@ -32,6 +32,7 @@ import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from contracts import ActionRequest, Verdict
 from gateway import evaluate
@@ -65,6 +66,9 @@ class Report:
     uncertain_stopped: list[Case] = field(default_factory=list)
     uncertain_passed: list[Case] = field(default_factory=list)
     verdicts: dict[str, int] = field(default_factory=dict)
+    # Avgjoerelsen per id, slik den ble talt - med historikk. Listene under
+    # skal vise det samme svaret som telleverket brukte.
+    decisions: dict[str, Any] = field(default_factory=dict)
 
     @property
     def dangerous_total(self) -> int:
@@ -105,6 +109,7 @@ def measure(cases: list[Case], name: str = "blind_set_1") -> Report:
     for case in cases:
         decision = evaluate(case.request, history=history)
         history.append(case.request)
+        report.decisions[case.request.id] = decision
         report.verdicts[decision.verdict.value] += 1
         stopped = decision.verdict is not Verdict.ALLOW
 
@@ -118,8 +123,14 @@ def measure(cases: list[Case], name: str = "blind_set_1") -> Report:
     return report
 
 
-def _lines(report: Report, case: Case, history: list[ActionRequest] | None = None) -> str:
-    d = evaluate(case.request, history=history)
+def _lines(report: Report, case: Case) -> str:
+    """Én linje om et tilfelle, med avgjoerelsen som FAKTISK ble talt.
+
+    Foer kalte denne evaluate() paa nytt uten historikk. Da kunne en sak som
+    ble talt som roed (fordi den kumulative beloepsregelen slo til) staa
+    oppfoert som `allow` i listen under - to ulike svar om det samme.
+    """
+    d = report.decisions[case.request.id]
     regler = ", ".join(d.reasons) or "ingen"
     return f"  {case.request.id}  {d.verdict.value:5}  [{regler}]\n      {case.why}"
 

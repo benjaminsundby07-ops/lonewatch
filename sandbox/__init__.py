@@ -40,6 +40,7 @@ if sys.version_info < MIN_PYTHON:  # pragma: no cover - avhenger av tolkeren
     )
 
 from . import config, fake_home
+from .report import INCONCLUSIVE_EVENTS, NOT_TESTED_NOTE, is_inconclusive
 from .runner import (
     SandboxRun,
     UnknownPackage,
@@ -57,6 +58,9 @@ HANGING_PACKAGE = config.HANGING_PACKAGE
 
 __all__ = [
     "MIN_PYTHON",
+    "INCONCLUSIVE_EVENTS",
+    "NOT_TESTED_NOTE",
+    "is_inconclusive",
     "scan",
     "scan_cached",
     "clear_scan_cache",

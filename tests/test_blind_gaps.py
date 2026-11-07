@@ -242,29 +242,28 @@ def test_summen_regnes_i_hele_oere():
 # ---------------------------------------------------------------------------
 
 
-def test_sletting_i_delt_kalender_slipper_fortsatt_gjennom():
+def test_sletting_i_delt_kalender_fanges_naa():
     """blind_032: sletting av et helt kvartal i en delt kalender.
 
-    Den er ugjenkallelig og rammer mange, men `update_calendar` staar ikke i
-    IRREVERSIBLE_RELEVANT_ACTIONS, og reglene ser ikke hvor mange en handling
-    rammer. Vi har IKKE rettet dette - se gateway/LIMITS.md.
+    Denne testen slo tidligere fast at saken SLAPP GJENNOM, og stod som et
+    synlig hull i testkjoeringen. `destructive_change` lukker det: en
+    kalenderoppfoering som ikke kan angres betyr at noe slettes.
 
-    Testen staar her for at hullet skal vaere synlig i testkjoeringen i stedet
-    for aa vaere glemt, og for at en fremtidig endring skal maatte ta stilling
-    til den bevisst.
+    Merk at vi fortsatt ikke ser OMFANGET. Vi vet at noe ble slettet, ikke at
+    det var et helt kvartal. Se gateway/LIMITS.md.
     """
     d = evaluate(blind("blind_032"))
-    assert d.verdict is Verdict.ALLOW
-    assert d.reasons == []
+    assert d.verdict is Verdict.RED
+    assert "destructive_change" in d.reasons
+    assert "slettet eller overskrevet" in d.consequence_text
 
 
-def test_aa_tette_blind_032_ville_kostet_mer_enn_det_smaker(monkeypatch):
-    """Den prinsipielle endringen er proevd, og den gjoer det verre.
+def test_den_gamle_veien_til_blind_032_ville_fortsatt_kostet_for_mye(monkeypatch):
+    """Vi tok IKKE veien om aa loefte vekten paa `irreversible`.
 
-    Aa legge update_calendar i IRREVERSIBLE_RELEVANT_ACTIONS gir bare 1 poeng,
-    og blind_032 blir fortsatt allow. Skal den bli roed, maa `irreversible`
-    veie 2 - og da blir sju harmloese saker i vaar EGEN syntetiske testmengde
-    til falske alarmer.
+    Den ville ogsaa fanget blind_032, men sprengt vaar egen syntetiske
+    testmengde. Testen staar igjen fordi tallet er verdt aa kunne etterproeve
+    hvis noen vil forenkle regelsettet senere.
     """
     from gateway import evaluation
 
@@ -273,10 +272,5 @@ def test_aa_tette_blind_032_ville_kostet_mer_enn_det_smaker(monkeypatch):
         "IRREVERSIBLE_RELEVANT_ACTIONS",
         frozenset(set(config.IRREVERSIBLE_RELEVANT_ACTIONS) | {ActionType.UPDATE_CALENDAR}),
     )
-    # Steg 1: bare aa gjoere den relevant hjelper ikke.
-    assert evaluate(blind("blind_032")).verdict is Verdict.ALLOW
-
-    # Steg 2: loefte vekten fanger den - og sprenger alt annet.
     monkeypatch.setattr(config, "RULE_WEIGHTS", dict(config.RULE_WEIGHTS, irreversible=2))
-    assert evaluate(blind("blind_032")).verdict is Verdict.RED
     assert len(evaluation.measure().false_alarms) >= 7

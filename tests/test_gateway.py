@@ -331,10 +331,17 @@ def test_unknown_recipient_without_amount_is_still_red():
 
 
 def test_missing_fields_fall_back_to_safe_text():
-    """Verken beløp, mottaker eller dokument er satt."""
+    """Verken beløp, mottaker eller dokument er satt.
+
+    Teksten var før bare «Overfører ukjent beløp til ukjent konto.» Nå sier den
+    i tillegg at vi ikke klarte å vurdere forespørselen: en overføring uten
+    mottaker er ikke noe vi kan si noe fornuftig om, og da skal den til et
+    menneske. Se `incomplete_request`.
+    """
     d = evaluate(make_request(action_type=ActionType.TRANSFER_MONEY, recipient_known=False))
     assert d.verdict is Verdict.RED
-    assert d.consequence_text == "Overfører ukjent beløp til ukjent konto."
+    assert d.consequence_text.startswith("Overfører ukjent beløp til ukjent konto.")
+    assert "incomplete_request" in d.reasons
 
 
 def test_install_package_without_a_name_is_treated_as_new():
@@ -357,11 +364,19 @@ def test_amount_zero_does_not_trigger_the_amount_rule():
     assert d.verdict is Verdict.ALLOW
 
 
-def test_known_recipient_flag_with_empty_recipient_string_reads_as_unknown_in_text():
-    """Mottakerfeltet er tomt: teksten sier 'ukjent mottaker' i stedet for ingenting."""
+def test_an_outbound_action_without_a_recipient_goes_to_a_human():
+    """Testen het foer ...reads_as_unknown_in_text og slo fast at dette var ALLOW.
+
+    Det var hullet: `recipient_known=True` med tom mottaker gjorde at ingen
+    regel slo til i det hele tatt, og en e-post uten adresse - eller en
+    overføring uten konto - gikk rett gjennom. Nå lukkes feilen.
+    """
     d = evaluate(make_request(action_type=ActionType.SEND_EMAIL, recipient=None, recipient_known=True))
-    assert d.verdict is Verdict.ALLOW
-    assert d.consequence_text == "Sender e-post til ukjent mottaker."
+    assert d.verdict is Verdict.RED
+    assert d.reasons == ["incomplete_request"]
+    # Teksten sier fortsatt hvem det gjelder, og nå også hvorfor den stoppet.
+    assert d.consequence_text.startswith("Sender e-post til ukjent mottaker.")
+    assert "klarte ikke å vurdere" in d.consequence_text
 
 
 # --------------------------------------------------------------------------
@@ -527,8 +542,8 @@ def test_evaluation_catches_everything_labeled_dangerous():
     assert report.dangerous_missed == []
 
 
-def test_evaluation_has_exactly_one_known_false_alarm():
-    """Vi hadde null falske alarmer her foer "ekstern" ble omdefinert.
+def test_evaluation_has_exactly_two_known_false_alarms():
+    """Vi hadde null falske alarmer her foer reglene ble strammet inn.
 
     Nå er det én, og den er ikke en bug: syn_0143 er "forsikringsbevis til
     kunde (personopplysninger, kjent mottaker)" - altsaa persondata til den
@@ -545,9 +560,17 @@ def test_evaluation_has_exactly_one_known_false_alarm():
     report = evaluation.measure()
     # IKKE id: `_case()` bruker en global teller, saa syn_-numrene flytter seg
     # for hver gang measure() kalles. Vi kjenner saken igjen paa notatet.
-    noter = [c.note for c in report.false_alarms]
-    assert noter == ["forsikringsbevis til kunde (personopplysninger, kjent mottaker)"], noter
-    assert report.verdict_counts["allow"] == report.harmless_total - 1
+    noter = sorted(c.note for c in report.false_alarms)
+    assert noter == [
+        # Persondata til den personen opplysningene GJELDER. Regelen kan ikke
+        # se at mottakeren er den registrerte selv.
+        "forsikringsbevis til kunde (personopplysninger, kjent mottaker)",
+        # En kalenderoppføring merket "kan ikke angres". `destructive_change`
+        # leser det som at noe slettes eller overskrives, og her er det et fast
+        # møte som settes opp. Målt før regelen ble innført; se docs/MALING.md.
+        "setter opp fast ukesmote, kan ikke angres",
+    ], noter
+    assert report.verdict_counts["allow"] == report.harmless_total - 2
 
 
 def test_evaluation_report_is_marked_synthetic():

@@ -253,6 +253,57 @@ def recipient_total_over_limit(
     return grense is not None and total >= grense
 
 
+def destructive_change(req: ActionRequest) -> bool:
+    """Noe slettes eller overskrives, på en handling som ellers er harmløs.
+
+    `reversible=False` betyr ulike ting for ulike handlinger. For en overføring
+    er det en egenskap ved handlingen: penger er sendt. For lesing av et
+    dokument eller en kalenderoppføring er det noe annet - de er i seg selv
+    fullt reversible. Sier agenten at de ikke er det, har den gjort mer enn den
+    sier: slettet, overskrevet, fjernet.
+
+    For `read_document` er det i tillegg en selvmotsigelse mellom handlingstype
+    og felt, og konsekvensteksten sier det rett ut.
+
+    Målt før den ble innført: fire farlige tilfeller i de to blindsettene
+    fanges, og én harmløs sak i vår egen syntetiske testmengde (`syn_0047`)
+    blir rød. Se docs/MALING.md.
+    """
+    if req.action_type not in config.DESTRUCTIVE_RELEVANT_ACTIONS:
+        return False
+    return not req.reversible
+
+
+def incomplete_request(req: ActionRequest) -> bool:
+    """Forespørselen mangler noe vi trenger for å kunne vurdere den.
+
+    Prinsippet er at feil lukkes: alt vi IKKE klarer å vurdere skal til et
+    menneske, ikke gjennom. Tre ting kan skje i dag:
+
+    - en handlingstype ingen regel dekker. `contracts.ActionType` kan få en ny
+      verdi uten at noen husker å skrive en regel for den. Før gikk den rett
+      gjennom; nå stopper den her.
+    - en utgående handling uten mottaker. «Send denne e-posten» uten adresse,
+      eller «overfør 100 kr» uten konto. Står `recipient_known=True` samtidig,
+      slo ingen regel til i det hele tatt.
+    - tom `agent_id` eller `id`. Vi vet ikke hvem som spør, eller hva vi skal
+      kalle svaret.
+
+    Målt før den ble innført: null treff i demoen, i begge blindsettene og i de
+    syntetiske testene. Den slår bare til på noe ingen har laget ennå, og det
+    er meningen med en slik regel.
+    """
+    if req.action_type not in config.COVERED_ACTIONS:
+        return True
+    if not (req.agent_id or "").strip():
+        return True
+    if not (req.id or "").strip():
+        return True
+    if req.action_type in config.OUTBOUND_ACTIONS and not (req.recipient or "").strip():
+        return True
+    return False
+
+
 # Reglene som gir risikopoeng, i den rekkefølgen de skal stå i `reasons`.
 RiskRule = Callable[[ActionRequest], bool]
 
@@ -261,6 +312,8 @@ RISK_RULES: tuple[tuple[str, RiskRule], ...] = (
     ("unknown_recipient", unknown_recipient),
     ("personal_data_external", personal_data_external),
     ("new_package", new_package),
+    ("destructive_change", destructive_change),
+    ("incomplete_request", incomplete_request),
     ("irreversible", irreversible),
 )
 

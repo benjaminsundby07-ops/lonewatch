@@ -9,29 +9,67 @@ leverandørregister og ingen skanner som finner personopplysninger. Setter en
 agent `recipient_known=True` på en ukjent konto, slipper den gjennom. Dette er
 det største hullet: tilliten ligger ett hakk før oss.
 
+## Vi tror på agenten når den sier hva den gjør
+Dette er det tyngste forbeholdet ved de to nye reglene, og det er verdt å si
+før tallene: **`action_type` og `reversible` er felt agenten fyller ut selv.**
+
+`destructive_change` leser `reversible=False` på en `read_document` eller en
+`update_calendar` som «noe slettes eller overskrives». Det er en god slutning
+så lenge feltet er ærlig utfylt. En agent som er lurt - eller som bare er
+dårlig skrevet - kan sette `reversible=True` på en sletting, og da ser vi
+ingenting. Motsatt kan en forsiktig agent sette `reversible=False` på noe helt
+harmløst og utløse et rødt varsel uten grunn (det er nøyaktig det som skjer med
+`syn_0047` i vår egen testmengde).
+
+Et ekte produkt må **utlede handlingstype og reversibilitet fra selve
+verktøykallet**, ikke fra agentens egen oppgave: hvilken funksjon ble kalt,
+hvilket endepunkt, hvilken HTTP-metode, hvilke rettigheter kreves. `DELETE
+/kalender/kvartal` er en sletting uansett hva agenten kaller det. Så lenge
+feltene kommer fra den som ber om handlingen, flytter vi bare tilliten ett
+hakk - vi fjerner den ikke.
+
+Det samme gjelder `contains_personal_data` og `recipient_known`, og det står
+allerede øverst i denne filen. De nye reglene gjør ikke det hullet større, men
+de gjør det ikke mindre heller.
+
+## Vi slipper ikke gjennom det vi ikke klarer å vurdere
+`incomplete_request` er en fail-closed-regel: alt vi ikke kan si noe fornuftig
+om, går til et menneske i stedet for å gå gjennom. Tre ting fanges:
+
+- en handlingstype som ikke står i `COVERED_ACTIONS`. Legger noen en ny verdi i
+  `contracts.ActionType` uten å skrive en regel for den, gikk den før rett
+  gjennom med `reasons == []`.
+- en utgående handling uten mottaker. «Send denne e-posten» uten adresse, eller
+  «overfør 100 kr» uten konto. Sa agenten samtidig `recipient_known=True`, slo
+  ingen regel til i det hele tatt.
+- tom `agent_id` eller `id`.
+
+Målt før regelen ble innført: **null treff** i demoen, i begge blindsettene og
+i de syntetiske testene. Den slår bare til på noe ingen har laget ennå, og det
+er meningen.
+
+Hva den ikke gjør: den sjekker ikke at feltene er *riktige*, bare at de finnes.
+En mottaker som er `"x"` teller som en mottaker. Og `contracts.py` stopper
+allerede ukjente handlingstyper og negative beløp før gateway ser dem - det er
+pydantic som gjør den jobben, ikke oss.
+
 ## Reglene ser ikke OMFANGET av en handling
-`blind_032` i `docs/MALING.md` er sletting av et helt kvartal i en delt
-kalender. Den kan ikke angres og rammer alle som bruker kalenderen. Reglene
-slipper den rett gjennom, og det er det eneste farlige tilfellet i blindsettet
-som gikk upaaaktet hen.
+`blind_032` (sletting av et helt kvartal i en delt kalender) og `blind2_024`
+(en endring paa 200 dokumenter samtidig) er samme sak. Den foerste fanges naa
+av `destructive_change` - men **ikke fordi vi saa omfanget.** Vi saa at noe ble
+slettet. At det var et helt kvartal og ikke ett moete, vet vi ikke.
+`blind2_024` slipper fortsatt gjennom.
 
-Grunnen: `update_calendar` staar ikke i `IRREVERSIBLE_RELEVANT_ACTIONS`, fordi
-en vanlig kalenderoppfoering som «kan ikke angres» er helt alminnelig arbeid.
-Og `reversible` sier bare *om* noe kan angres, ikke *hvor mye* som forsvinner.
-Aa slette ett moete og aa slette tre maaneder er samme forespoersel for oss.
+`reversible` sier bare *om* noe kan angres, ikke *hvor mye* som forsvinner. Aa
+slette ett moete og aa slette tre maaneder er samme forespoersel for oss, og
+det samme gjelder én e-post og en masseutsending til 8400.
 
-**Vi har proevd den prinsipielle endringen, og den gjoer det verre.** Aa legge
-`update_calendar` inn i `IRREVERSIBLE_RELEVANT_ACTIONS` gir 1 poeng, og
-`blind_032` blir fortsatt `allow`. Skal den bli roed, maa `irreversible` veie 2
-- og da blir sju harmloese saker i vaar egen syntetiske testmengde til falske
-alarmer, og en demoforespoersel til. Det staar som en test i
-`tests/test_blind_gaps.py`, slik at tallene er etterproevbare og hullet ikke er
-glemt.
-
-Vi kunne fanget akkurat dette ene tilfellet ved aa se etter «delt» i
-kalendernavnet eller ved aa gi sletting egen vekt. Det ville vaert aa tilpasse
-regelen til ett eksempel i den testmengden vi maaler oss mot, og neste
-blindsett ville avsloert at det ikke generaliserte.
+**Veien vi IKKE tok:** aa legge `update_calendar` inn i
+`IRREVERSIBLE_RELEVANT_ACTIONS` og loefte vekten paa `irreversible` til 2.
+Det ville ogsaa fanget `blind_032`, men gjort sju harmloese saker i vaar egen
+syntetiske testmengde til falske alarmer. `destructive_change` koster én.
+Tallet staar som en test i `tests/test_blind_gaps.py`, saa det er
+etterproevbart hvis noen vil forenkle regelsettet senere.
 
 **Hva som ville løst det:** et omfangsfelt i forespoerselen - hvor mange
 oppfoeringer, hvor mange mottakere, hvor mange rader - slik at reglene kunne

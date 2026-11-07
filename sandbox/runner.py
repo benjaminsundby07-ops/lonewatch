@@ -34,7 +34,7 @@ from pathlib import Path
 from contracts import SandboxReport
 
 from . import config, fake_home
-from .report import build_report
+from .report import build_report, is_inconclusive
 
 HARNESS = Path(__file__).with_name("harness.py")
 PACKAGES_DIR = Path(__file__).with_name("packages")
@@ -67,6 +67,16 @@ class SandboxRun:
 
     def kinds(self) -> list[str]:
         return [str(event.get("kind", "")) for event in self.events]
+
+    @property
+    def inconclusive(self) -> bool:
+        """Kom tillegget aldri i gang? Da har vi ikke testet det.
+
+        `SandboxReport.verdict` kan bare vaere "clean" eller "blocked"
+        (contracts.py er laast), saa dette er det naermeste en tredje status vi
+        kommer uten den endringen. Se sandbox/LIMITS.md.
+        """
+        return is_inconclusive(self.events)
 
 
 def available_packages() -> list[str]:

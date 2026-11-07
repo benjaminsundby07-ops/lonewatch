@@ -22,6 +22,27 @@ NETWORK_EVENTS = ("network_connect", "network_lookup", "network_send", "network_
 # ta imot, ikke sende.
 OUTBOUND_EVENTS = ("network_connect", "network_lookup", "network_send")
 
+# Hendelser som betyr at tillegget aldri kom i gang. Da har vi ikke TESTET det:
+# vi har sett at det ikke virket. "Clean" i et slikt tilfelle betyr "vi saa
+# ingenting", og det er ikke det samme som "vi saa etter og fant ingenting".
+#
+# `SandboxReport.verdict` er Literal["clean", "blocked"] i den laaste
+# contracts.py, saa vi kan ikke si det i selve verdiktet. Vi sier det i
+# `notes`, som er det et menneske faktisk leser - og `SandboxRun.inconclusive`
+# gir det maskinlesbart til den som kan bruke det. Se sandbox/LIMITS.md.
+INCONCLUSIVE_EVENTS = ("plugin_error", "no_entry_point")
+
+NOT_TESTED_NOTE = (
+    "IKKE TESTET: sandkassen fikk ikke kjørt tillegget ferdig, så vi vet ikke "
+    "hva det ville gjort. Dette er ikke det samme som at vi så etter og ikke "
+    "fant noe."
+)
+
+
+def is_inconclusive(events: list[dict]) -> bool:
+    """Kom tillegget aldri i gang?"""
+    return any(str(e.get("kind", "")) in INCONCLUSIVE_EVENTS for e in events)
+
 
 def _unique(values: list[str], limit: int) -> list[str]:
     """Beholder rekkefølgen, fjerner duplikater, kutter på grensen."""
@@ -88,6 +109,9 @@ def build_report(
     )
 
     notes: list[str] = []
+    inconclusive = is_inconclusive(events)
+    if inconclusive:
+        notes.append(NOT_TESTED_NOTE)
     if outbound:
         notes.append(
             f"Tillegget prøvde å koble seg til {_antall(len(outbound), 'adresse', 'adresser')}: "
@@ -145,6 +169,9 @@ def build_report(
         notes.append(f"Tillegget krasjet: {first.get('type', 'Feil')}: {first.get('message', '')}")
 
     if not notes:
+        # Denne setningen er en klarering, og den skal bare staa naar tillegget
+        # faktisk kjoerte ferdig. Et tillegg uten run() rakk aldri aa gjoere
+        # noe, og "ingen forsøk paa nettverk" ville da lest som en godkjenning.
         notes.append(
             "Ingen forsøk på nettverk, ingen lesing av de falske hemmelighetene "
             "og ingenting utenfor boksen."

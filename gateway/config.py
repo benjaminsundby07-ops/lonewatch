@@ -89,6 +89,37 @@ IRREVERSIBLE_RELEVANT_ACTIONS: frozenset[ActionType] = frozenset(
     }
 )
 
+# Handlinger der "kan ikke angres" betyr at noe BLIR SLETTET ELLER OVERSKREVET.
+#
+# For en overføring, en deling eller en installasjon er det å ikke kunne angres
+# en egenskap ved handlingen selv - penger er sendt, data er delt. For disse to
+# er det noe annet: å lese et dokument eller å sette opp et møte er i seg selv
+# helt reversibelt. Sier agenten at det IKKE er det, har den gjort noe mer enn
+# den sier.
+#
+# `install_package` står med vilje IKKE her: den dekkes allerede av
+# `irreversible`, og å ta den med ville bare dublert poeng uten å fange noe nytt.
+DESTRUCTIVE_RELEVANT_ACTIONS: frozenset[ActionType] = frozenset(
+    {
+        ActionType.READ_DOCUMENT,
+        ActionType.UPDATE_CALENDAR,
+    }
+)
+
+# Handlingstypene regelsettet faktisk har vurdert. Kommer det en ny type i
+# `contracts.py`, står den ikke her, og `incomplete_request` sørger for at den
+# havner hos et menneske i stedet for å gå rett gjennom.
+COVERED_ACTIONS: frozenset[ActionType] = frozenset(
+    {
+        ActionType.SEND_EMAIL,
+        ActionType.TRANSFER_MONEY,
+        ActionType.SHARE_DATA,
+        ActionType.INSTALL_PACKAGE,
+        ActionType.READ_DOCUMENT,
+        ActionType.UPDATE_CALENDAR,
+    }
+)
+
 # Handlinger som har en synlig virkning utenfor huset. Brukes bare til konsekvensteksten.
 EFFECTFUL_ACTIONS: frozenset[ActionType] = frozenset(
     {
@@ -132,6 +163,11 @@ RULE_WEIGHTS: dict[str, int] = {
     "unknown_recipient": 2,
     "personal_data_external": 3,
     "new_package": 2,
+    # Noe slettes eller overskrives. Alene nok til at et menneske skal se på det.
+    "destructive_change": 2,
+    # Vi klarte ikke å vurdere forespørselen. Da skal den heller ikke gå
+    # gjennom av seg selv.
+    "incomplete_request": 2,
     "irreversible": 1,
 }
 

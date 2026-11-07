@@ -20,6 +20,22 @@ IRREVERSIBLE_NOTE = "Kan ikke angres."
 PERSONAL_DATA_NOTE = "Inneholder personopplysninger."
 BLOCKED_NOTE = "Dette stoppes automatisk og kan ikke godkjennes."
 
+# Noe slettes eller overskrives paa en handling som ellers er harmloes.
+DESTRUCTIVE_NOTE = "Noe blir slettet eller overskrevet, og det kan ikke angres."
+
+# Lesing som ikke kan angres er en selvmotsigelse mellom handlingstype og felt.
+# Vi sier det rett ut, i stedet for aa velge én av dem og haape vi gjettet rett.
+DESTRUCTIVE_READ_NOTE = (
+    "Oppgitt som lesing, men også som umulig å angre. Da er det ikke bare "
+    "lesing: noe blir slettet eller overskrevet."
+)
+
+# Vi klarte ikke aa vurdere forespoerselen.
+INCOMPLETE_NOTE = (
+    "Lonewatch klarte ikke å vurdere denne forespørselen, så den går til et "
+    "menneske i stedet for å gå gjennom."
+)
+
 # Sandkassen. Teksten sier hva vi SAA, aldri at noe er trygt.
 SANDBOX_NOT_TESTED = "Tillegget er ikke testet i sandkassen."
 SANDBOX_CLEAN = (
@@ -161,6 +177,16 @@ def build_consequence_text(
         elif "new_package" in reasons:
             # Et tillegg vi ikke kjenner OG ikke har prøvd. Det skal staa.
             parts.append(SANDBOX_NOT_TESTED)
+
+    if "destructive_change" in reasons:
+        parts.append(
+            DESTRUCTIVE_READ_NOTE
+            if req.action_type is ActionType.READ_DOCUMENT
+            else DESTRUCTIVE_NOTE
+        )
+
+    if "incomplete_request" in reasons:
+        parts.append(INCOMPLETE_NOTE)
 
     if "package_on_blocklist" in reasons:
         parts.append("Tillegget står på blokklisten.")

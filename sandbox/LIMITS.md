@@ -156,16 +156,49 @@ Hva det betyr i praksis:
   Et krasjende tillegg slipper altså ikke gjennom *på grunn av* rapporten -
   men rapporten hjelper heller ikke mennesket som skal bestemme.
 
-**Vi har ikke endret regelen.** Å gjøre `plugin_error` eller `no_entry_point`
-blokkerende hadde vært lett, men da ville et tillegg med en vanlig bug blitt
-behandlet som ondsinnet, og vi har ingen måte å skille dem på. Det riktige
-svaret er en tredje verdi («kunne ikke vurderes»), og den finnes ikke:
-`SandboxReport.verdict` er `Literal["clean", "blocked"]` og `contracts.py` er
-låst.
+**Vi har ikke endret verdiktet**, og det er ikke et valg: `SandboxReport.verdict`
+er `Literal["clean", "blocked"]` i `contracts.py`, som er låst. Et krasjende
+tillegg er fortsatt `clean`.
 
-**Hva som ville løst det:** en tredje verdi i `SandboxReport.verdict`, og at UI
-viser «ikke vurdert» i stedet for «ingenting mistenkelig» når tillegget aldri
-kom i gang.
+**Det vi HAR endret:** rapporten sier det nå rett ut. Krasjer tillegget, eller
+mangler det `run()`, begynner `notes` med
+
+> IKKE TESTET: sandkassen fikk ikke kjørt tillegget ferdig, så vi vet ikke hva
+> det ville gjort. Dette er ikke det samme som at vi så etter og ikke fant noe.
+
+Og den gamle klareringen — «Ingen forsøk på nettverk, ingen lesing av de falske
+hemmelighetene og ingenting utenfor boksen» — står nå **bare** når tillegget
+faktisk kjørte ferdig. Det var den farligste delen: den setningen var sann, men
+bare fordi ingenting ble kjørt, og den leste som en godkjenning.
+
+`SandboxRun.inconclusive` gir det samme maskinlesbart til den som kan bruke det
+(`sandbox.is_inconclusive(events)`).
+
+**Det som fortsatt mangler, og hva som skal til.** Mellomstasjonen kan ikke se
+forskjell: `gateway.evaluate()` får en `SandboxReport`, og der står det `clean`.
+I praksis gjør det lite — en `clean`-rapport senker aldri risikoen, og
+`new_package` gjør tillegget rødt uansett — men et menneske som leser
+konsekvensteksten får «Sandkassen kjørte tillegget i en lukket boks og så
+ingenting mistenkelig», og det er feil for et tillegg som aldri kom i gang.
+
+For å rette det trengs **én endring i `contracts.py`**:
+
+```python
+class SandboxReport(Strict):
+    ...
+    verdict: Literal["clean", "blocked", "not_tested"]
+```
+
+(Alternativt et nytt felt `tested: bool = True`, som er mindre inngripende for
+alt som allerede leser `verdict`.) Med den på plass kan `build_report()` sette
+`not_tested`, `gateway/consequence.py` få en egen setning, og
+`tests/test_sandbox.py::test_en_tredje_status_krever_contracts` snus til å
+kreve den nye verdien. Vi har ikke gjort endringen selv — `contracts.py` er
+låst, og det er ikke vår fil å låse opp.
+
+**Hvorfor ikke bare gjøre krasj blokkerende:** da blir et tillegg med en vanlig
+bug behandlet som ondsinnet, og vi har ingen måte å skille dem på. «Vi vet
+ikke» er et ærligere svar enn «nei».
 
 ## Hva vi måler, og hva vi ikke måler
 
