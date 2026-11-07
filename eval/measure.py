@@ -16,6 +16,11 @@ Forespørslene kjøres uten `sandbox_report`. Sandkassen kan bare uttale seg om
 tillegg den har en fil for, og det har den ikke for noen av navnene i et
 blindsett. Målingen gjelder altså reglene alene.
 
+Settet kjøres i rekkefølge, og hver forespørsel får de foregående som
+`history` — akkurat som i appen. Det er nødvendig for at den kumulative
+beløpsregelen skal måles i det hele tatt; uten historikk ville den aldri slått
+til, og målingen ville sett bedre ut enn den er.
+
 Kjøringen er deterministisk: ingen klokke, ingen tilfeldighet, ingen nettverk.
 Samme fil gir samme tall hver gang.
 """
@@ -96,8 +101,10 @@ def measure(cases: list[Case], name: str = "blind_set_1") -> Report:
     report = Report(name=name, total=len(cases))
     report.verdicts = {v.value: 0 for v in Verdict}
 
+    history: list[ActionRequest] = []
     for case in cases:
-        decision = evaluate(case.request)
+        decision = evaluate(case.request, history=history)
+        history.append(case.request)
         report.verdicts[decision.verdict.value] += 1
         stopped = decision.verdict is not Verdict.ALLOW
 
@@ -111,8 +118,8 @@ def measure(cases: list[Case], name: str = "blind_set_1") -> Report:
     return report
 
 
-def _lines(report: Report, case: Case) -> str:
-    d = evaluate(case.request)
+def _lines(report: Report, case: Case, history: list[ActionRequest] | None = None) -> str:
+    d = evaluate(case.request, history=history)
     regler = ", ".join(d.reasons) or "ingen"
     return f"  {case.request.id}  {d.verdict.value:5}  [{regler}]\n      {case.why}"
 

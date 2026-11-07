@@ -14,6 +14,11 @@ from contracts import ActionType
 # Grensen er INKLUDERENDE: et beløp som er nøyaktig lik grensen slår til.
 AMOUNT_LIMIT_NOK: float = 50_000.0
 
+# Tidsvindu for aa summere overfoeringer til samme mottaker (timer).
+# Regnes fra forespoerselens egen `ts`, aldri fra klokken, slik at samme
+# forespoerselsrekke alltid gir samme svar.
+TRANSFER_WINDOW_HOURS: int = 24
+
 # Hard grense (NOK). Overføring STØRRE enn denne blir blokkert, ingen kan godkjenne den.
 # Satt høyt med vilje: demoens overføring på 10 000 000 kr skal fortsatt bli rød,
 # slik at et menneske faktisk må ta stilling til den.
@@ -121,6 +126,9 @@ DESTINATION_PATTERN = re.compile(r"^[A-Za-z0-9._:\[\]-]{1,100}$")
 # mottakere skal slippe gjennom. Den løfter derimot noe som alt er mistenkelig.
 RULE_WEIGHTS: dict[str, int] = {
     "amount_over_limit": 2,
+    # Samme vekt som amount_over_limit: summen krysset den samme grensen, bare
+    # fordelt paa flere forespoersler. Den skal alene vaere nok til roedt.
+    "recipient_total_over_limit": 2,
     "unknown_recipient": 2,
     "personal_data_external": 3,
     "new_package": 2,

@@ -56,12 +56,16 @@ def run(vault: Vault | None = None) -> Vault:
     # Samme minimering som nettsiden. Se vault/LIMITS.md punkt 7.
     vault = vault if vault is not None else Vault(redact=redact_enabled())
     scanned: set[str] = set()
+    # Forespørslene gateway har sett. Brukes til å summere overføringer til
+    # samme mottaker innenfor tidsvinduet. Ligger i minnet, som i appen.
+    history: list[ActionRequest] = []
 
     for req in all_scenarios():
         vault.append("request", req.model_dump(mode="json"), ts=req.ts)
         report = _scan(req, vault, scanned)
-        decision = evaluate(req, sandbox_report=report)
+        decision = evaluate(req, sandbox_report=report, history=history)
         vault.append("decision", decision.model_dump(mode="json"), ts=decision.ts)
+        history.append(req)
 
         print(LINE)
         print(f"{req.id}  {req.agent_id}  {req.action_type.value}")

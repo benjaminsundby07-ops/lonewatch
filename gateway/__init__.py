@@ -14,6 +14,8 @@ gir samme avgjørelse hver gang.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from contracts import ActionRequest, ActionType, Decision, Risk, SandboxReport, Verdict
 
 from . import config, rules
@@ -63,19 +65,32 @@ def _checked_report(
     return sandbox_report
 
 
-def evaluate(req: ActionRequest, sandbox_report: SandboxReport | None = None) -> Decision:
+def evaluate(
+    req: ActionRequest,
+    sandbox_report: SandboxReport | None = None,
+    history: Sequence[ActionRequest] | None = None,
+) -> Decision:
     """Avgjør hva som skjer med en forespørsel fra en agent.
 
     `sandbox_report` er valgfri og brukes bare ved install_package. Den kommer
     fra sandbox/, som har kjørt tillegget i en lukket boks og sett hva det
     faktisk gjorde. Gateway kjører ingenting selv: den tar imot et resultat.
-    Uten rapport oppfører evaluate() seg nøyaktig som før.
 
-    Fortsatt deterministisk: samme (req, rapport) gir samme Decision hver gang.
+    `history` er valgfri og er tidligere forespørsler integrasjonslaget har
+    sett. Den brukes bare til å summere overføringer til samme mottaker
+    innenfor et tidsvindu - hullet der 100 betalinger på 49 999 kr gikk rett
+    gjennom fordi hver enkelt var under grensen. Gateway husker ingenting selv:
+    den tar imot en liste. Se docs/MALING.md.
+
+    Uten disse to oppfører evaluate() seg nøyaktig som før.
+
+    Fortsatt deterministisk: samme (req, rapport, historikk) gir samme Decision
+    hver gang. Tidsvinduet regnes fra `req.ts`, aldri fra klokken.
     """
     report = _checked_report(req, sandbox_report)
     block_reasons = rules.triggered_block_rules(req, report)
-    risk_reasons = rules.triggered_risk_rules(req)
+    risk_reasons = rules.triggered_risk_rules(req, history)
+    total_ore = rules.recipient_total_ore(req, history)
 
     if block_reasons:
         # Blokk slår alltid risikopoengene. Risikoen settes til high fordi
@@ -88,7 +103,8 @@ def evaluate(req: ActionRequest, sandbox_report: SandboxReport | None = None) ->
             risk=Risk.HIGH,
             reasons=reasons,
             consequence_text=build_consequence_text(
-                req, reasons, blocked=True, sandbox_report=report
+                req, reasons, blocked=True, sandbox_report=report,
+                recipient_total_ore=total_ore,
             ),
             requires_typed_amount=False,
         )
@@ -105,6 +121,8 @@ def evaluate(req: ActionRequest, sandbox_report: SandboxReport | None = None) ->
         verdict=verdict,
         risk=risk,
         reasons=risk_reasons,
-        consequence_text=build_consequence_text(req, risk_reasons, sandbox_report=report),
+        consequence_text=build_consequence_text(
+            req, risk_reasons, sandbox_report=report, recipient_total_ore=total_ore
+        ),
         requires_typed_amount=requires_typed_amount,
     )

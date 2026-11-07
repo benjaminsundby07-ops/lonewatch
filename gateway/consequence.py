@@ -139,8 +139,14 @@ def build_consequence_text(
     reasons: list[str],
     blocked: bool = False,
     sandbox_report: SandboxReport | None = None,
+    recipient_total_ore: int | None = None,
 ) -> str:
-    """Setter sammen hele teksten mennesket får se."""
+    """Setter sammen hele teksten mennesket får se.
+
+    `recipient_total_ore` er summen til samme mottaker innenfor tidsvinduet.
+    Den regnes ut av reglene og vises som et tall, aldri som noe hentet fra
+    `summary`.
+    """
     parts = [_base_text(req)]
 
     if req.contains_personal_data and req.action_type in config.OUTBOUND_ACTIONS:
@@ -158,6 +164,12 @@ def build_consequence_text(
 
     if "package_on_blocklist" in reasons:
         parts.append("Tillegget står på blokklisten.")
+
+    if "recipient_total_over_limit" in reasons and recipient_total_ore is not None:
+        parts.append(
+            f"Til sammen {format_ore(recipient_total_ore)} til samme mottaker "
+            f"siste {config.TRANSFER_WINDOW_HOURS} timer."
+        )
 
     if "transfer_over_hard_limit" in reasons:
         parts.append(f"Beløpet er over den harde grensen på {format_amount(config.HARD_TRANSFER_LIMIT_NOK)}.")

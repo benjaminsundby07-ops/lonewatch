@@ -180,6 +180,11 @@ class DemoState:
             self._fired_traps: set[tuple[str, str, str]] = set()
             # "Prøv selv": juryens egne forespørsler, nummerert for seg.
             self._custom_count = 0
+            # Forespørslene gateway har sett, i rekkefølge. Brukes bare til å
+            # summere overføringer til samme mottaker innenfor tidsvinduet.
+            # Den ligger i MINNET og forsvinner ved omstart og Nullstill - se
+            # gateway/LIMITS.md.
+            self._history: list[ActionRequest] = []
             # Før-listen: tillegg sandkassen har kjørt, og tillegg den ikke har.
             self._scanned: dict[str, dict[str, Any]] = {}
             self._untested: dict[str, dict[str, Any]] = {}
@@ -238,8 +243,11 @@ class DemoState:
         self._append("request", req.model_dump(mode="json"), ts=req.ts)
 
         report = self._scan(req)
-        decision: Decision = evaluate(req, sandbox_report=report)
+        decision: Decision = evaluate(req, sandbox_report=report, history=self._history)
         self._append("decision", decision.model_dump(mode="json"), ts=decision.ts)
+        # Først NÅ legges den i historikken: en forespørsel skal ikke summere
+        # seg selv to ganger.
+        self._history.append(req)
 
         # I historien er fellene egne steg, slik at de kommer på skjermen når
         # fortellingen sier det. Da skal ikke forespørselen logge dem en gang til.

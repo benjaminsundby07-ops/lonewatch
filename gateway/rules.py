@@ -9,7 +9,9 @@ Navnet på funksjonen er navnet som havner i `Decision.reasons`.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Sequence
+from datetime import timedelta
 
 from contracts import ActionRequest, ActionType, SandboxReport
 
@@ -188,6 +190,69 @@ def sandbox_blocked(req: ActionRequest, sandbox_report: SandboxReport | None) ->
     return sandbox_report.verdict == "blocked"
 
 
+def normalize_recipient(recipient: str | None) -> str:
+    """Gjør mottakere sammenlignbare. "NO12 3456 789" og "no12345 6789" er samme konto."""
+    return re.sub(r"\s+", "", (recipient or "").strip().lower())
+
+
+def recipient_total_ore(
+    req: ActionRequest, history: Sequence[ActionRequest] | None
+) -> int | None:
+    """Sum i hele øre av overføringer til samme mottaker innenfor tidsvinduet.
+
+    Vinduet slutter på `req.ts` og er `config.TRANSFER_WINDOW_HOURS` langt.
+    Det regnes fra forespørselens eget tidsstempel, ikke fra klokken, slik at
+    samme rekke forespørsler alltid gir samme svar.
+
+    Returnerer None hvis det ikke gir mening å summere: ikke en overføring,
+    ingen mottaker, eller et beløp vi ikke kan lese.
+    """
+    if req.action_type is not ActionType.TRANSFER_MONEY:
+        return None
+    key = normalize_recipient(req.recipient)
+    if not key:
+        return None
+    total = to_ore(req.amount)
+    if total is None:
+        return None
+
+    start = req.ts - timedelta(hours=config.TRANSFER_WINDOW_HOURS)
+    for prior in history or ():
+        if prior.action_type is not ActionType.TRANSFER_MONEY:
+            continue
+        if normalize_recipient(prior.recipient) != key:
+            continue
+        if not (start < prior.ts <= req.ts):
+            continue
+        ore = to_ore(prior.amount)
+        if ore is not None:
+            total += ore
+    return total
+
+
+def recipient_total_over_limit(
+    req: ActionRequest, history: Sequence[ActionRequest] | None = None
+) -> bool:
+    """Flere overføringer til samme mottaker naar beløpsgrensen til sammen.
+
+    Hullet denne lukker: hver enkelt overføring er under grensen, saa
+    `amount_over_limit` slaar aldri til, og 100 betalinger paa 49 999 kr til
+    samme kjente konto gikk rett gjennom. Se docs/MALING.md.
+
+    Regelen slaar BARE til naar enkeltbeløpet er under grensen. Er det alt over,
+    er det allerede fanget av `amount_over_limit`, og aa telle det to ganger
+    ville flyttet eksisterende røde kort fra medium til high uten at noe nytt
+    var oppdaget.
+    """
+    if amount_over_limit(req):
+        return False
+    total = recipient_total_ore(req, history)
+    if total is None:
+        return False
+    grense = to_ore(config.AMOUNT_LIMIT_NOK)
+    return grense is not None and total >= grense
+
+
 # Reglene som gir risikopoeng, i den rekkefølgen de skal stå i `reasons`.
 RiskRule = Callable[[ActionRequest], bool]
 
@@ -206,9 +271,19 @@ BLOCK_RULES: tuple[tuple[str, RiskRule], ...] = (
 )
 
 
-def triggered_risk_rules(req: ActionRequest) -> list[str]:
-    """Navnene på risikoreglene som slo til, i fast rekkefølge."""
-    return [name for name, rule in RISK_RULES if rule(req)]
+def triggered_risk_rules(
+    req: ActionRequest, history: Sequence[ActionRequest] | None = None
+) -> list[str]:
+    """Navnene på risikoreglene som slo til, i fast rekkefølge.
+
+    `recipient_total_over_limit` staar rett etter `amount_over_limit`, fordi de
+    handler om det samme: beløpet er for stort til aa gaa av seg selv.
+    """
+    names = [name for name, rule in RISK_RULES if rule(req)]
+    if recipient_total_over_limit(req, history):
+        index = names.index("amount_over_limit") + 1 if "amount_over_limit" in names else 0
+        names.insert(index, "recipient_total_over_limit")
+    return names
 
 
 def triggered_block_rules(

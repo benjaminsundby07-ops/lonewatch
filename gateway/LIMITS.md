@@ -37,13 +37,33 @@ aa bli bedre.
 personer, hvilke kategorier opplysninger), og en maate aa vite om mottakeren er
 den registrerte selv.
 
-## Ingen hukommelse mellom forespørsler
-Hver forespørsel vurderes helt alene. 100 overføringer på 49 999 kr rett etter
-hverandre gir 100 ganger `allow`. Vi oppdager ikke:
-- oppdeling av et stort beløp i mange små (under beløpsgrensen)
-- en agent som plutselig gjør tusen ganger mer enn vanlig
-- samme ukjente konto som dukker opp igjen og igjen
-- rekkefølgen "les dokument med felle" -> "overfør penger" som kjede
+## Hukommelsen er én regel, og den ligger i minnet
+Før så hver forespørsel seg selv og ingenting annet: 100 overføringer på
+49 999 kr rett etter hverandre ga 100 ganger `allow`. Det er lukket for ett
+tilfelle. `recipient_total_over_limit` summerer overføringer til **samme
+mottaker** innenfor et vindu på `TRANSFER_WINDOW_HOURS` (24) timer, og blir rød
+når summen når beløpsgrensen.
+
+Vinduet regnes fra forespørselens egen `ts`, ikke fra klokken, så samme rekke
+forespørsler alltid gir samme svar.
+
+Det som fortsatt ikke oppdages:
+
+- **Beløp spredt over mange mottakere.** Ti betalinger på 49 999 kr til ti
+  forskjellige kontoer summeres ikke. Vi grupperer på mottaker, ikke på agent,
+  avdeling eller døgn. Den som vet dette, deler opp på mottaker i stedet for
+  på beløp.
+- **Historikken ligger i minnet.** `ui/state.py` og `run_demo.py` holder listen,
+  og den forsvinner ved omstart og ved Nullstill. Starter appen på nytt, er
+  telleren null igjen. Gateway husker ingenting selv - den tar imot en liste.
+  En ekte versjon ville lest historikken fra loggen eller en database.
+- **Mottakere sammenlignes på tekst.** Vi fjerner mellomrom og store bokstaver,
+  så `NO12 3456 7890 123` og `no1234567890123` er samme konto. Men samme
+  mottaker med to ulike kontonumre er to mottakere for oss.
+- **En agent som plutselig gjør tusen ganger mer enn vanlig.** Vi har ingen
+  normal å sammenligne med.
+- **Kjeden "les dokument med felle" -> "overfør penger".** `source_doc_id`
+  logges, men brukes ikke i noen regel.
 
 ## Ingen forståelse av innhold
 Vi leser aldri dokumentet, e-posten eller dataene. En e-post til en kjent
