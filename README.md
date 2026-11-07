@@ -164,7 +164,8 @@ python run_demo.py
 
 Spiller de 40 demoforespørslene gjennom mellomstasjonen og skriver avgjørelse, regler og konsekvenstekst for
 hver. Med nøklene satt gir den 32 `allow`, 7 `red` og 1 `block`, og til slutt «Sjekk av logg: OK, ingen
-linjer er endret.» På en fersk logg blir det 89 linjer (40 forespørsler, 40 avgjørelser, 7 menneskesvar,
+linjer er endret.» pluss de tolv første tegnene av siste hash. På en fersk logg blir det 89 linjer
+(40 forespørsler, 40 avgjørelser, 7 menneskesvar,
 2 sandkasserapporter); loggen bare vokser, så kjører du på nytt mot samme fil, blir den lengre.
 
 Det røde menneskesvaret er midlertidig hardkodet til *avvis* i terminaldemoen. Skal du svare selv, bruk
@@ -177,7 +178,8 @@ python3 -m ui
 ```
 
 Åpne <http://127.0.0.1:8000>. Verts- og portnavn kan styres med `LONEWATCH_HOST` og `LONEWATCH_PORT`.
-Se [docs/DEMO.md](docs/DEMO.md) for en demo på rundt to minutter.
+Se [docs/DEMO.md](docs/DEMO.md) for en demo på rundt to minutter, og
+[docs/PERSONVERN.md](docs/PERSONVERN.md) for hva loggen faktisk inneholder om folk.
 
 Bare én Lonewatch kan holde samme loggfil om gangen. Starter du en til, sier den fra og stopper uten å røre
 loggen; sett `LONEWATCH_LOG_PATH` til en annen fil hvis du vil kjøre to.
@@ -198,7 +200,7 @@ bom og falske alarmer. Resultatet — og viktigere, hva det *ikke* beviser — s
 pytest -q
 ```
 
-450 tester går gjennom, og én er `xfail`: `test_sperrene_kan_ikke_omgaas_via_globals` i
+471 tester går gjennom, og én er `xfail`: `test_sperrene_kan_ikke_omgaas_via_globals` i
 `tests/test_sandbox.py`. Den står som forventet feil med vilje, fordi hullet den beskriver ikke er lukket —
 se neste seksjon. Testene lager egne nøkler og skriver til en midlertidig mappe, så de krever ingen
 miljøvariabler og rører ikke loggen din.
@@ -291,8 +293,9 @@ røde et menneske faktisk tåler.
 
 ### Loggen er ekte kryptert, men ikke et revisjonssikkert arkiv (`vault/LIMITS.md`)
 
-Hash-kjeden oppdager at en linje er endret eller fjernet fra midten. Den oppdager ikke at hele filen er
-borte, eller at noen har kuttet slutten og beholdt en gyldig kjede fra linje 0. Det finnes ingen kopi noe
+Hash-kjeden oppdager at en linje er endret eller fjernet fra midten. Kutting av de *siste* linjene fanges
+av et signert hale-anker ved siden av loggen (`<logg>.head`), som husker hvor lang loggen var. Men den som
+har både loggen, ankeret og nøkkelen kan skrive om begge, og hele mappen kan slettes. Det finnes ingen kopi noe
 annet sted, ingen ekstern vitne-tjeneste og ingen «append only» på filsystemet. Den som har skrivetilgang og
 nøkkelen, kan lage en ny, kortere, helt gyldig logg.
 
@@ -333,7 +336,9 @@ ble lagt, men den nye kjeden har ingen peker tilbake, så rekkefølgen *mellom* 
 
 Fernet-kryptering per linje med nøkkel kun fra miljøvariabel. Hash-kjede fra `contracts.make_log_entry` /
 `verify_chain`, verifisert ved å lese og dekryptere filen på nytt fra disk, der `verify()` peker på `seq` til
-første linje som er endret, uleselig eller på feil plass. HMAC-SHA256-pseudonymer som ikke kan regnes
+første linje som er endret, uleselig eller på feil plass. Et HMAC-signert hale-anker fanger kutting av de
+siste linjene, og «Sjekk loggen» viser de tolv første tegnene av siste hash, slik at den kan noteres utenfor
+maskinen. HMAC-SHA256-pseudonymer som ikke kan regnes
 tilbake uten nøkkelen. Etter-listen bygget bare fra logglinjer. Og sandkassen er en god detektor for et
 tillegg som ikke prøver å skjule seg — men det er en detektor, ikke en vegg.
 
@@ -370,6 +375,7 @@ lonewatch/
 ├── docs/
 │   ├── DEMO.md           Demofortelling på rundt to minutter
 │   ├── MALING.md         Måling mot et uavhengig blindsett, før og etter
+│   ├── PERSONVERN.md     Hva loggen faktisk inneholder om folk
 │   └── REDTEAM.md        Angrepstest med reproduserte funn
 ├── eval/
 │   └── measure.py        python -m eval.measure
@@ -386,8 +392,9 @@ lonewatch/
 │   ├── evaluation.py     Måling mot en syntetisk testmengde på 43
 │   └── LIMITS.md         Hull i regelsettet
 ├── vault/                Den låste loggen
-│   ├── store.py          Vault.append / verify, Fernet per linje, archive_log,
-│   │                     acquire_log_lock (én Lonewatch om gangen)
+│   ├── store.py          Vault.append / verify / verify_detail, Fernet per linje,
+│   │                     archive_log, acquire_log_lock (én Lonewatch om gangen)
+│   ├── anchor.py         Hale-anker: <logg>.head, HMAC-signert
 │   ├── crypto.py         Nøkler fra miljøvariabler, ingen standardnøkkel
 │   ├── identity.py       pseudonymize / register_employee / reveal
 │   ├── redaction.py      Dataminimering (på i demoen, LONEWATCH_REDACT)
@@ -410,5 +417,5 @@ lonewatch/
 │   ├── amount.py         Hvordan et skrevet beløp tolkes (fasiten)
 │   └── static/           index.html, app.js, amount.js, style.css
 ├── examples/             Eksempler på JSON for hver type i contracts
-└── tests/                450 tester + 1 xfail. test_contracts.py røres ikke
+└── tests/                471 tester + 1 xfail. test_contracts.py røres ikke
 ```

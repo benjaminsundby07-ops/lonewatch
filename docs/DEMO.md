@@ -122,14 +122,19 @@ tegn — og hvor mange sekunder det tok. Si at loggen aldri ser navnet.
 
 Trykk **Sjekk loggen** oppe til høyre.
 
-Banneret svarer: **«Loggen stemmer. *n* linjer, ingen er endret.»** Si at dette ikke er et tall fra minnet:
-`verify()` leser og dekrypterer hele filen på nytt fra disk og følger hash-kjeden linje for linje. Er én
-linje endret, peker svaret på `seq` til den første.
+Banneret svarer: **«Loggen stemmer. *n* linjer, ingen er endret. Siste hash: …»** Si at dette ikke er et
+tall fra minnet: `verify()` leser og dekrypterer hele filen på nytt fra disk og følger hash-kjeden linje for
+linje. Er én linje endret, peker svaret på `seq` til den første.
 
-Vær ærlig med det samme: *kjeden oppdager en endret eller fjernet linje. Den oppdager ikke at hele filen er
-slettet. Det står i `vault/LIMITS.md`.*
+Pek på hashen til slutt: *skriver du ned disse tolv tegnene nå, kan du siden se om loggen er den samme. Det
+er det eneste som fanger en som har alt på maskinen.*
 
-Og si hva loggen faktisk inneholder, hvis noen spør: *den er minimert. Agentens forklaring er
+Vær ærlig med det samme: *kjeden oppdager en endret eller fjernet linje. Kutting av de siste linjene fanges
+av et signert anker ved siden av loggen — men den som har både loggen, ankeret og nøkkelen kan skrive om
+begge, og hele mappen kan slettes. Det står i `vault/LIMITS.md`.*
+
+Og si hva loggen faktisk inneholder, hvis noen spør (hele svaret står i `docs/PERSONVERN.md`):
+*den er minimert. Agentens forklaring er
 kastet, kontonummeret står som `**** 947`, og teksten mennesket fikk se er ikke lagret.
 Men beløpet, hvilken agent og hvilket dokument står der — det er nødvendig for å granske.
 Minimering, ikke anonymisering.* Vil du vise forskjellen: start appen med `LONEWATCH_REDACT=0`,
