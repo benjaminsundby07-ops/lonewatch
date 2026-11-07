@@ -387,3 +387,39 @@ def test_sperrene_kan_ikke_omgaas_via_globals():
     )
     _, resultat = _kjor("globalsomvei", kilde)
     assert "KOM GJENNOM" not in resultat, resultat
+
+
+def test_os_stat_er_ikke_sperret():
+    """Kjent hull, dokumentert i LIMITS.md: et tillegg kan kartlegge hvilke
+    filer som finnes utenfor boksen, selv om det ikke får lese dem. Testen
+    står her for at hullet ikke skal overraske noen senere."""
+    kilde = (
+        "import os\n"
+        "def run():\n"
+        "    try:\n"
+        "        return 'stat gikk: %d' % os.stat('/etc/hosts').st_size\n"
+        "    except BaseException as exc:\n"
+        "        return 'stat stoppet: %s' % type(exc).__name__\n"
+    )
+    rapport, resultat = _kjor("stattest", kilde)
+    assert "stat gikk" in resultat  # hullet finnes
+    assert rapport.verdict == "clean"  # og det gir ikke utslag
+
+
+def test_tillegg_som_later_som_det_er_standardbiblioteket():
+    """Kjent hull, dokumentert i LIMITS.md: importsperren ser på `__name__` hos
+    den som spør. Et tillegg som setter `__name__ = 'uuid'` får forsøket regnet
+    som standardbibliotekets. Importen blir fortsatt avvist - men tillegget blir
+    ikke `blocked`."""
+    kilde = (
+        "def run():\n"
+        "    globals()['__name__'] = 'uuid'\n"
+        "    try:\n"
+        "        import ctypes\n"
+        "        return 'KOM GJENNOM'\n"
+        "    except ImportError:\n"
+        "        return 'ctypes avvist'\n"
+    )
+    rapport, resultat = _kjor("navnejuks", kilde)
+    assert "KOM GJENNOM" not in resultat, resultat  # sperren holder
+    assert rapport.verdict == "clean"  # men vi roper ikke
