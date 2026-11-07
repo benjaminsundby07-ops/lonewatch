@@ -37,6 +37,32 @@ def _utc(ts: datetime | None) -> datetime:
     return ts.astimezone(timezone.utc)
 
 
+def archive_log(path: str | Path | None = None, ts: datetime | None = None) -> Path | None:
+    """Flytter loggfilen til side slik at neste Vault() starter paa en tom logg.
+
+    Brukes naar demoen nullstilles: en logg som bare vokser kan ikke tømmes,
+    saa i stedet begynner vi en ny fil. Den gamle blir liggende under nytt navn
+    (lonewatch_log.<tidsstempel>.jsonl), slik at ingenting forsvinner i det skjulte.
+
+    Returnerer stien den gamle loggen ble flyttet til, eller None hvis det ikke
+    fantes noen logg aa ta vare paa.
+    """
+    target = Path(path) if path is not None else log_path()
+    if not target.exists() or target.stat().st_size == 0:
+        return None
+
+    stamp = _utc(ts).strftime("%Y%m%dT%H%M%SZ")
+    # Flere nullstillinger samme sekund skal ikke skrive over hverandre.
+    candidate = target.with_suffix(f".{stamp}{target.suffix}")
+    counter = 2
+    while candidate.exists():
+        candidate = target.with_suffix(f".{stamp}-{counter}{target.suffix}")
+        counter += 1
+
+    target.rename(candidate)
+    return candidate
+
+
 class Vault:
     """Logg som bare vokser. Hver linje peker paa forrige via hash.
 

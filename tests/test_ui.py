@@ -3,8 +3,8 @@
 Logikken testes direkte mot DemoState. Det er der alt skjer: app.py er bare et
 tynt lag med ruter over den.
 
-Testene bruker skjelettets gateway og vault hvis de ekte ikke er flettet inn
-ennaa, saa de sjekker flyten, ikke hvor gode reglene er.
+Testene kjoerer mot den ekte gatewayen og den ekte vaulten. De sjekker flyten
+gjennom UI, ikke hvor gode reglene er: det hoerer til tests/test_gateway.py.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import socket
 import threading
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 
@@ -134,8 +135,36 @@ def _first_waiting(state: DemoState) -> dict:
     return waiting[0]
 
 
+# Beloepet paa demoens store overfoering. Det er dette mennesket maa skrive.
+BIG_TRANSFER_NOK = 10_000_000
+
+
+def _big_transfer(state: DemoState) -> dict:
+    """Kortet for pengeoverfoeringen paa 10 000 000 kr.
+
+    Med det ekte regelsettet er flere forespoersler roede (ukjent mottaker,
+    nytt tillegg, personopplysninger ut av huset), og koeen viser nyeste
+    foerst. Foerste kort i koeen er derfor ikke overfoeringen. Testene under
+    handler om beloepet som maa skrives inn, saa de plukker overfoeringen med
+    vilje i stedet for aa gjette paa rekkefoelgen.
+    """
+    _drain(state)
+    for card in state.snapshot()["waiting"]:
+        if card["request"]["amount"] == BIG_TRANSFER_NOK:
+            return card
+    raise AssertionError("demoen skal ha en roed overfoering paa 10 000 000 kr")
+
+
+def test_the_big_transfer_is_red_and_cannot_be_approved_without_typing_the_amount(state):
+    """Hovedpoenget i demoen: 10 000 000 kr slipper ikke gjennom av seg selv."""
+    card = _big_transfer(state)
+    assert card["decision"]["verdict"] == Verdict.RED.value
+    assert card["decision"]["requires_typed_amount"] is True
+    assert card["status"] == STATUS_WAITING
+
+
 def test_a_typed_amount_request_cannot_be_approved_with_the_wrong_amount(state):
-    card = _first_waiting(state)
+    card = _big_transfer(state)
     assert card["decision"]["requires_typed_amount"] is True
     out = state.respond(card["request"]["id"], approved=True, typed_amount="1")
     assert out["ok"] is False
@@ -145,13 +174,13 @@ def test_a_typed_amount_request_cannot_be_approved_with_the_wrong_amount(state):
 
 
 def test_an_empty_amount_is_also_refused(state):
-    card = _first_waiting(state)
+    card = _big_transfer(state)
     assert state.respond(card["request"]["id"], approved=True, typed_amount="")["ok"] is False
     assert state.respond(card["request"]["id"], approved=True, typed_amount=None)["ok"] is False
 
 
 def test_the_right_amount_approves_it_and_lands_in_the_log(state):
-    card = _first_waiting(state)
+    card = _big_transfer(state)
     request_id = card["request"]["id"]
     before = len(state.vault.entries())
 
@@ -163,7 +192,7 @@ def test_the_right_amount_approves_it_and_lands_in_the_log(state):
     human = state.vault.entries()[-1]
     assert human.kind == "human"
     assert human.payload["approved"] is True
-    assert human.payload["typed_amount"] == 10_000_000
+    assert human.payload["typed_amount"] == BIG_TRANSFER_NOK
     assert human.payload["seconds_to_decide"] == pytest.approx(9.5)
 
 
@@ -339,6 +368,37 @@ def test_reset_empties_the_queue_the_log_and_the_story(state):
     assert snap["feed"]["seen"] == 0
 
 
+def test_reset_starts_a_new_log_file_and_keeps_the_old_one(state):
+    """Nullstilling skal gi en fersk logg, men aldri slette den gamle i det skjulte."""
+    _drain(state)
+    old_path = state.vault.path
+    lines_before = len(state.vault.entries())
+    assert lines_before > 0
+
+    state.reset()
+
+    assert state.vault.entries() == []
+    assert state.snapshot()["log"]["lines"] == 0
+
+    archived = state.snapshot()["log"]["archived"]
+    assert archived, "UI maa si hvor den gamle loggen ble lagt"
+    archived_path = Path(archived)
+    assert archived_path.exists()
+    assert archived_path != old_path
+    # Den gamle loggen er flyttet, ikke slettet: alle linjene er fortsatt der.
+    assert len(archived_path.read_text(encoding="utf-8").splitlines()) == lines_before
+
+
+def test_the_log_after_a_reset_verifies_from_scratch(state):
+    """Den nye loggen skal ha sin egen hash-kjede, ikke henge etter den gamle."""
+    _drain(state)
+    state.reset()
+    _drain(state)
+    result = state.verify()
+    assert result["ok"] is True
+    assert state.vault.entries()[0].seq == 0
+
+
 def test_the_snapshot_has_everything_the_page_needs(state):
     snap = state.snapshot()
     assert {
@@ -450,9 +510,13 @@ def test_approving_over_http_needs_the_right_amount(server):
         pass
 
     snap = _get(server, "/api/state")[1]
-    waiting = snap["waiting"]
-    assert waiting
-    request_id = waiting[0]["request"]["id"]
+    transfers = [
+        c for c in snap["waiting"] if c["request"]["amount"] == BIG_TRANSFER_NOK
+    ]
+    assert transfers, "demoen skal ha en roed overfoering paa 10 000 000 kr"
+    card = transfers[0]
+    assert card["decision"]["requires_typed_amount"] is True
+    request_id = card["request"]["id"]
 
     status, out = _post(
         server,

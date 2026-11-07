@@ -4,4 +4,5 @@ __pycache__/
 .pytest_cache/
 env.sh
 lonewatch_log.jsonl
+lonewatch_log.*.jsonl
 lonewatch_pseudonyms.enc

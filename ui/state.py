@@ -81,9 +81,14 @@ class DemoState:
     # -- oppsett ---------------------------------------------------------
 
     def reset(self) -> None:
-        """Tilbake til start: tom logg, tom kø, historien ikke spilt."""
+        """Tilbake til start: tom logg, tom kø, historien ikke spilt.
+
+        Loggen kan ikke tømmes (den skal bare vokse), så i stedet begynner vi
+        en ny loggfil. Den gamle blir liggende under nytt navn, og stien til
+        den vises i UI, slik at ingen logg forsvinner i det skjulte.
+        """
         with self._lock:
-            self.vault, self.vault_error = self._new_vault()
+            self.vault, self.vault_error, self.log_archived = self._new_vault()
             self._requests: list[ActionRequest] = scenarios.all_scenarios()
             self._next_index = 0
             self.cards: dict[str, dict[str, Any]] = {}
@@ -100,13 +105,22 @@ class DemoState:
 
     @staticmethod
     def _new_vault():
-        """Lager loggen. Feiler den (for eksempel manglende nøkkel), sier vi fra i UI."""
-        try:
-            from vault import Vault
+        """Starter en fersk logg.
 
-            return Vault(), None
+        Returnerer (vault, feilmelding, stien den gamle loggen ble flyttet til).
+        Feiler det (for eksempel manglende nøkkel), sier vi fra i UI i stedet
+        for å krasje.
+        """
+        try:
+            from vault import Vault, archive_log, load_log_key
+
+            # Sjekk nøkkelen FØR vi flytter noe. Kan vi ikke starte en logg,
+            # skal den gamle filen bli liggende der den lå.
+            load_log_key()
+            archived = archive_log()
+            return Vault(), None, str(archived) if archived else None
         except Exception as exc:  # pragma: no cover - avhenger av økt C
-            return None, f"Loggen kunne ikke startes: {exc}"
+            return None, f"Loggen kunne ikke startes: {exc}", None
 
     def _pseudonym(self) -> str:
         try:
@@ -402,5 +416,7 @@ class DemoState:
                     "lines": len(self.vault.entries()) if self.vault else 0,
                     "error": self.vault_error,
                     "last_verify": self.verify_result,
+                    # Hvor forrige logg ble lagt da demoen ble nullstilt. Ingenting slettes.
+                    "archived": self.log_archived,
                 },
             }

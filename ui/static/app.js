@@ -126,6 +126,15 @@ function render() {
   box.classList.toggle("hidden", !err);
   if (err) box.textContent = err;
 
+  // Nullstilling begynner en ny loggfil. Vi sier hvor den gamle ble lagt,
+  // slik at ingen logg forsvinner i det skjulte.
+  const archived = latest.log && latest.log.archived;
+  const note = el("log-note");
+  note.classList.toggle("hidden", !archived);
+  if (archived) {
+    note.textContent = "Ny logg startet. Forrige logg ligger uendret i " + archived;
+  }
+
   el("btn-story").disabled = latest.story.running;
 }
 

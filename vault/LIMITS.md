@@ -60,7 +60,17 @@ En logg som bare vokser og som er hash-kjedet, kan ikke rette seg etter et krav 
 av persondata uten aa knekke kjeden. Det er en reell konflikt med personvern som denne
 versjonen ikke løser.
 
-## 9. Det som ER ekte her
+## 9. Nullstilling av demoen starter en ny logg
+`archive_log()` gir den gamle loggfilen et nytt navn (`lonewatch_log.<tidsstempel>.jsonl`)
+og lar neste `Vault()` begynne paa linje 0. Den sletter ingenting, og UI viser hvor den
+gamle loggen ble lagt. Men: den nye kjeden har ingen peker tilbake til den forrige, saa
+rekkefølgen MELLOM to logger er ikke sikret av hashene. Noen med skrivetilgang kan fjerne
+en arkivfil uten at `verify()` merker det (samme hull som punkt 1).
+
+**Hva som ville løst det:** skrive hashen av siste linje i den gamle loggen som første
+linje i den nye, og legge arkivfilene et sted Lonewatch ikke kan skrive over.
+
+## 10. Det som ER ekte her
 - Fernet-kryptering per linje, nøkkel kun fra miljøvariabel, ingen stille standardnøkkel.
 - Hash-kjede fra `contracts.make_log_entry` / `verify_chain`, verifisert ved aa lese og
   dekryptere filen paa nytt fra disk.

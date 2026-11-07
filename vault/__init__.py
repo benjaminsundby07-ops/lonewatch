@@ -4,6 +4,7 @@ Alt som skjer i Lonewatch havner her:
     vault.append(kind, payload) -> LogEntry      (kryptert linje paa disk)
     vault.verify() -> int | None                 (seq til første ødelagte linje)
     pseudonymize(employee_id) -> "emp_xxxx"      (loggen ser aldri navn)
+    archive_log() -> Path | None                 (flytter loggen til side, sletter aldri)
 
 Nøkler leses fra miljøvariabler og finnes ikke i koden:
     LONEWATCH_LOG_KEY        Fernet-nøkkel for loggfilen
@@ -22,12 +23,13 @@ from vault.crypto import (
     VaultDecryptError,
     VaultError,
     VaultKeyError,
+    load_log_key,
     new_log_key,
     new_pseudonym_key,
 )
 from vault.identity import ADMIN_ROLE, NotAuthorized, pseudonymize, register_employee, reveal
 from vault.redaction import mask_recipient, redact_payload
-from vault.store import DEFAULT_LOG_PATH, ENV_LOG_PATH, Vault, log_path
+from vault.store import DEFAULT_LOG_PATH, ENV_LOG_PATH, Vault, archive_log, log_path
 
 __all__ = [
     "ADMIN_ROLE",
@@ -40,8 +42,10 @@ __all__ = [
     "VaultDecryptError",
     "VaultError",
     "VaultKeyError",
+    "archive_log",
     "build_after_actions",
     "format_nok",
+    "load_log_key",
     "log_path",
     "mask_recipient",
     "new_log_key",
