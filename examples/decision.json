@@ -1,0 +1,9 @@
+{
+  "request_id": "req_0001",
+  "ts": "2026-11-07T10:15:00+00:00",
+  "verdict": "red",
+  "risk": "high",
+  "reasons": ["amount_over_limit", "unknown_recipient", "irreversible"],
+  "consequence_text": "Overfører 10 000 000 kr til ukjent konto. Kan ikke angres.",
+  "requires_typed_amount": true
+}

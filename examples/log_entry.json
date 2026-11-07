@@ -1,0 +1,8 @@
+{
+  "seq": 0,
+  "ts": "2026-11-07T10:15:00+00:00",
+  "kind": "request",
+  "payload": {"request_id": "req_0001", "action_type": "transfer_money", "agent_id": "finance_agent"},
+  "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "hash": ""
+}

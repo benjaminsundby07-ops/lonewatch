@@ -1,0 +1,14 @@
+{
+  "id": "req_0001",
+  "ts": "2026-11-07T10:15:00+00:00",
+  "agent_id": "finance_agent",
+  "action_type": "transfer_money",
+  "summary": "Betaler faktura fra leverandør",
+  "amount": 10000000,
+  "recipient": "NO93 8601 1117 947",
+  "recipient_known": false,
+  "reversible": false,
+  "contains_personal_data": false,
+  "package_name": null,
+  "source_doc_id": "doc_invoice_77"
+}

@@ -1,0 +1,8 @@
+{
+  "request_id": "req_0001",
+  "ts": "2026-11-07T10:15:12+00:00",
+  "employee_pseudonym": "emp_a3f9",
+  "approved": false,
+  "typed_amount": null,
+  "seconds_to_decide": 12.4
+}
