@@ -24,6 +24,7 @@ from contracts import (
 )
 from gateway import evaluate
 from ui.amount import amount_matches, parse_amount
+from ui.overview import build_overview
 
 # Den som sitter ved skjermen i demoen. Navnet forlater aldri denne filen:
 # det som logges er pseudonymet.
@@ -676,6 +677,21 @@ class DemoState:
                 "clean": len([r for r in scanned if r["verdict"] == "clean"]),
                 "error": self.sandbox_error,
             }
+
+    def overview(self) -> dict[str, Any]:
+        """Tallene til dashbordet, i formen design-handoff/DATASHAPE.md beskriver.
+
+        Alt regnes ut herfra: ingen tall er skrevet inn, og ingenting er hentet
+        fra eksempeldataene i bundle.js.
+        """
+        with self._lock:
+            cards = [self.cards[request_id] for request_id in self.order]
+            return build_overview(
+                cards=cards,
+                before=self.before_list(),
+                verify=self.verify_result,
+                log_error=self.vault_error,
+            )
 
     # -- alt nettsiden trenger i ett kall ---------------------------------
 

@@ -15,8 +15,9 @@ export LONEWATCH_PSEUDONYM_KEY=$(python -m vault.gen_key --pseudonym)
 python3 -m ui
 ```
 
-Åpne <http://127.0.0.1:8000>. Fanen **Under** er åpen fra start, og den rolige strømmen begynner med én
-gang: hvert andre sekund slippes neste forespørsel fra demodataene gjennom mellomstasjonen.
+Åpne <http://127.0.0.1:8000>. Fanen **Oversikt** er åpen fra start, og den rolige strømmen begynner med
+én gang: hvert andre sekund slippes neste forespørsel fra demodataene gjennom mellomstasjonen. Tallene på
+Oversikt teller opp mens du ser på.
 
 Har du spilt demoen før i samme økt: trykk **Nullstill**. Da begynner en ny loggfil, og banneret sier
 «Ny logg startet. Forrige logg ligger uendret i …» — ingenting slettes. La siden stå i 20–30 sekunder før
@@ -24,7 +25,12 @@ du starter, slik at listen **Går gjennom** har noe i seg.
 
 ## 0:00 — «Dette er en vanlig arbeidsdag» (ca. 15 s)
 
-Stå i fanen **Under**.
+Start på **Oversikt**. Pek på de tre tallene øverst: handlinger vurdert, røde varsler, blokkert. Si at
+hvert eneste tall her er regnet fra loggen — *ingenting på denne siden er skrevet inn på forhånd, og
+mangler vi et tall står det en strek*. Nederst til høyre: loggkjeden, og sandkassen med hvor mange
+tillegg som faktisk ble kjørt.
+
+Bytt så til **Godkjenning**.
 
 Pek på kolonnen til høyre: **Går gjennom**. Der ligger kalenderoppdateringer, dokumentlesing og e-post til
 kjente mottakere, med agentnavn — Kundeservice, Innkjøp, Økonomi, HR, IT-hjelp — og agentens egen
@@ -72,7 +78,7 @@ finnes, og at sandkassen svarte nei — ingenting forlot maskinen.
 
 Les gjerne linjen over listen høyt: *«Rent» betyr vi så ingenting, ikke at tillegget er trygt.*
 
-Bytt tilbake til **Under**. Tillegget står under **Stoppet av Lonewatch**, ikke i køen: dette er `block`, og
+Bytt tilbake til **Godkjenning**. Tillegget står under **Stoppet av Lonewatch**, ikke i køen: dette er `block`, og
 ingen kan godkjenne det. Konsekvensteksten sier det rett ut.
 
 Har den rolige strømmen rukket langt nok, ligger det også et tillegg merket **rent** i **Før**-fanen. Pek på
@@ -88,7 +94,7 @@ leverandør selskapet bruker hver måned.*
 Steg 8 er **Fella nummer to**: fakturaen har hvit tekst på hvit bakgrunn med et nytt kontonummer og en
 beskjed om å ikke varsle noen. Den havner også i **Hendelser**.
 
-## 1:20 — Under: det røde varselet (ca. 30 s)
+## 1:20 — Godkjenning: det røde varselet (ca. 30 s)
 
 Steg 9: **Overføringen**.
 

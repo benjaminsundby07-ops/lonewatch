@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="no" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lonewatch – dashbord (design-handoff)</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components/bundle.css">
+<!-- React 18 fra jsDelivr, samme som designsystemet bruker. Krever internett. -->
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="components/bundle.js"></script>
+</head>
+<body style="margin:0;background:#0e131b">
+<div id="root"></div>
+<script>
+  /* Tegner dashbordet fra datasettet LONEWATCH_DATA i components/bundle.js (Lonewatch.data).
+     Ekte data: ReactDOM...render(React.createElement(Lonewatch.Dashboard, { data: mittDatasett })). */
+  ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(Lonewatch.Dashboard));
+</script>
+</body>
+</html>

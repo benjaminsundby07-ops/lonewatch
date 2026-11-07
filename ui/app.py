@@ -103,6 +103,16 @@ def api_custom_help() -> dict:
     return state.custom_help()
 
 
+@app.get("/api/overview")
+def api_overview() -> dict:
+    """Tallene til dashbordet, regnet fra tilstanden og loggen.
+
+    Samme form som LONEWATCH_DATA i design-handoff/, saa svaret kan sendes
+    rett inn i Lonewatch.setData(...).
+    """
+    return state.overview()
+
+
 @app.get("/api/verify")
 def api_verify() -> dict:
     """Sjekk loggen: kaller vault.verify()."""

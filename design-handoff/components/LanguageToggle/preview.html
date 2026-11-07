@@ -1,0 +1,15 @@
+<!-- @dsCard group="Navigation" height=110 -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>LanguageToggle — preview</title>
+<style>html,body{margin:0;background:var(--shell);}</style></head>
+<body>
+<div id="root" class="lw" style="padding:24px"></div>
+<script>
+  /* Alle tekster og tall hentes fra datasettet i bundle.js (Lonewatch.data). */
+  var L = window.Lonewatch, h = React.createElement, D = L.data, t = D.text.no, n = D.counts;
+  function Toggle(){ var st = React.useState('no'); return h(L.LanguageToggle, { value: st[0], onChange: st[1] }); }
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { style: { display: 'flex', gap: 24, alignItems: 'center' } }, h(Toggle), h(L.LanguageToggle, { value: 'en', vertical: true })));
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+<!-- @dsCard group="Brand" height=240 -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>GlassObject — preview</title>
+<style>html,body{margin:0;background:var(--shell);}</style></head>
+<body>
+<div id="root" class="lw" style="padding:24px"></div>
+<script>
+  /* Alle tekster og tall hentes fra datasettet i bundle.js (Lonewatch.data). */
+  var L = window.Lonewatch, h = React.createElement, D = L.data, t = D.text.no, n = D.counts;
+  ReactDOM.createRoot(document.getElementById('root')).render(h(L.GlassObject, { size: 190 }));
+</script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+<!-- @dsCard height=288 -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Lonewatch — cover</title>
+<style>
+  html,body{margin:0;background:var(--shell);}
+  .cv{position:relative;width:960px;height:288px;overflow:hidden;background:var(--shell);font-family:var(--font-sans);}
+  .cv svg{position:absolute;inset:0;}
+  .accent{fill:var(--accent);} .sand{fill:var(--chart-2);} .steel{fill:var(--promo-bottom);} .card{fill:var(--card);} .panel{fill:var(--panel);}
+  .ring{fill:none;stroke:var(--accent);stroke-width:9;stroke-linecap:round;}
+  .ring-track{fill:none;stroke:var(--track);stroke-width:9;stroke-linecap:round;}
+    .ring-faint{fill:none;stroke:var(--on-accent);stroke-opacity:.25;stroke-width:9;stroke-linecap:round;}
+  .ring-ink{fill:none;stroke:var(--on-accent);stroke-width:9;stroke-linecap:round;}
+  .txt{position:absolute;left:40px;bottom:40px;max-width:440px;}
+  .name{margin:0;font-size:80px;line-height:.92;font-weight:600;letter-spacing:-0.035em;color:var(--ink);}
+  .tag{margin:16px 0 0;font-size:14px;line-height:20px;color:var(--ink-muted);}
+</style></head>
+<body>
+<div class="cv">
+  <!--
+    blocks: accent 208x288 (tall slab, radius-xl 22), steel promo-bottom 152x136 (radius-xl), sand chart-2 152x136 (radius-xl), card 112x288 (radius-xl)
+    arrangement: one tall accent slab with satellites, the card slab bleeding off the right edge, all right of x=480
+    pattern: literal motif, the score gauge: three open rings (330° sweep, gap lower right) in accent/track/on-accent, from the README's gauge and progress rules
+    scales: gaps space-4 (16px), corners radius-xl (22px), ring stroke 9px as in ScoreGauge
+  -->
+  <svg width="960" height="288" viewBox="0 0 960 288" aria-hidden="true">
+    <rect class="accent" x="496" y="0" width="208" height="288" rx="22"/>
+    <rect class="steel" x="720" y="0" width="152" height="136" rx="22"/>
+    <rect class="sand" x="720" y="152" width="152" height="136" rx="22"/>
+    <rect class="card" x="888" y="0" width="112" height="288" rx="22"/>
+    <!-- gauge rings: gap centred at lower right, as ScoreGauge -->
+    <path class="ring-faint" d="M 655.8 149.1 A 56 56 0 0 1 648.5 172.0"/>
+    <path class="ring-ink" d="M 628.0 192.5 A 56 56 0 1 1 655.8 149.1"/>
+    <path class="ring-faint" d="M 808.2 36.3 A 34 34 0 0 1 825.4 85.0"/>
+    <path class="ring-ink" d="M 813.0 97.4 A 34 34 0 1 1 808.2 36.3"/>
+    <path class="ring-ink" d="M 813.0 249.4 A 34 34 0 1 1 825.4 237.0"/>
+    <path class="ring-track" d="M 968.3 126.4 A 30 30 0 0 1 970.0 159.0"/>
+    <path class="ring" d="M 959.0 170.0 A 30 30 0 1 1 968.3 126.4"/>
+  </svg>
+  <div class="txt">
+    <h1 class="name">Lonewatch</h1>
+    <p class="tag">Control panel for AI agents. Before, during and after every action.</p>
+  </div>
+</div>
+</body>
+</html>

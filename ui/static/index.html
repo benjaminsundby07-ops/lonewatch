@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lonewatch</title>
 <link rel="stylesheet" href="/static/style.css">
+<!-- Dashbordet. Alt ligger lokalt: ingenting hentes fra nettet. -->
+<link rel="stylesheet" href="/static/dashboard/tokens.css">
+<link rel="stylesheet" href="/static/dashboard/bundle.css">
 </head>
 <body>
 
@@ -37,13 +40,19 @@
 </section>
 
 <nav class="tabs" role="tablist">
+  <button class="tab-btn on" data-tab="overview" role="tab">Oversikt</button>
   <button class="tab-btn" data-tab="before" role="tab">Før</button>
-  <button class="tab-btn on" data-tab="queue" role="tab">Under</button>
+  <button class="tab-btn" data-tab="queue" role="tab">Godkjenning</button>
   <button class="tab-btn" data-tab="after" role="tab">Etter</button>
   <button class="tab-btn" data-tab="custom" role="tab">Prøv selv</button>
 </nav>
 
 <main>
+
+  <section id="tab-overview" class="tab">
+    <div id="dashboard-error" class="banner bad hidden" role="status"></div>
+    <div id="dashboard-root"></div>
+  </section>
 
   <section id="tab-before" class="tab hidden">
     <h2 class="h-quiet">Før</h2>
@@ -56,7 +65,7 @@
     <div id="before-list" class="after-list"></div>
   </section>
 
-  <section id="tab-queue" class="tab">
+  <section id="tab-queue" class="tab hidden">
     <div class="grid">
 
       <div class="col-main">
@@ -169,6 +178,9 @@
   og kan fortsatt slettes &mdash; se <code>vault/LIMITS.md</code>.
 </footer>
 
+<script src="/static/vendor/react.production.min.js"></script>
+<script src="/static/vendor/react-dom.production.min.js"></script>
+<script src="/static/dashboard/bundle.js"></script>
 <script src="/static/amount.js"></script>
 <script src="/static/app.js"></script>
 </body>

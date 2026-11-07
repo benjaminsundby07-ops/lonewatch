@@ -1,0 +1,58 @@
+/* Lonewatch — generated from tokens.json */
+:root, [data-theme="dark"] {
+  --backdrop: #1a2433;
+  --shell: #0b0b0c;
+  --sidebar: #121213;
+  --panel: #19191a;
+  --card: #232325;
+  --card-top: #2d2d30;
+  --row-head: #2a2a2c;
+  --icon-tile: #2a2a2d;
+  --line: #2e2e31;
+  --track: #3a3a3e;
+  --ink: #f4f4f5;
+  --ink-muted: #a3a3a8;
+  --ink-faint: #5c5c61;
+  --nav-icon: #8e8e94;
+  --accent: #c4d2f5;
+  --accent-strong: #9db2ea;
+  --on-accent: #15171d;
+  --positive: #9fe09b;
+  --negative: #f0918d;
+  --chart-1: #a7afc2;
+  --chart-2: #d3c99a;
+  --chart-3: #a6bfb1;
+  --promo-top: #090b10;
+  --promo-mid: #26344d;
+  --promo-bottom: #8da4c9;
+  --blob-deep: #0f2fb8;
+  --blob-mid: #3b6cf2;
+  --blob-light: #c3d4ff;
+  --example-ink: #e8bd62;
+  --example-bg: #2c2410;
+  --shadow-shell: 0 40px 80px rgba(0,0,0,0.55);
+}
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --radius-2xl: 34px;
+  --radius-pill: 999px;
+  --font-sans: "Plus Jakarta Sans", "Helvetica Neue", Arial, sans-serif;
+}
+.metric { font-family: var(--font-sans); font-size: 34px; line-height: 40px; font-weight: 500; letter-spacing: -0.02em; }
+.gauge { font-family: var(--font-sans); font-size: 30px; line-height: 36px; font-weight: 500; letter-spacing: -0.02em; }
+.promo-title { font-family: var(--font-sans); font-size: 20px; line-height: 28px; font-weight: 600; letter-spacing: -0.01em; }
+.panel-title { font-family: var(--font-sans); font-size: 17px; line-height: 24px; font-weight: 600; letter-spacing: -0.01em; }
+.card-title { font-family: var(--font-sans); font-size: 14px; line-height: 20px; font-weight: 500; }
+.body { font-family: var(--font-sans); font-size: 13px; line-height: 20px; font-weight: 400; }
+.label { font-family: var(--font-sans); font-size: 12px; line-height: 16px; font-weight: 500; }
+.micro { font-family: var(--font-sans); font-size: 11px; line-height: 14px; font-weight: 500; }

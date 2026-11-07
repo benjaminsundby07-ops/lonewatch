@@ -50,7 +50,18 @@ i `evaluate()`, der regelen `sandbox_blocked` gir `block`.
 Sandkassen kjører bare filer som ligger i `sandbox/packages/` fra før. Et pakkenavn fra en forespørsel
 fører aldri til at noe lastes ned eller startes; et navn som ikke finnes der gir «ikke testet».
 
-### Under — `gateway/` og `ui/`
+### Oversikt — `ui/overview.py` og `ui/static/dashboard/`
+
+Forsiden er et dashbord: handlinger vurdert, røde varsler, blokkert, en rad per agent, status på
+loggkjeden og sandkassen. **Alle tall regnes fra loggen og tilstanden** i `/api/overview` — ingen
+er skrevet inn. Mangler et tall, står det «–»; det finnes ingen oppdiktede prosenter, mål eller
+snitt, og kurvene i kortene er ekte forløp (vurderte, røde og blokkerte per tidsbøtte), ikke pynt.
+
+Designet kom fra `design-handoff/`. Filene dashbordet trenger for å kjøre ligger i
+`ui/static/dashboard/`; resten av mappen er referanse. React 18.3.1 og skriften ligger lokalt i
+`ui/static/vendor/` og `ui/static/dashboard/fonts/`, så **hele appen virker uten internett**.
+
+### Godkjenning — `gateway/` og `ui/`
 
 Seks risikoregler gir poeng (`gateway/config.py`): `amount_over_limit` (2),
 `recipient_total_over_limit` (2), `unknown_recipient` (2), `personal_data_external` (3),
@@ -177,7 +188,8 @@ nettsiden.
 python3 -m ui
 ```
 
-Åpne <http://127.0.0.1:8000>. Verts- og portnavn kan styres med `LONEWATCH_HOST` og `LONEWATCH_PORT`.
+Åpne <http://127.0.0.1:8000>. Fanene er **Oversikt** (forsiden), **Før**, **Godkjenning**, **Etter**
+og **Prøv selv**. Verts- og portnavn kan styres med `LONEWATCH_HOST` og `LONEWATCH_PORT`.
 Se [docs/DEMO.md](docs/DEMO.md) for en demo på rundt to minutter, og
 [docs/PERSONVERN.md](docs/PERSONVERN.md) for hva loggen faktisk inneholder om folk.
 
@@ -200,7 +212,7 @@ bom og falske alarmer. Resultatet — og viktigere, hva det *ikke* beviser — s
 pytest -q
 ```
 
-471 tester går gjennom, og én er `xfail`: `test_sperrene_kan_ikke_omgaas_via_globals` i
+495 tester går gjennom, og én er `xfail`: `test_sperrene_kan_ikke_omgaas_via_globals` i
 `tests/test_sandbox.py`. Den står som forventet feil med vilje, fordi hullet den beskriver ikke er lukket —
 se neste seksjon. Testene lager egne nøkler og skriver til en midlertidig mappe, så de krever ingen
 miljøvariabler og rører ikke loggen din.
@@ -372,6 +384,7 @@ lonewatch/
 ├── CLAUDE.md             Spilleregler, mappeeierskap og grensesnitt
 ├── PROMPTS.md            Promptene prosjektet ble bygget med
 ├── README.md
+├── design-handoff/       Designsystemet som referanse (ikke kjørt av appen)
 ├── docs/
 │   ├── DEMO.md           Demofortelling på rundt to minutter
 │   ├── MALING.md         Måling mot et uavhengig blindsett, før og etter
@@ -411,11 +424,13 @@ lonewatch/
 │   └── LIMITS.md         Hvorfor dette ikke er isolasjon
 ├── ui/                   Nettsiden
 │   ├── app.py            FastAPI: /api/state, /api/feed/step, /api/respond,
-│   │                     /api/custom, /api/verify, /api/after, /api/story/*,
-│   │                     /api/reset
+│   │                     /api/custom, /api/overview, /api/verify, /api/after,
+│   │                     /api/story/*, /api/reset
+│   ├── overview.py       Tallene til dashbordet, regnet fra loggen
 │   ├── state.py          Tilstanden bak siden. Ingen regler her
 │   ├── amount.py         Hvordan et skrevet beløp tolkes (fasiten)
-│   └── static/           index.html, app.js, amount.js, style.css
+│   └── static/           index.html, app.js, amount.js, style.css,
+│                         dashboard/ (design-handoff + skrift), vendor/ (React, MIT)
 ├── examples/             Eksempler på JSON for hver type i contracts
-└── tests/                471 tester + 1 xfail. test_contracts.py røres ikke
+└── tests/                495 tester + 1 xfail. test_contracts.py røres ikke
 ```

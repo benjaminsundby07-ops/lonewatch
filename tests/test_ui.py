@@ -907,3 +907,41 @@ def test_the_custom_help_endpoint_answers(server):
     assert status == 200
     assert help_data["known_total"] > 0
     assert {a["value"] for a in help_data["actions"]}
+
+
+def test_the_overview_endpoint_answers_with_real_numbers(server):
+    """Ruten dashbordet henter fra. Formen maa kunne sendes rett inn i
+    Lonewatch.setData(...), og merkelappen "Eksempeldata" skal vaere borte."""
+    _post(server, "/api/reset")
+    while _post(server, "/api/feed/step")[1]["card"] is not None:
+        pass
+
+    status, o = _get(server, "/api/overview")
+    assert status == 200
+    assert o["isExample"] is False
+
+    c = o["counts"]
+    assert c["allowed"] + c["red"] + c["blocked"] == c["evaluated"] == 40
+    assert c["waitingForHuman"] + c["followedUp"] == c["red"]
+    assert sum(a["actions"] for a in o["agents"]) == c["evaluated"]
+    assert len(o["chartShapes"]) == 3
+    assert sum(o["chartShapes"][0]["data"]) == c["evaluated"]
+
+    # Nullstill setter tallene tilbake.
+    _post(server, "/api/reset")
+    assert _get(server, "/api/overview")[1]["counts"]["evaluated"] == 0
+
+
+def test_the_dashboard_files_are_served(server):
+    """Alt dashbordet trenger maa ligge lokalt og svare 200."""
+    for path in (
+        "/static/vendor/react.production.min.js",
+        "/static/vendor/react-dom.production.min.js",
+        "/static/dashboard/bundle.js",
+        "/static/dashboard/bundle.css",
+        "/static/dashboard/tokens.css",
+        "/static/dashboard/fonts/plus-jakarta-sans-latin-400-normal.woff2",
+    ):
+        with urllib.request.urlopen(server + path, timeout=5) as res:
+            assert res.status == 200, path
+            assert res.read()

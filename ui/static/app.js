@@ -36,7 +36,7 @@ let feedTimer = null;
 let storyTimer = null;
 let typed = {};          // request_id -> det brukeren har skrevet
 let shownAt = {};        // request_id -> når kortet kom på skjermen
-let activeTab = "queue";
+let activeTab = "overview";   // Oversikt er forsiden
 
 /* ---------------- nettverk ---------------- */
 
@@ -112,6 +112,10 @@ async function storyNext() {
 function apply(state) {
   latest = state;
   render();
+  /* Dashbordet skal foelge med mens stroemmen gaar og etter Nullstill. Vi
+   * henter bare naar fanen faktisk er synlig - ingen grunn til aa regne ut
+   * tall ingen ser. */
+  if (activeTab === "overview") refreshOverview();
 }
 
 function render() {
@@ -372,6 +376,85 @@ function renderBefore(b) {
     : '<p class="empty">Ingen tillegg er forsøkt installert ennå.</p>';
 }
 
+/* ---------------- Oversikt: dashbordet ---------------- */
+
+/* Dashbordet tegnes ALDRI uten et `data`-objekt vi har laget selv. Uten det
+ * ville React falt tilbake paa LONEWATCH_DATA i bundle.js, som er eksempeldata
+ * med isExample: true - og eksempeltall skal aldri vises som om de var ekte. */
+let dashboardRoot = null;
+let dashboardData = null;
+
+function dashboardReady() {
+  return (
+    typeof React !== "undefined" &&
+    typeof ReactDOM !== "undefined" &&
+    globalThis.Lonewatch &&
+    globalThis.Lonewatch.Dashboard
+  );
+}
+
+function drawDashboard() {
+  if (!dashboardReady() || !dashboardData) return;
+  if (!dashboardRoot) {
+    dashboardRoot = ReactDOM.createRoot(el("dashboard-root"));
+  }
+  dashboardRoot.render(
+    React.createElement(globalThis.Lonewatch.Dashboard, {
+      data: dashboardData,
+      lang: "no",
+      /* Sidemenyen i dashbordet og fanerekka over er den samme menyen.
+       * Uten dette ville siden hatt to menyer som ikke visste om hverandre. */
+      onNavigate: (tab) => showTab(tab === "under" ? "queue" : tab),
+    })
+  );
+}
+
+async function refreshOverview() {
+  const feil = el("dashboard-error");
+  if (!dashboardReady()) {
+    feil.classList.remove("hidden");
+    feil.textContent =
+      "Dashbordet kunne ikke lastes. Filene ligger lokalt i /static/dashboard/ " +
+      "og /static/vendor/ - sjekk at de ble med.";
+    return;
+  }
+  try {
+    dashboardData = await api("/api/overview");
+    feil.classList.add("hidden");
+  } catch (e) {
+    /* Ingen tall er bedre enn feil tall: alt blir «–». */
+    dashboardData = tomtDatasett();
+    feil.classList.remove("hidden");
+    feil.textContent =
+      "Fikk ikke tall fra Lonewatch akkurat nå. Tallene under står som «–» " +
+      "til forbindelsen er tilbake.";
+  }
+  drawDashboard();
+}
+
+/* Samme form som /api/overview, men uten tall. Brukes bare hvis backend ikke
+ * svarer. Teksten hentes fra bundle.js, som er den eneste delen av
+ * eksempeldataene det er trygt aa laane: ren tekst, ingen tall. */
+function tomtDatasett() {
+  const tekst = globalThis.Lonewatch && globalThis.Lonewatch.data
+    ? globalThis.Lonewatch.data.text
+    : undefined;
+  return {
+    isExample: false,
+    defaultLang: "no",
+    counts: {
+      evaluated: null, red: null, blocked: null,
+      allowed: null, waitingForHuman: null, followedUp: null,
+    },
+    agents: [],
+    logChain: { status: null, checkedAt: null },
+    sandbox: { tested: null, blocked: null },
+    log: { status: null },
+    chartShapes: [],
+    text: tekst,
+  };
+}
+
 /* ---------------- Prøv selv ---------------- */
 
 let customHelp = null;
@@ -511,6 +594,9 @@ async function verify() {
     latest.log.last_verify = r;
     latest.log.lines = r.lines;
   }
+  /* Ringen "Loggkjede" paa Oversikt staar som "Ikke sjekket ennaa" til noen
+   * faktisk har sjekket. Naa har de det. */
+  if (activeTab === "overview") refreshOverview();
 }
 
 /* ---------------- hendelser fra brukeren ---------------- */
@@ -562,15 +648,21 @@ function showTab(tab) {
   document.querySelectorAll(".tab-btn").forEach((b) =>
     b.classList.toggle("on", b.getAttribute("data-tab") === tab)
   );
+  el("tab-overview").classList.toggle("hidden", tab !== "overview");
   el("tab-before").classList.toggle("hidden", tab !== "before");
   el("tab-queue").classList.toggle("hidden", tab !== "queue");
   el("tab-after").classList.toggle("hidden", tab !== "after");
   el("tab-custom").classList.toggle("hidden", tab !== "custom");
   const hash =
-    tab === "after" ? "#etter" : tab === "before" ? "#foer" : tab === "custom" ? "#prov" : "#";
+    tab === "after" ? "#etter"
+      : tab === "before" ? "#foer"
+      : tab === "custom" ? "#prov"
+      : tab === "queue" ? "#godkjenning"
+      : "#";
   if (history.replaceState) history.replaceState(null, "", hash);
   if (tab === "after") loadAfter();
   if (tab === "custom") loadCustomHelp();
+  if (tab === "overview") refreshOverview();
 }
 
 el("custom-form").addEventListener("submit", sendCustom);
@@ -585,7 +677,9 @@ el("btn-reset").addEventListener("click", async () => {
   waitingSig = null;
   el("verify-banner").classList.add("hidden");
   el("story-band").classList.add("hidden");
+  dashboardData = null;
   apply(await api("/api/reset", {}));
+  if (activeTab === "overview") await refreshOverview();
   startFeed();
 });
 
@@ -594,7 +688,9 @@ el("btn-reset").addEventListener("click", async () => {
 (async () => {
   apply(await api("/api/state"));
   if (location.hash === "#etter") showTab("after");
-  if (location.hash === "#foer") showTab("before");
-  if (location.hash === "#prov") showTab("custom");
+  else if (location.hash === "#foer") showTab("before");
+  else if (location.hash === "#prov") showTab("custom");
+  else if (location.hash === "#godkjenning") showTab("queue");
+  else showTab("overview");
   startFeed();
 })();
