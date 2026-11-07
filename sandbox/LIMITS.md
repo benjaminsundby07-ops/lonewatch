@@ -154,6 +154,12 @@ svetter.
   er `uuid` (`globals()["__name__"] = "uuid"`) får importforsøkene sine regnet
   som ufarlige. Hullet er lite, fordi importen fortsatt blir avvist - men det
   blir ikke `blocked`.
+- **Etter-listen skiller ikke bind fra connect.** `vault/after.py` lager
+  oppgaven "Tillegget prøvde å sende data ut" av `attempted_network`, og det
+  feltet er sant også for et tillegg som bare prøvde å *åpne en port*. Et slikt
+  tillegg blir riktig blokkert og beskrevet riktig i `notes`, men overskriften
+  på Etter-listen sier "sende ut" når det egentlig var "slippe inn".
+  `SandboxReport` har ikke noe felt å skille dem på, og `contracts.py` er låst.
 - **Agnlisten er hardkodet.** Et tillegg som leser `~/.ssh/id_ed25519` i stedet
   for `id_rsa` treffer ikke et agn. Vi skriver det ned som vanlig fillesing, og
   rapporten blir `clean`.

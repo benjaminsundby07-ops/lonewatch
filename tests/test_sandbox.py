@@ -162,6 +162,43 @@ def test_ukjent_pakkenavn_blir_avvist(navn):
         sandbox.scan(navn)
 
 
+# ------------------------------------------- F5: nettverk og dom maa vaere enige
+
+
+def test_et_tillegg_som_aapner_en_port_blir_blokkert():
+    """F5 i docs/REDTEAM.md: bind() ga attempted_network=True OG verdict=clean.
+
+    bind() betyr at tillegget vil TA IMOT trafikk, ikke sende. Det er et
+    bakdoer-moenster, og det er om noe alvorligere enn aa sende data ut. At
+    rapporten sa "clean" om det var feil vei aa loese selvmotsigelsen paa.
+    """
+    kilde = (
+        "import socket\n"
+        "def run():\n"
+        "    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
+        "    try:\n"
+        "        s.bind(('192.0.2.99', 4444))\n"
+        "        return 'BANT PORTEN'\n"
+        "    except BaseException:\n"
+        "        return 'stoppet'\n"
+    )
+    rapport, resultat = _kjor("bind_only", kilde)
+    assert rapport.attempted_network is True
+    assert rapport.verdict == "blocked"
+    assert "BANT PORTEN" not in resultat, resultat
+    assert "192.0.2.99:4444" in rapport.destinations
+    # Teksten skal si at tillegget ville LYTTE, ikke at det ville koble seg til.
+    assert "ta imot" in rapport.notes
+
+
+@pytest.mark.parametrize("navn", sorted(set(HARMLOSE) | set(MISTENKELIGE)))
+def test_nettverksforsoek_og_dom_er_alltid_enige(navn):
+    """Invarianten: en rapport kan ikke si baade "proevde nett" og "clean"."""
+    rapport = sandbox.scan(navn)
+    if rapport.attempted_network:
+        assert rapport.verdict == "blocked", navn
+
+
 # ----------------------------------------------------------- tidsgrensen
 
 def test_tidsgrensen_virker():

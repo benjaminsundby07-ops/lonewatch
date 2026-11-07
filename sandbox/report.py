@@ -14,7 +14,13 @@ from contracts import SandboxReport
 
 from . import config
 
+# Alt som er et nettverksforsøk. Alle staar ogsaa i config.BLOCKING_EVENTS, saa
+# `attempted_network` og `verdict` kan ikke bli uenige.
 NETWORK_EVENTS = ("network_connect", "network_lookup", "network_send", "network_bind")
+
+# Forsøk paa aa naa noe UT. bind() hoerer ikke hjemme her: der vil tillegget
+# ta imot, ikke sende.
+OUTBOUND_EVENTS = ("network_connect", "network_lookup", "network_send")
 
 
 def _unique(values: list[str], limit: int) -> list[str]:
@@ -48,10 +54,17 @@ def build_report(
     kinds = [str(e.get("kind", "")) for e in events]
     finished = "done" in kinds
 
-    destinations = _unique(
-        [str(e["data"].get("destination", "")) for e in events if e.get("kind") in NETWORK_EVENTS],
+    outbound = _unique(
+        [str(e["data"].get("destination", "")) for e in events if e.get("kind") in OUTBOUND_EVENTS],
         config.MAX_DESTINATIONS,
     )
+    bound = _unique(
+        [str(e["data"].get("destination", "")) for e in events if e.get("kind") == "network_bind"],
+        config.MAX_DESTINATIONS,
+    )
+    # SandboxReport har bare ett felt for adresser (contracts er laast), saa
+    # begge slags staar der. Teksten skiller dem.
+    destinations = _unique(outbound + bound, config.MAX_DESTINATIONS)
     attempted_network = any(k in NETWORK_EVENTS for k in kinds)
 
     secrets = _unique(
@@ -75,11 +88,18 @@ def build_report(
     )
 
     notes: list[str] = []
-    if attempted_network:
+    if outbound:
         notes.append(
-            f"Tillegget prøvde å koble seg til {_antall(len(destinations), 'adresse', 'adresser')}: "
-            + ", ".join(destinations)
+            f"Tillegget prøvde å koble seg til {_antall(len(outbound), 'adresse', 'adresser')}: "
+            + ", ".join(outbound)
             + ". Sandkassen svarte nei, så ingenting ble sendt."
+        )
+    if bound:
+        notes.append(
+            f"Tillegget prøvde å åpne {_antall(len(bound), 'port', 'porter')} for å ta imot "
+            "innkommende trafikk: "
+            + ", ".join(bound)
+            + ". Et tillegg som vil lytte, vil slippe noe INN. Sandkassen svarte nei."
         )
     if secrets:
         notes.append(

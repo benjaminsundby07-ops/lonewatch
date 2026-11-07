@@ -43,10 +43,15 @@ HANGING_PACKAGE = "endless-indexer"
 PACKAGE_NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$")
 
 # Hendelser fra delprosessen som alene gjør at et tillegg ikke slippes inn.
+# network_bind staar her fordi bind() betyr at tillegget vil TA IMOT trafikk.
+# Det er et bakdør-mønster, og om noe alvorligere enn å sende data ut. Før
+# stod det bare i NETWORK_EVENTS, så rapporten kunne si både "prøvde nett" og
+# "clean" om samme tillegg (F5 i docs/REDTEAM.md).
 BLOCKING_EVENTS = (
     "network_connect",
     "network_lookup",
     "network_send",
+    "network_bind",
     "secret_read",
     "denied_file",
     "denied_process",
