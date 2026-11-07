@@ -301,9 +301,36 @@ def test_spraakvalget_er_skjult_men_tekstene_er_beholdt():
 
 
 def test_dashbordet_tegnes_aldri_uten_egne_data():
-    """Uten `data`-prop faller React tilbake paa eksempeldataene i bundle.js."""
+    """Dashbordet skal aldri vise eksempeltallene som ligger i bundle.js.
+
+    Appen setter naa sammen Oversikt av delene `bundle.js` eksporterer, i
+    stedet for aa kalle `Dashboard`. Grunnen er at `Dashboard` tegner sin egen
+    `.lw-backdrop`, `.lw-shell` og sidemeny, og appen har alt en.
+
+    Det flytter ansvaret, men ikke kravet: hver eneste verdi skal komme fra
+    `dashboardData`, som er svaret fra `/api/overview`. `Dashboard` og de
+    enkelte delene har samme fallback - uten data faller de tilbake paa
+    `LONEWATCH_DATA`, og de tallene er oppdiktede.
+    """
     app_js = (UI / "static/app.js").read_text(encoding="utf-8")
-    assert "Lonewatch.Dashboard, {" in app_js
-    kall = app_js.split("Lonewatch.Dashboard, {", 1)[1][:200]
-    assert "data: dashboardData" in kall
+
+    # Ingenting tegnes foer vi har vaare egne tall.
     assert "if (!dashboardReady() || !dashboardData) return;" in app_js
+
+    # `Dashboard` brukes ikke lenger - den ville tatt med seg en andre sidemeny.
+    assert "Lonewatch.Dashboard" not in app_js
+
+    # Tallene leses fra vaart eget datasett, ikke fra konstanten i bundle.js.
+    innhold = app_js.split("function dashInnhold(", 1)
+    assert len(innhold) == 2, "Oversikt settes sammen i dashInnhold()"
+    kropp = innhold[1].split("\nfunction ", 1)[0]
+    assert "dashboardData" in kropp
+    assert "Lonewatch.data" not in kropp
+
+    # Den eneste bruken av konstanten er tekstene naar backend ikke svarer -
+    # aldri et tall.
+    tomt = app_js.split("function tomtDatasett()", 1)[1].split("\n}", 1)[0]
+    assert "Lonewatch.data" in tomt
+    assert "text: tekst" in tomt
+    for felt in ("evaluated", "red", "blocked", "allowed", "waitingForHuman", "followedUp"):
+        assert f"{felt}: null" in tomt, felt

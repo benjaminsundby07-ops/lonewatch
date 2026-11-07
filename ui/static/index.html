@@ -4,179 +4,248 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lonewatch</title>
-<link rel="stylesheet" href="/static/style.css">
-<!-- Dashbordet. Alt ligger lokalt: ingenting hentes fra nettet. -->
+<!-- Designspråket. Alt ligger lokalt: ingenting hentes fra nettet. -->
 <link rel="stylesheet" href="/static/dashboard/tokens.css">
 <link rel="stylesheet" href="/static/dashboard/bundle.css">
+<link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
-<header class="top">
-  <div class="brand">
-    <span class="mark" aria-hidden="true"></span>
-    <h1>Lonewatch</h1>
-    <span class="sub">Nordlys Forsikring <span class="sep">&middot;</span> simulering</span>
-  </div>
-  <div class="actions">
-    <button id="btn-story" class="primary">Spill av hendelsen</button>
-    <button id="btn-verify">Sjekk loggen</button>
-    <button id="btn-reset" class="ghost">Nullstill</button>
-  </div>
-</header>
+<!-- Hele appen ligger inne i .lw, som er der designsystemets variabler bor. -->
+<div class="lw">
+<div class="lw-backdrop app-backdrop">
+<div class="lw-shell app-shell">
 
-<div id="verify-banner" class="banner hidden" role="status"></div>
-<div id="log-error" class="banner bad hidden" role="status"></div>
-<div id="log-note" class="banner hidden" role="status"></div>
-
-<section id="story-band" class="story hidden" aria-live="polite">
-  <div class="story-head">
-    <span id="story-clock" class="clock">0 s</span>
-    <strong id="story-title">Hendelsen</strong>
-    <span id="story-step-count" class="muted"></span>
-    <button id="btn-story-next" class="mini">Neste steg</button>
-  </div>
-  <p id="story-detail" class="story-detail"></p>
-  <div class="bar"><div id="story-fill" class="fill"></div></div>
-</section>
-
-<nav class="tabs" role="tablist">
-  <button class="tab-btn on" data-tab="overview" role="tab">Oversikt</button>
-  <button class="tab-btn" data-tab="before" role="tab">Før</button>
-  <button class="tab-btn" data-tab="queue" role="tab">Godkjenning</button>
-  <button class="tab-btn" data-tab="after" role="tab">Etter</button>
-  <button class="tab-btn" data-tab="custom" role="tab">Prøv selv</button>
-</nav>
-
-<main>
-
-  <section id="tab-overview" class="tab">
-    <div id="dashboard-error" class="banner bad hidden" role="status"></div>
-    <div id="dashboard-root"></div>
-  </section>
-
-  <section id="tab-before" class="tab hidden">
-    <h2 class="h-quiet">Før</h2>
-    <p class="lead">
-      Tillegg blir kjørt i en lukket boks før mellomstasjonen bestemmer seg.
-      Vi skriver ned hva tillegget faktisk gjorde. &laquo;Rent&raquo; betyr
-      <em>vi så ingenting</em>, ikke at tillegget er trygt &mdash; se
-      <code>sandbox/LIMITS.md</code>.
-    </p>
-    <div id="before-list" class="after-list"></div>
-  </section>
-
-  <section id="tab-queue" class="tab hidden">
-    <div class="grid">
-
-      <div class="col-main">
-        <h2 class="h-red">Trenger et menneske <span id="waiting-count" class="count"></span></h2>
-        <div id="waiting"></div>
-
-        <div id="blocked-wrap" class="hidden">
-          <h2 class="h-quiet">Stoppet av Lonewatch</h2>
-          <div id="blocked"></div>
-        </div>
-
-        <div id="answered-wrap" class="hidden">
-          <h2 class="h-quiet">Besvart</h2>
-          <div id="answered"></div>
-        </div>
-      </div>
-
-      <aside class="col-side">
-        <h2 class="h-quiet">Går gjennom <span id="calm-count" class="count quiet"></span></h2>
-        <div id="calm" class="calm-list"></div>
-
-        <h2 class="h-quiet">Hendelser</h2>
-        <div id="notices" class="notice-list"></div>
-      </aside>
-
+  <!-- Sidemenyen er eneste navigasjon. Ingen knapp her fører ingensteds. -->
+  <aside class="lw-sidebar app-sidebar">
+    <div class="lw-logo" aria-label="Lonewatch">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+        <path d="M8.5 4.5 5 19.5h11.5" fill="none" stroke="currentColor"
+              stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"></path>
+        <circle cx="19.5" cy="8.5" r="2.6" fill="currentColor"></circle>
+      </svg>
     </div>
-  </section>
+    <nav id="app-nav" class="lw-nav app-nav" aria-label="Hovedmeny"></nav>
+  </aside>
 
-  <section id="tab-custom" class="tab hidden">
-    <h2 class="h-quiet">Prøv selv</h2>
-    <p class="lead">
-      Skriv din egen forespørsel. Den går gjennom <em>nøyaktig samme vei</em> som
-      de 40 i demoen: sandkassen først hvis det er et tillegg, så de samme
-      reglene i <code>gateway.evaluate()</code>, så loggen. Ingenting her er
-      skrevet på forhånd.
-    </p>
+  <main class="lw-main app-main">
 
-    <form id="custom-form" autocomplete="off">
-      <div class="field">
-        <label for="c-action">Handling</label>
-        <select id="c-action" name="action_type"></select>
+    <!-- Topprad: hva du ser på, og de tre handlingene som alltid er der -->
+    <header class="app-top">
+      <div class="app-top-id">
+        <span id="app-dot" class="app-dot" aria-hidden="true"></span>
+        <h1 id="app-view-title">Oversikt</h1>
+        <span class="app-sub">Nordlys Forsikring <span class="app-sep">&middot;</span> simulering</span>
       </div>
-
-      <div class="field" id="c-amount-wrap">
-        <label for="c-amount">Beløp</label>
-        <input id="c-amount" name="amount" maxlength="64" placeholder="10 000 000">
-        <span class="field-note">Samme tolkning som beløpsporten: mellomrom og
-          punktum er tusenskille, komma er desimalskille.</span>
+      <div class="app-actions">
+        <button id="btn-story" class="lw-btn lw-btn-primary" type="button">Spill av hendelsen</button>
+        <button id="btn-verify" class="lw-btn lw-btn-quiet" type="button">Sjekk loggen</button>
+        <button id="btn-reset" class="lw-btn lw-btn-ghost" type="button">Nullstill</button>
       </div>
+    </header>
 
-      <div class="field" id="c-recipient-wrap">
-        <label for="c-recipient">Mottaker</label>
-        <input id="c-recipient" name="recipient" maxlength="120"
-               placeholder="NO93 8601 1117 947 eller noen@eksempel.no">
-        <span class="field-note" id="c-known-note"></span>
+    <div id="verify-banner" class="app-banner hidden" role="status"></div>
+    <div id="log-error" class="app-banner is-bad hidden" role="status"></div>
+    <div id="log-note" class="app-banner hidden" role="status"></div>
+
+    <section id="story-band" class="app-story hidden" aria-live="polite">
+      <div class="app-story-head">
+        <span id="story-clock" class="app-clock">0 s</span>
+        <strong id="story-title">Hendelsen</strong>
+        <span id="story-step-count" class="app-muted"></span>
+        <button id="btn-story-next" class="lw-btn lw-btn-quiet app-mini" type="button">Neste steg</button>
       </div>
+      <p id="story-detail" class="app-story-detail"></p>
+      <div class="app-bar"><div id="story-fill" class="app-fill"></div></div>
+    </section>
 
-      <div class="field" id="c-package-wrap">
-        <label for="c-package">Pakkenavn</label>
-        <input id="c-package" name="package_name" maxlength="64"
-               placeholder="nordlys-mail-connector-patch">
-        <span class="field-note">Sandkassen kjører bare tillegg den har en fil
-          for fra før. Et navn den ikke har gir «ikke testet» — ingenting
-          lastes ned, og ingenting kjøres.</span>
+    <!-- ---------- Oversikt ---------- -->
+    <section id="tab-overview" class="app-view">
+      <div id="dashboard-error" class="app-banner is-bad hidden" role="status"></div>
+      <div id="dashboard-root"></div>
+    </section>
+
+    <!-- ---------- Godkjenning ---------- -->
+    <section id="tab-queue" class="app-view hidden">
+      <div class="app-cols app-cols-split">
+        <aside class="app-col-list">
+          <section class="lw-panel app-panel-list">
+            <div class="lw-panel-head">
+              <div>
+                <h2 class="lw-panel-title">Køen</h2>
+                <p class="lw-panel-sub">Rødt øverst. Det er det som venter på deg.</p>
+              </div>
+              <span id="waiting-count" class="app-count"></span>
+            </div>
+            <div id="queue-list" class="app-list"></div>
+          </section>
+
+          <section class="lw-panel">
+            <div class="lw-panel-head">
+              <h2 class="lw-panel-title">Går gjennom</h2>
+              <span id="calm-count" class="app-count is-quiet"></span>
+            </div>
+            <div id="calm" class="app-quiet-list"></div>
+          </section>
+        </aside>
+
+        <div id="queue-detail" class="app-detail"></div>
       </div>
+    </section>
 
-      <div class="field">
-        <label for="c-summary">Agenten sier</label>
-        <input id="c-summary" name="summary" maxlength="200"
-               placeholder="Betaler samleoppgjør, haster før forfall">
-        <span class="field-note warn">Dette feltet vises i kortet, men brukes
-          <strong>aldri</strong> i vurderingen. Skriv gjerne noe overbevisende —
-          avgjørelsen blir den samme.</span>
+    <!-- ---------- Før ---------- -->
+    <section id="tab-before" class="app-view hidden">
+      <div class="app-cols app-cols-split">
+        <aside class="app-col-list">
+          <section class="lw-panel app-panel-list">
+            <div class="lw-panel-head">
+              <div>
+                <h2 class="lw-panel-title">Tillegg</h2>
+                <p class="lw-panel-sub">Kjørt i en lukket boks før mellomstasjonen bestemte seg.</p>
+              </div>
+              <span id="before-count" class="app-count is-quiet"></span>
+            </div>
+            <div id="before-list" class="app-list"></div>
+          </section>
+        </aside>
+
+        <div id="before-detail" class="app-detail"></div>
       </div>
+    </section>
 
-      <div class="field check">
-        <label><input type="checkbox" id="c-personal" name="contains_personal_data">
-          Inneholder personopplysninger</label>
-        <span class="field-note">Denne kan bare gjøre forespørselen rødere,
-          aldri grønnere.</span>
+    <!-- ---------- Etter ---------- -->
+    <section id="tab-after" class="app-view hidden">
+      <section id="chain-strip" class="lw-panel app-strip" aria-live="polite"></section>
+
+      <section class="lw-panel">
+        <div class="lw-panel-head">
+          <div>
+            <h2 class="lw-panel-title">Hendelser</h2>
+            <p class="lw-panel-sub">Hver linje i den låste loggen, nyeste først.</p>
+          </div>
+          <div id="log-filter" class="app-filter" role="group" aria-label="Filter"></div>
+        </div>
+        <div id="log-table"></div>
+      </section>
+
+      <section class="lw-panel">
+        <div class="lw-panel-head">
+          <div>
+            <h2 class="lw-panel-title">Oppfølging</h2>
+            <p id="after-note" class="lw-panel-sub">
+              Bygget rett fra logglinjene. Det som haster står først.
+            </p>
+          </div>
+        </div>
+        <div id="after-list" class="app-after"></div>
+      </section>
+    </section>
+
+    <!-- ---------- Prøv selv ---------- -->
+    <section id="tab-custom" class="app-view hidden">
+      <div class="app-cols app-cols-custom">
+        <section class="lw-panel">
+          <div class="lw-panel-head">
+            <div>
+              <h2 class="lw-panel-title">Skriv din egen forespørsel</h2>
+              <p class="lw-panel-sub">
+                Den går gjennom <em>nøyaktig samme vei</em> som de 40 i demoen:
+                sandkassen først hvis det er et tillegg, så de samme reglene,
+                så loggen. Ingenting her er skrevet på forhånd.
+              </p>
+            </div>
+          </div>
+
+          <form id="custom-form" autocomplete="off">
+            <div class="app-field">
+              <label for="c-action">Handling</label>
+              <select id="c-action" name="action_type"></select>
+            </div>
+
+            <div class="app-field" id="c-amount-wrap">
+              <label for="c-amount">Beløp</label>
+              <input id="c-amount" name="amount" maxlength="64" placeholder="10 000 000">
+              <span class="app-note">Samme tolkning som beløpsporten: mellomrom og
+                punktum er tusenskille, komma er desimalskille.</span>
+            </div>
+
+            <div class="app-field" id="c-recipient-wrap">
+              <label for="c-recipient">Mottaker</label>
+              <input id="c-recipient" name="recipient" maxlength="120"
+                     placeholder="NO93 8601 1117 947 eller noen@eksempel.no">
+              <span class="app-note" id="c-known-note"></span>
+            </div>
+
+            <div class="app-field" id="c-package-wrap">
+              <label for="c-package">Pakkenavn</label>
+              <input id="c-package" name="package_name" maxlength="64"
+                     placeholder="nordlys-mail-connector-patch">
+              <span class="app-note">Sandkassen kjører bare tillegg den har en fil
+                for fra før. Et navn den ikke har gir «ikke testet» — ingenting
+                lastes ned, og ingenting kjøres.</span>
+            </div>
+
+            <div class="app-field">
+              <label for="c-summary">Agenten sier</label>
+              <input id="c-summary" name="summary" maxlength="200"
+                     placeholder="Betaler samleoppgjør, haster før forfall">
+              <span class="app-note is-warn">Dette feltet vises i kortet, men brukes
+                <strong>aldri</strong> i vurderingen. Skriv gjerne noe overbevisende —
+                avgjørelsen blir den samme.</span>
+            </div>
+
+            <div class="app-field app-check">
+              <label><input type="checkbox" id="c-personal" name="contains_personal_data">
+                Inneholder personopplysninger</label>
+              <span class="app-note">Denne kan bare gjøre forespørselen rødere,
+                aldri grønnere.</span>
+            </div>
+
+            <div class="app-field app-submit">
+              <button type="submit" class="lw-btn lw-btn-primary" id="c-send">Send gjennom Lonewatch</button>
+              <span id="c-error" class="app-hint is-bad hidden"></span>
+            </div>
+          </form>
+
+          <p class="app-note app-foot-note">
+            To felt settes av Lonewatch, ikke av deg: om mottakeren er <em>kjent</em>
+            regnes ut mot demoens liste, og om handlingen <em>kan angres</em> følger
+            av handlingstypen. Ellers kunne man krysset seg forbi reglene.
+          </p>
+        </section>
+
+        <section class="lw-panel">
+          <div class="lw-panel-head">
+            <h2 class="lw-panel-title">Dine forespørsler</h2>
+            <span id="custom-count" class="app-count is-quiet"></span>
+          </div>
+          <div id="custom-list" class="app-rows"></div>
+        </section>
       </div>
+    </section>
 
-      <div class="field">
-        <button type="submit" class="primary" id="c-send">Send gjennom Lonewatch</button>
-        <span id="c-error" class="hint bad hidden"></span>
-      </div>
-    </form>
+    <footer class="app-footer">
+      Simulering. Nordlys Forsikring er oppdiktet. Ingen ekte penger, ingen ekte
+      personopplysninger, ingen ekte skadevare.
+      <button class="app-limits" type="button" data-limits="loggen">Begrensninger</button>
+    </footer>
 
-    <p class="lead quiet-note">
-      To felt settes av Lonewatch, ikke av deg: om mottakeren er <em>kjent</em>
-      regnes ut mot demoens liste, og om handlingen <em>kan angres</em> følger
-      av handlingstypen. Ellers kunne man krysset seg forbi reglene.
-    </p>
+  </main>
+</div>
+</div>
+</div>
 
-    <h2 class="h-quiet">Dine forespørsler <span id="custom-count" class="count quiet"></span></h2>
-    <div id="custom-list" class="calm-list"></div>
-  </section>
-
-  <section id="tab-after" class="tab hidden">
-    <h2 class="h-quiet">Etter</h2>
-    <p id="after-note" class="lead">Hva som må gjøres når noe har skjedd.</p>
-    <div id="after-list" class="after-list"></div>
-  </section>
-
-</main>
-
-<footer>
-  Simulering. Nordlys Forsikring er oppdiktet. Ingen ekte penger, ingen ekte
-  personopplysninger, ingen ekte skadevare. Loggen ligger i minnet i denne demoen
-  og kan fortsatt slettes &mdash; se <code>vault/LIMITS.md</code>.
-</footer>
+<!-- Begrensninger: rå filstier hører ikke hjemme i brødteksten. -->
+<div id="limits-dialog" class="app-dialog hidden" role="dialog" aria-modal="true"
+     aria-labelledby="limits-title">
+  <div class="app-dialog-card lw-panel">
+    <div class="lw-panel-head">
+      <h2 class="lw-panel-title" id="limits-title">Begrensninger</h2>
+      <button id="limits-close" class="lw-btn lw-btn-quiet app-mini" type="button">Lukk</button>
+    </div>
+    <div id="limits-body" class="app-dialog-body"></div>
+  </div>
+</div>
 
 <script src="/static/vendor/react.production.min.js"></script>
 <script src="/static/vendor/react-dom.production.min.js"></script>

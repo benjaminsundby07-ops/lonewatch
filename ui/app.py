@@ -103,6 +103,22 @@ def api_custom_help() -> dict:
     return state.custom_help()
 
 
+@app.get("/api/log")
+def api_log() -> dict:
+    """Logglinjene som tabell, pluss fellene i dokumentene.
+
+    Alt kommer fra loggen og fra agents/traps.py. Ingenting er regnet ut for
+    aa se pent ut.
+    """
+    return {"log": state.log_rows(), "traps": state.traps_overview()}
+
+
+@app.get("/api/trail/{request_id}")
+def api_trail(request_id: str) -> dict:
+    """«Dette ledet hit»: hva samme agent gjorde rett foer."""
+    return {"trail": state.agent_trail(request_id)}
+
+
 @app.get("/api/overview")
 def api_overview() -> dict:
     """Tallene til dashbordet, regnet fra tilstanden og loggen.

@@ -229,13 +229,34 @@ def test_alle_regelnavn_har_norsk_tekst_i_ui():
 
 
 def test_foer_listen_i_ui_viser_ikke_testet_som_egen_tilstand():
+    """«Ikke testet» maa vaere en tredje tilstand, ikke en variant av «rent».
+
+    Testen spoer etter innholdet, ikke etter en bestemt formulering: Foer-
+    visningen er skrevet om, og en test som laaser teksten ville stoppet enhver
+    omskriving uten aa si noe om det som faktisk betyr noe.
+    """
     import pathlib
+    import re
 
     js = (pathlib.Path(__file__).resolve().parents[1] / "ui" / "static" / "app.js").read_text(
         encoding="utf-8"
     )
-    assert "not_tested: { tittel: \"ikke testet\"" in js
-    assert '"ingenting mistenkelig"' in js
+
+    # Alle tre verdiktene har sin egen tilstand i UI.
+    tilstander = re.search(r"const BEFORE_STATE = \{(.+?)\n\};", js, re.S)
+    assert tilstander, "Foer-visningen maa ha en tabell over tilstandene"
+    blokk = tilstander.group(1)
+    for verdict in ("blocked", "clean", "not_tested"):
+        assert f"{verdict}:" in blokk, verdict
+
+    # Og de tre skal ha hver sin etikett - ikke samme ord to ganger.
+    etiketter = re.findall(r'tekst: "([^"]+)"', blokk)
+    assert len(etiketter) == 3 and len(set(etiketter)) == 3, etiketter
+
+    # «Rent» skal si hva det IKKE betyr, paa stedet der det staar.
+    assert "ikke det samme som at tillegget er trygt" in js
+    # «Ikke testet» skal ikke kunne leses som en klarering.
+    assert "Vi vet ikke hva tillegget ville gjort" in js
 
 
 def test_loggsjekken_kjoeres_automatisk_i_ui():

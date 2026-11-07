@@ -35,6 +35,35 @@ const RULE_TEXT = {
   transfer_over_hard_limit: "over den harde grensen",
 };
 
+/* Visningsnavn avledet stabilt av IDen, slik skissene bruker LW-nummer.
+ * Det er IKKE en ny identifikator: rå-IDen staar lite ved siden av overalt.
+ * Prefikset skiller kildene saa to forespoersler aldri faar samme navn:
+ *   req_0037 -> LW-1037   story_0004 -> LW-2004   custom_0001 -> LW-9001 */
+function lwName(id) {
+  const m = String(id || "").match(/^([a-z]+)_(\d+)$/);
+  if (!m) return String(id || "");
+  const serie = { req: 1, story: 2, custom: 9 }[m[1]];
+  if (!serie) return String(id);
+  return "LW-" + serie + String(m[2]).padStart(3, "0").slice(-3);
+}
+
+/* Alvorlighet finnes bare som Decision.risk (low/medium/high). Skissens
+ * "92/100" og alvorlighet PER REGEL finnes ikke, og vi finner dem ikke paa. */
+const RISK_TEXT = { high: "Høy", medium: "Middels", low: "Lav" };
+
+const UTFALL_TEXT = {
+  allow: "tillatt", red: "til menneske", block: "stoppet",
+  trap: "felle", blocked: "blokkert", clean: "rent", not_tested: "ikke testet",
+};
+
+const VIEWS = [
+  { tab: "overview", navn: "Oversikt", ikon: "home" },
+  { tab: "before", navn: "Før", ikon: "shield" },
+  { tab: "queue", navn: "Godkjenning", ikon: "alert" },
+  { tab: "after", navn: "Etter", ikon: "check" },
+  { tab: "custom", navn: "Prøv selv", ikon: "bars" },
+];
+
 let latest = null;
 let waitingSig = null;   // hindrer at køen tegnes om mens noen skriver i den
 let feedTimer = null;
@@ -132,15 +161,12 @@ function apply(state) {
 function render() {
   if (!latest) return;
   renderStory(latest.story);
-  renderWaiting(latest.waiting);
-  renderBlocked(latest.blocked);
-  renderAnswered(latest.answered);
+  renderQueue();
   renderCalm(latest.calm, latest.calm_total);
-  renderNotices(latest.notices);
   renderBefore(latest.before);
   renderCustom(latest.custom || []);
 
-  document.body.classList.toggle("alert", latest.waiting.length > 0);
+  syncNavCounts();
 
   const err = latest.log && latest.log.error;
   const box = el("log-error");
@@ -175,225 +201,465 @@ function renderStory(s) {
   el("btn-story-next").disabled = s.done;
 }
 
+function buildNav() {
+  el("app-nav").innerHTML = VIEWS.map((v) =>
+    '<button type="button" class="lw-nav-item" data-tab="' + v.tab + '" ' +
+    'title="' + esc(v.navn) + '" aria-label="' + esc(v.navn) + '">' +
+    '<span class="app-nav-icon" data-icon="' + v.ikon + '"></span>' +
+    '<span class="app-nav-text">' + esc(v.navn) + '</span>' +
+    '<span class="app-nav-count hidden" data-count="' + v.tab + '"></span>' +
+    "</button>"
+  ).join("");
+  /* Ikonene tegnes med designsystemets egen Icon-komponent, saa strek,
+     tykkelse og stoerrelse er de samme som i dashbordet. */
+  if (globalThis.Lonewatch && globalThis.Lonewatch.Icon && typeof ReactDOM !== "undefined") {
+    document.querySelectorAll("#app-nav [data-icon]").forEach((slot) => {
+      ReactDOM.createRoot(slot).render(
+        React.createElement(globalThis.Lonewatch.Icon, {
+          name: slot.getAttribute("data-icon"), size: 18,
+        })
+      );
+    });
+  }
+}
+
+/* Teller paa menyvalget, saa man ser at noe venter uten aa gaa inn. */
+function syncNavCounts() {
+  if (!latest) return;
+  const tall = {
+    queue: latest.waiting.length,
+    before: (latest.before && latest.before.scanned.length) || 0,
+    custom: (latest.custom && latest.custom.length) || 0,
+  };
+  document.querySelectorAll("#app-nav [data-count]").forEach((e) => {
+    const n = tall[e.getAttribute("data-count")];
+    e.classList.toggle("hidden", !n);
+    e.classList.toggle("is-red", e.getAttribute("data-count") === "queue" && n > 0);
+    if (n) e.textContent = n;
+  });
+  el("app-dot").classList.toggle("is-alert", latest.waiting.length > 0);
+}
+
 function chips(decision) {
   const parts = (decision.reasons || []).map(
-    (r) => '<span class="chip">' + esc(RULE_TEXT[r] || r) + "</span>"
+    (r) => '<span class="app-chip is-red">' + esc(RULE_TEXT[r] || r) + "</span>"
   );
-  parts.push('<span class="chip quiet">risiko: ' + esc(decision.risk) + "</span>");
-  return '<div class="chips">' + parts.join("") + "</div>";
+  parts.push('<span class="app-chip">risiko: ' + esc(RISK_TEXT[decision.risk] || decision.risk) + "</span>");
+  return '<div class="app-chips">' + parts.join("") + "</div>";
 }
 
 function who(card) {
   const r = card.request;
   const bits = [
-    '<span class="agent">' + esc(card.agent_label) + "</span>",
+    '<span class="app-agent">' + esc(card.agent_label) + "</span>",
     esc(card.action_label),
   ];
   if (r.recipient) bits.push("til " + esc(r.recipient));
   if (card.source === "story") bits.push("hendelsen");
-  if (card.source === "custom") bits.push('<span class="mine">skrevet av deg</span>');
-  return '<div class="who">' + bits.join(' <span class="sep">&middot;</span> ') + "</div>";
+  if (card.source === "custom") bits.push('<span class="app-mine">skrevet av deg</span>');
+  return '<div class="app-who">' + bits.join(' <span class="app-sep">&middot;</span> ') + "</div>";
 }
 
-function renderWaiting(list) {
+/* ---------------- Godkjenning: koe til venstre, detalj til hoeyre ----------------
+ *
+ * Kjernen staar uroert: et menneske maa skrive BELOEPET foer Godkjenn blir
+ * trykkbar. Det er hele poenget med et roedt varsel, og det kan ikke klikkes
+ * bort. Resten av panelet er bare det som ligger i loggen fra foer, satt opp
+ * slik at man kan lese seg til en avgjoerelse uten aa aapne et terminalvindu.
+ */
+
+let valgt = null;          // request_id paa det som staar aapent til hoeyre
+let trailCache = {};       // request_id -> hva agenten gjorde foer
+let logData = null;        // /api/log: logglinjer + feller
+let logFilter = "alle";
+
+function alleKort() {
+  if (!latest) return [];
+  /* Roedt foerst: det er det eneste som venter paa et menneske. Deretter det
+   * vi stoppet selv, og til slutt det som alt er besvart. */
+  return [].concat(latest.waiting || [], latest.blocked || [], latest.answered || []);
+}
+
+function koeStatus(card) {
+  if (card.status === "waiting") return { klasse: "is-red", merke: "venter paa deg", tekst: "Venter" };
+  if (card.decision.verdict === "block") return { klasse: "is-stopped", merke: "stoppet", tekst: "Stoppet" };
+  if (card.status === "approved") return { klasse: "is-yes", merke: "godkjent", tekst: "Godkjent" };
+  if (card.status === "rejected") return { klasse: "is-no", merke: "avvist", tekst: "Avvist" };
+  return { klasse: "", merke: "", tekst: "" };
+}
+
+function renderQueue() {
+  const liste = alleKort();
+  const venter = (latest.waiting || []).length;
+
   const badge = el("waiting-count");
-  badge.textContent = list.length;
-  badge.classList.toggle("zero", list.length === 0);
+  badge.textContent = venter;
+  badge.classList.toggle("is-quiet", venter === 0);
 
-  /* Tegn bare om når køen faktisk er endret. Den rolige strømmen oppdaterer
-     siden hvert par sekund, og uten dette ville beløpsfeltet mistet markøren
-     midt i at noen skriver. */
-  const sig = JSON.stringify(list.map((c) => [c.request.id, c.status, c.error]));
-  if (sig === waitingSig) return;
-  waitingSig = sig;
+  /* Valget skal ikke hoppe naar stroemmen tegner om. Det foerste roede er
+   * standardvalget, fordi det er det som faktisk venter. */
+  if (!liste.some((c) => c.request.id === valgt)) {
+    valgt = liste.length ? liste[0].request.id : null;
+  }
 
-  if (!list.length) {
-    el("waiting").innerHTML = '<p class="empty">Ingenting venter. Agentene jobber.</p>';
+  el("queue-list").innerHTML = liste.length
+    ? liste.map((card) => {
+        const st = koeStatus(card);
+        const r = card.request;
+        return (
+          '<button type="button" class="app-item ' + st.klasse +
+          (r.id === valgt ? " is-open" : "") + '" data-pick="' + esc(r.id) + '">' +
+          '<span class="app-item-top">' +
+          '<span class="app-item-name">' + esc(lwName(r.id)) + "</span>" +
+          '<span class="app-item-state">' + esc(st.tekst) + "</span></span>" +
+          '<span class="app-item-mid">' + esc(card.agent_label) +
+          ' <span class="app-sep">&middot;</span> ' + esc(card.action_label) + "</span>" +
+          '<span class="app-item-sub">' +
+          (r.amount != null ? esc(kroner(r.amount)) : esc(r.recipient || r.package_name || "")) +
+          "</span></button>"
+        );
+      }).join("")
+    : '<p class="app-empty">Ingenting i køen ennå. Agentene jobber.</p>';
+
+  renderQueueDetail();
+}
+
+/* «Regler som slo inn». Navnene er VAARE egne regelnavn fra gateway, med den
+ * norske forklaringen ved siden av - ikke oppdiktede R-numre. */
+function reglerBlokk(d) {
+  if (!d.reasons || !d.reasons.length) {
+    return '<p class="app-empty">Ingen regel slo inn. Forespørselen gikk gjennom som den var.</p>';
+  }
+  return (
+    '<ul class="app-rules">' +
+    d.reasons.map((r) =>
+      '<li><code class="app-rule-id">' + esc(r) + "</code>" +
+      '<span class="app-rule-text">' + esc(RULE_TEXT[r] || "Ingen forklaring lagt inn for denne regelen.") +
+      "</span></li>"
+    ).join("") +
+    "</ul>"
+  );
+}
+
+/* «Forespurt handling» - den ekte ActionRequest, ordnet slik at feltene
+ * reglene faktisk leste staar foerst. Ingenting er lagt til. */
+function handlingBlokk(r) {
+  const rekkefolge = [
+    "id", "agent_id", "action_type", "amount", "recipient", "recipient_known",
+    "contains_personal_data", "reversible", "package_name", "source_doc_id",
+    "summary", "ts",
+  ];
+  const ut = {};
+  rekkefolge.forEach((k) => { if (r[k] !== undefined) ut[k] = r[k]; });
+  Object.keys(r).forEach((k) => { if (ut[k] === undefined) ut[k] = r[k]; });
+  return '<pre class="app-json">' + esc(JSON.stringify(ut, null, 2)) + "</pre>";
+}
+
+/* «Dette ledet hit» - hva den samme agenten gjorde rett foer, fra loggen. */
+function sporBlokk(id) {
+  const spor = trailCache[id];
+  if (!spor) return '<p class="app-empty">Henter …</p>';
+  if (!spor.length) return '<p class="app-empty">Ingenting i loggen før denne.</p>';
+  return (
+    '<ol class="app-trail">' +
+    spor.map((t) =>
+      '<li' + (t.er_denne ? ' class="is-here"' : "") + ">" +
+      '<span class="app-trail-time">' + esc(klokke(t.ts)) + "</span>" +
+      '<span class="app-trail-what">' + esc(t.kall) +
+      (t.maal ? ' <span class="app-sep">&middot;</span> ' + esc(t.maal) : "") + "</span>" +
+      '<span class="app-trail-out">' + esc(UTFALL_TEXT[t.utfall] || t.utfall) + "</span>" +
+      (t.felle ? '<span class="app-chip is-red">felle: ' + esc(t.felle) + "</span>" : "") +
+      "</li>"
+    ).join("") +
+    "</ol>"
+  );
+}
+
+/* «Feller i dokumenter» - de ekte fellene fra agents/traps, og naar de sist
+ * gikk av i denne oekten. Ingen oppdiktede kundetall. */
+function fellerBlokk() {
+  const feller = (logData && logData.traps) || [];
+  if (!feller.length) return "";
+  return (
+    '<section class="app-block">' +
+    '<h3 class="app-block-h">Feller i dokumenter</h3>' +
+    '<p class="app-block-sub">Plantet i demoens dokumenter. Her ser du om de har gått av.</p>' +
+    '<table class="lw-table app-table"><thead><tr>' +
+    "<th>Dokument</th><th>Type</th><th>Hva den ber om</th><th>Sist av</th>" +
+    "</tr></thead><tbody>" +
+    feller.map((f) =>
+      "<tr" + (f.sist ? ' class="is-fired"' : "") + ">" +
+      "<td>" + esc(f.doc_id) + "</td>" +
+      "<td>" + esc(f.type) + "</td>" +
+      "<td>" + esc(f.intent) + "</td>" +
+      "<td>" + (f.sist
+        ? esc(klokke(f.sist.ts)) + " <span class=\"app-muted\">" + esc(f.sist.agent) + "</span>"
+        : '<span class="app-muted">ikke gått av</span>') + "</td></tr>"
+    ).join("") +
+    "</tbody></table></section>"
+  );
+}
+
+function renderQueueDetail() {
+  const box = el("queue-detail");
+  const card = alleKort().find((c) => c.request.id === valgt);
+  if (!card) {
+    box.innerHTML =
+      '<section class="lw-panel app-detail-panel"><p class="app-empty">' +
+      "Velg noe i køen for å se hele saken." + "</p></section>";
     return;
   }
 
-  const focused = document.activeElement;
-  const refocus = focused && focused.getAttribute ? focused.getAttribute("data-amt") : null;
-  const caret = refocus ? focused.selectionStart : null;
+  const r = card.request;
+  const d = card.decision;
+  const st = koeStatus(card);
+  if (!shownAt[r.id]) shownAt[r.id] = Date.now();
 
-  el("waiting").innerHTML = list
-    .map((card) => {
-      const r = card.request;
-      const d = card.decision;
-      if (!shownAt[r.id]) shownAt[r.id] = Date.now();
+  /* Alvorlighet finnes som Decision.risk. Ingen poengsum: vi har ikke noen,
+   * og en skala vi ikke maaler ville vaert en paastand. */
+  const risiko =
+    '<span class="app-sev is-' + esc(d.risk) + '">' +
+    esc(RISK_TEXT[d.risk] || d.risk) + "</span>";
 
-      let gate;
-      if (d.requires_typed_amount) {
-        const val = typed[r.id] || "";
-        const ok = amountMatches(val, r.amount);
-        const hint = card.error
-          ? '<span class="hint bad">' + esc(card.error) + "</span>"
-          : ok
-          ? '<span class="hint ok">Stemmer.</span>'
-          : '<span class="hint">Skriv beløpet nøyaktig for å kunne godkjenne.</span>';
-        gate =
-          '<div class="gate"><label for="amt-' + esc(r.id) + '">Skriv beløpet for å godkjenne</label>' +
-          '<div class="gate-row">' +
-          '<input id="amt-' + esc(r.id) + '" inputmode="numeric" autocomplete="off" ' +
-          'placeholder="0" value="' + esc(val) + '" data-amt="' + esc(r.id) + '">' +
-          '<button class="danger" data-approve="' + esc(r.id) + '"' + (ok ? "" : " disabled") + ">Godkjenn</button>" +
-          '<button data-reject="' + esc(r.id) + '">Avvis</button>' +
-          hint +
-          "</div></div>";
-      } else {
-        gate =
-          '<div class="gate"><div class="gate-row">' +
-          '<button class="danger" data-approve="' + esc(r.id) + '">Godkjenn</button>' +
-          '<button data-reject="' + esc(r.id) + '">Avvis</button>' +
-          (card.error ? '<span class="hint bad">' + esc(card.error) + "</span>" : "") +
-          "</div></div>";
-      }
-
-      return (
-        '<article class="red-card">' +
-        who(card) +
-        '<p class="consequence">' + esc(d.consequence_text) + "</p>" +
-        chips(d) +
-        '<p class="said"><b>Agenten sier</b>' + esc(r.summary) + "</p>" +
-        gate +
-        "</article>"
-      );
-    })
-    .join("");
-
-  if (refocus) {
-    const again = document.querySelector('[data-amt="' + refocus + '"]');
-    if (again) {
-      again.focus();
-      if (caret != null) again.setSelectionRange(caret, caret);
+  let gate = "";
+  if (card.status === "waiting") {
+    if (d.requires_typed_amount) {
+      const val = typed[r.id] || "";
+      const ok = amountMatches(val, r.amount);
+      const hint = card.error
+        ? '<span class="app-hint is-bad">' + esc(card.error) + "</span>"
+        : ok
+        ? '<span class="app-hint is-ok">Stemmer.</span>'
+        : '<span class="app-hint">Skriv beløpet nøyaktig for å kunne godkjenne.</span>';
+      gate =
+        '<div class="app-gate"><label for="amt-' + esc(r.id) + '">' +
+        "Skriv beløpet for å godkjenne</label>" +
+        '<div class="app-gate-row">' +
+        '<input id="amt-' + esc(r.id) + '" inputmode="numeric" autocomplete="off" ' +
+        'placeholder="0" value="' + esc(val) + '" data-amt="' + esc(r.id) + '">' +
+        '<button class="lw-btn lw-btn-danger" data-approve="' + esc(r.id) + '"' +
+        (ok ? "" : " disabled") + ">Godkjenn</button>" +
+        '<button class="lw-btn lw-btn-quiet" data-reject="' + esc(r.id) + '">Avvis</button>' +
+        hint + "</div></div>";
+    } else {
+      gate =
+        '<div class="app-gate"><div class="app-gate-row">' +
+        '<button class="lw-btn lw-btn-danger" data-approve="' + esc(r.id) + '">Godkjenn</button>' +
+        '<button class="lw-btn lw-btn-quiet" data-reject="' + esc(r.id) + '">Avvis</button>' +
+        (card.error ? '<span class="app-hint is-bad">' + esc(card.error) + "</span>" : "") +
+        "</div></div>";
     }
+  } else if (card.human) {
+    const h = card.human;
+    gate =
+      '<div class="app-gate is-done">' + esc(st.tekst) +
+      (h.employee_pseudonym ? " av " + esc(h.employee_pseudonym) : "") +
+      (h.seconds_to_decide != null ? " etter " + Math.round(h.seconds_to_decide) + " s" : "") +
+      (h.typed_amount != null ? ", skrev " + esc(kroner(h.typed_amount)) : "") +
+      "</div>";
+  } else if (d.verdict === "block") {
+    gate = '<div class="app-gate is-done">Stoppet av Lonewatch. Ingen kan klikke dette gjennom.</div>';
   }
+
+  box.innerHTML =
+    '<section class="lw-panel app-detail-panel ' + st.klasse + '">' +
+    '<div class="app-detail-head">' +
+    "<div>" +
+    '<div class="app-detail-id">' + esc(lwName(r.id)) + risiko +
+    '<span class="app-raw">' + esc(r.id) + "</span></div>" +
+    '<h2 class="app-detail-title">' + esc(d.consequence_text) + "</h2>" +
+    who(card) +
+    "</div>" +
+    '<span class="app-item-state ' + st.klasse + '">' + esc(st.tekst) + "</span>" +
+    "</div>" +
+
+    gate +
+
+    '<section class="app-block">' +
+    '<h3 class="app-block-h">Regler som slo inn</h3>' +
+    reglerBlokk(d) +
+    "</section>" +
+
+    '<div class="app-block-two">' +
+    '<section class="app-block">' +
+    '<h3 class="app-block-h">Forespurt handling</h3>' +
+    '<p class="app-block-sub">Feltene mellomstasjonen leste. ' +
+    "<code>summary</code> er agentens egen forklaring og brukes aldri i vurderingen.</p>" +
+    handlingBlokk(r) +
+    "</section>" +
+    '<section class="app-block">' +
+    '<h3 class="app-block-h">Dette ledet hit</h3>' +
+    '<p class="app-block-sub">Hva samme agent gjorde rett før, fra loggen.</p>' +
+    sporBlokk(r.id) +
+    "</section>" +
+    "</div>" +
+
+    fellerBlokk() +
+    "</section>";
+
+  if (!trailCache[r.id]) hentSpor(r.id);
 }
 
-function renderBlocked(list) {
-  el("blocked-wrap").classList.toggle("hidden", !list.length);
-  el("blocked").innerHTML = list
-    .map(
-      (card) =>
-        '<div class="flat-card stopped"><div class="line1">' +
-        '<span class="agent">' + esc(card.agent_label) + "</span>" +
-        '<span class="muted">' + esc(card.action_label) + "</span></div>" +
-        '<div class="line2">' + esc(card.decision.consequence_text) + "</div></div>"
-    )
-    .join("");
+/* Fellene og logglinjene hentes én gang per visning som trenger dem. */
+async function hentLogg() {
+  try {
+    logData = await api("/api/log");
+  } catch (e) {
+    logData = null;
+  }
+  if (activeTab === "queue") renderQueueDetail();
+  if (activeTab === "after") renderLogTable();
 }
 
-function renderAnswered(list) {
-  el("answered-wrap").classList.toggle("hidden", !list.length);
-  el("answered").innerHTML = list
-    .map((card) => {
-      const ok = card.status === "approved";
-      const h = card.human || {};
-      const svar = ok ? "Godkjent" : "Avvist";
-      const extra =
-        (h.employee_pseudonym ? " av " + esc(h.employee_pseudonym) : "") +
-        (h.seconds_to_decide != null
-          ? " etter " + Math.round(h.seconds_to_decide) + " s"
-          : "") +
-        (ok && h.typed_amount != null ? ", skrev " + esc(kroner(h.typed_amount)) : "");
-      return (
-        '<div class="flat-card ' + (ok ? "ok-answer" : "no-answer") + '"><div class="line1">' +
-        '<span class="agent">' + esc(svar) + "</span>" +
-        '<span class="muted">' + esc(card.agent_label) + " &middot; " + esc(card.action_label) + "</span>" +
-        "</div>" +
-        '<div class="line2">' + esc(card.decision.consequence_text) + extra + "</div></div>"
-      );
-    })
-    .join("");
+async function hentSpor(id) {
+  try {
+    const svar = await api("/api/trail/" + encodeURIComponent(id));
+    trailCache[id] = svar.trail || [];
+  } catch (e) {
+    trailCache[id] = [];
+  }
+  if (valgt === id && activeTab === "queue") renderQueueDetail();
 }
 
 function renderCalm(list, total) {
   const badge = el("calm-count");
   badge.textContent = total;
   if (!list.length) {
-    el("calm").innerHTML = '<p class="empty">Ingenting ennå.</p>';
+    el("calm").innerHTML = '<p class="app-empty">Ingenting ennå.</p>';
     return;
   }
   el("calm").innerHTML = list
     .map(
       (card) =>
-        '<div class="calm-row"><span class="tick">&#9679;</span>' +
-        '<span class="agent">' + esc(card.agent_label) + "</span>" +
-        '<span class="what">' + esc(card.request.summary) + "</span></div>"
+        '<div class="app-quiet-row"><span class="app-tick">&#9679;</span>' +
+        '<span class="app-agent">' + esc(card.agent_label) + "</span>" +
+        '<span class="app-what">' + esc(card.request.summary) + "</span></div>"
     )
     .join("");
 }
 
-function renderNotices(list) {
-  if (!list || !list.length) {
-    el("notices").innerHTML = '<p class="empty">Ingen feller har gått av.</p>';
-    return;
-  }
-  el("notices").innerHTML = list
-    .map(
-      (n) =>
-        '<div class="notice"><span class="nt">' + esc(n.title) + "</span>" +
-        '<span class="nd">' + esc(n.detail) + "</span></div>"
-    )
-    .join("");
-}
+/* ---------------- Foer: sandkassen ----------------
+ *
+ * Skissen hadde versjon, utgiver, SHA, signatur og «tilganger bedt om mot
+ * tilganger brukt». `SandboxReport` har ingen av dem, saa de staar ikke her.
+ * Vi viser det boksen faktisk rapporterte: navn, verdikt, notat og hvilke
+ * adresser tillegget forsoekte aa kontakte.
+ */
 
-/* ---------------- Før: sandkassen ---------------- */
+let valgtPakke = null;
+
+const BEFORE_STATE = {
+  blocked: { tekst: "Blokkert", klasse: "is-stopped", merke: "blokkert" },
+  clean: { tekst: "Rent", klasse: "is-clean", merke: "rent" },
+  not_tested: { tekst: "Ikke testet", klasse: "is-untested", merke: "ikke testet" },
+};
+
+function beforeItems(b) {
+  if (!b) return [];
+  const ut = (b.scanned || []).map((r) => ({
+    navn: r.package_name, verdict: r.verdict, notes: r.notes,
+    destinations: r.destinations || [], testet: true,
+  }));
+  (b.untested || []).forEach((u) => ut.push({
+    navn: u.package_name, verdict: "not_tested", notes: u.note,
+    destinations: [], testet: false,
+  }));
+  return ut;
+}
 
 function renderBefore(b) {
-  const box = el("before-list");
   if (!b) return;
-  const rows = [];
+  const items = beforeItems(b);
+  el("before-count").textContent = items.length;
 
-  if (b.error) {
-    rows.push(
-      '<div class="after-row"><span class="box"></span><div>' +
-        '<div class="at">Sandkassen svarte ikke</div>' +
-        '<div class="ad">' + esc(b.error) + "</div></div>" +
-        '<span class="ao">it</span></div>'
-    );
+  if (!items.some((i) => i.navn === valgtPakke)) {
+    valgtPakke = items.length ? items[0].navn : null;
   }
 
-  /* Tre tilstander, og de sier tre forskjellige ting: vi stoppet det, vi saa
-   * etter og fant ingenting, eller vi fikk aldri sett etter. Den siste maa
-   * aldri se ut som en klarering. */
-  const TILSTAND = {
-    blocked: { tittel: "stoppet i sandkassen", merke: "blokkert" },
-    clean: { tittel: "ingenting mistenkelig", merke: "rent" },
-    not_tested: { tittel: "ikke testet", merke: "ikke testet" },
-  };
+  el("before-list").innerHTML = items.length
+    ? items.map((i) => {
+        const st = BEFORE_STATE[i.verdict] || { tekst: i.verdict, klasse: "" };
+        return (
+          '<button type="button" class="app-item ' + st.klasse +
+          (i.navn === valgtPakke ? " is-open" : "") +
+          '" data-pack="' + esc(i.navn) + '">' +
+          '<span class="app-item-top">' +
+          '<span class="app-item-name">' + esc(i.navn) + "</span>" +
+          '<span class="app-item-state">' + esc(st.tekst) + "</span></span>" +
+          '<span class="app-item-sub">' +
+          (i.destinations.length
+            ? i.destinations.length + " adresse" + (i.destinations.length > 1 ? "r" : "") + " forsøkt"
+            : i.testet ? "ingen nettverksforsøk" : "kom aldri i gang") +
+          "</span></button>"
+        );
+      }).join("")
+    : '<p class="app-empty">Ingen tillegg er forsøkt installert ennå.</p>';
 
-  b.scanned.forEach((r) => {
-    const t = TILSTAND[r.verdict] || { tittel: r.verdict, merke: r.verdict };
-    rows.push(
-      '<div class="after-row"><span class="box"></span><div>' +
-        '<div class="at">' +
-        esc(r.package_name) +
-        " &middot; " +
-        esc(t.tittel) +
-        "</div>" +
-        '<div class="ad">' +
-        esc(r.notes) +
-        (r.destinations && r.destinations.length
-          ? " Adresser: " + esc(r.destinations.join(", ")) + "."
-          : "") +
-        "</div></div>" +
-        '<span class="ao">' + esc(t.merke) + "</span></div>"
-    );
-  });
+  renderBeforeDetail(b, items);
+}
 
-  b.untested.forEach((u) => {
-    rows.push(
-      '<div class="after-row"><span class="box"></span><div>' +
-        '<div class="at">' + esc(u.package_name) + " &middot; ikke testet</div>" +
-        '<div class="ad">' + esc(u.note) + "</div></div>" +
-        '<span class="ao">ukjent</span></div>'
-    );
-  });
+function renderBeforeDetail(b, items) {
+  const box = el("before-detail");
+  const i = items.find((x) => x.navn === valgtPakke);
 
-  box.innerHTML = rows.length
-    ? rows.join("")
-    : '<p class="empty">Ingen tillegg er forsøkt installert ennå.</p>';
+  /* En sandkasse som ikke svarte er sin egen beskjed. Den skal ikke skjules
+   * bak et valg i listen. */
+  const feil = b.error
+    ? '<div class="app-banner is-bad">Sandkassen svarte ikke: ' + esc(b.error) + "</div>"
+    : "";
+
+  if (!i) {
+    box.innerHTML =
+      '<section class="lw-panel app-detail-panel">' + feil +
+      '<p class="app-empty">Velg et tillegg for å se hva boksen så.</p></section>';
+    return;
+  }
+
+  const st = BEFORE_STATE[i.verdict] || { tekst: i.verdict, klasse: "" };
+
+  /* «Rent» er det eneste ordet her som kan misforstaas, saa det forklares
+   * paa stedet hver gang - ikke i en fotnote nederst. */
+  const betyr = {
+    clean: "«Rent» betyr at vi ikke så noe. Det er ikke det samme som at tillegget er trygt.",
+    blocked: "Boksen stoppet tillegget. Ingenting forlot maskinen.",
+    not_tested: "Vi fikk aldri sett etter. Vi vet ikke hva tillegget ville gjort.",
+  }[i.verdict] || "";
+
+  const adresser = i.destinations.length
+    ? '<table class="lw-table app-table"><thead><tr><th>Vert</th><th>Resultat</th></tr></thead><tbody>' +
+      i.destinations.map((d) =>
+        "<tr><td>" + esc(d) + '</td><td><span class="app-tag is-blocked">Blokkert</span></td></tr>'
+      ).join("") +
+      "</tbody></table>" +
+      '<p class="app-block-sub">Sandkassen svarer nei på alt nettverk. ' +
+      "Adressene er det tillegget <em>prøvde</em> på, ikke noe som gikk ut.</p>"
+    : '<p class="app-empty">' +
+      (i.testet ? "Tillegget forsøkte ikke nettverk mens det kjørte."
+                : "Ingen adresser: tillegget kom aldri i gang.") +
+      "</p>";
+
+  box.innerHTML =
+    '<section class="lw-panel app-detail-panel ' + st.klasse + '">' + feil +
+    '<div class="app-detail-head"><div>' +
+    '<div class="app-detail-id">' + esc(i.navn) + "</div>" +
+    '<h2 class="app-detail-title">' + esc(betyr) + "</h2>" +
+    "</div>" +
+    '<span class="app-item-state ' + st.klasse + '">' + esc(st.tekst) + "</span></div>" +
+
+    '<section class="app-block">' +
+    '<h3 class="app-block-h">Hva boksen skrev ned</h3>' +
+    '<p class="app-note-body">' + esc(i.notes || "Ingen notat.") + "</p>" +
+    "</section>" +
+
+    '<section class="app-block">' +
+    '<h3 class="app-block-h">Nettverksforsøk</h3>' +
+    adresser +
+    "</section>" +
+
+    '<div class="app-detail-foot">' +
+    '<button class="app-limits" type="button" data-limits="sandkassen">' +
+    "Hva sandkassen ikke klarer</button></div>" +
+    "</section>";
 }
 
 /* ---------------- Oversikt: dashbordet ---------------- */
@@ -409,8 +675,161 @@ function dashboardReady() {
     typeof React !== "undefined" &&
     typeof ReactDOM !== "undefined" &&
     globalThis.Lonewatch &&
-    globalThis.Lonewatch.Dashboard
+    globalThis.Lonewatch.Panel &&
+    globalThis.Lonewatch.StatCard
   );
+}
+
+/* Samme tallformat som dashbordet bruker internt. Mangler tallet, blir det
+ * «–» - aldri 0, for de to betyr ikke det samme. */
+function dashNum(n) {
+  if (typeof n !== "number" || !isFinite(n)) return "–";
+  return new Intl.NumberFormat("nb-NO").format(n);
+}
+
+/* «Venter paa deg» erstatter reklamekortet.
+ *
+ * Reklamekortet solgte en funksjon til noen som alt hadde aapnet appen. Dette
+ * feltet er det eneste paa forsiden som kan kreve noe av deg akkurat naa, saa
+ * det er det som skal staa der. Alt i det kommer fra `waiting_for_you()`:
+ * ingen oppdiktet kunde, intet poengtall. */
+function venterKort(w, h) {
+  if (w === "ukjent") {
+    return h("section", { className: "lw-panel app-waiting is-unknown" },
+      h("div", { className: "app-waiting-head" },
+        h(globalThis.Lonewatch.Icon, { name: "alert", size: 18 }),
+        h("span", null, "Venter på deg")),
+      h("p", { className: "app-waiting-title" }, "Vi får ikke svar fra Lonewatch"),
+      h("p", { className: "app-waiting-sub" },
+        "Vi vet ikke om noe venter på deg akkurat nå. Prøv igjen."));
+  }
+  if (!w) {
+    return h("section", { className: "lw-panel app-waiting is-calm" },
+      h("div", { className: "app-waiting-head" },
+        h(globalThis.Lonewatch.Icon, { name: "check", size: 18 }),
+        h("span", null, "Venter på deg")),
+      h("p", { className: "app-waiting-title" }, "Ingenting venter på deg"),
+      h("p", { className: "app-waiting-sub" },
+        "Ingen røde varsler står ubesvart. Kommer det et, står det her."));
+  }
+
+  const linje = [w.agent, w.action].filter(Boolean).join(" · ");
+  const detalj = [
+    w.amount != null ? kroner(w.amount) : null,
+    w.recipient ? "til " + w.recipient : null,
+  ].filter(Boolean).join(" · ");
+
+  return h("section", { className: "lw-panel app-waiting" },
+    h("div", { className: "app-waiting-head" },
+      h(globalThis.Lonewatch.Icon, { name: "alert", size: 18 }),
+      h("span", null, "Venter på deg"),
+      w.waiting_total > 1
+        ? h("span", { className: "app-waiting-more" },
+            "1 av " + w.waiting_total + " røde")
+        : null),
+    h("p", { className: "app-waiting-who" }, linje),
+    detalj ? h("p", { className: "app-waiting-amount" }, detalj) : null,
+    h("p", { className: "app-waiting-title" }, w.consequence_text),
+    h("button", {
+      type: "button",
+      className: "lw-btn lw-btn-danger app-waiting-cta",
+      onClick: function () { valgt = w.request_id; showTab("queue"); },
+    }, "Se og godkjenn"));
+}
+
+/* Dashbordet settes sammen av designsystemets egne deler i stedet for aa kalle
+ * `Dashboard`. Grunnen er enkel: `Dashboard` tegner sin EGEN `.lw-backdrop`,
+ * `.lw-shell` og sidemeny, og appen har alt en. To sidemenyer paa samme side
+ * ville vaert to menyer som ikke visste om hverandre. Vi roerer ikke
+ * bundle.js - vi bruker bare delene den eksporterer. */
+function dashInnhold(h) {
+  const L = globalThis.Lonewatch;
+  const d = dashboardData || {};
+  const t = (d.text && d.text.no) || {};
+  const n = d.counts || {};
+  const shapes = d.chartShapes || [];
+  const lc = d.logChain || {};
+  const sb = d.sandbox || {};
+  const lg = d.log || {};
+  const farger = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)"];
+  const titler = t.stats || ["Handlinger vurdert", "Røde varsler", "Blokkert"];
+
+  const status = (st) => (st === "ok" ? "OK" : st === "broken" ? "Feil" : "–");
+  const brok = (x, y) =>
+    typeof x === "number" && typeof y === "number" && y > 0 ? x / y : 0;
+  const avTekst = (x, y) => dashNum(x) + " av " + dashNum(y);
+
+  const kort = [
+    { v: n.evaluated, rows: [{ label: t.allowed || "Sluppet gjennom", value: dashNum(n.allowed) }] },
+    { v: n.red, rows: [] },
+    { v: n.blocked, rows: [] },
+  ];
+
+  return [
+    h("div", { className: "lw-row-top app-dash-top", key: "top" },
+      venterKort(d.waiting, h),
+      h("div", { className: "lw-col" },
+        h(L.Panel, { title: t.activity || "Agentaktivitet" },
+          h("div", { className: "lw-stats" }, kort.map(function (k, i) {
+            const sh = shapes[i] || {};
+            return h(L.StatCard, {
+              key: i, title: titler[i], value: dashNum(k.v), rows: k.rows,
+              data: sh.data || [0, 0], marks: sh.marks, color: farger[i],
+            });
+          }))),
+        h("section", { className: "lw-panel lw-progress-row" },
+          h(L.ProgressStat, {
+            icon: "alert", label: t.waiting || "Røde varsler som venter på menneske",
+            value: avTekst(n.waitingForHuman, n.red),
+            progress: brok(n.waitingForHuman, n.red),
+          }),
+          h("span", { className: "lw-divider-v", "aria-hidden": "true" }),
+          h(L.ProgressStat, {
+            icon: "check", label: t.followed || "Fulgt opp",
+            value: avTekst(n.followedUp, n.red),
+            progress: brok(n.followedUp, n.red),
+          })))),
+
+    h("div", { className: "lw-row-bottom app-dash-bottom", key: "bottom" },
+      h(L.Panel, {
+        title: t.table || "Agenter",
+        action: h("button", {
+          type: "button", className: "lw-link",
+          onClick: function () { showTab("queue"); },
+        }, "Se køen", h("span", { className: "lw-link-dot" },
+          h(L.Icon, { name: "arrowRight", size: 11, strokeWidth: 2.6 }))),
+      }, h(L.AgentTable, {
+        lang: "no",
+        columns: t.cols || ["Agent", "Handlinger", "Røde", "Blokkert", "Sluppet gjennom"],
+        rows: (d.agents || []).map(function (ag) {
+          return Object.assign({}, ag, {
+            name: (ag.name && (ag.name.no || ag.name.en)) || ag.id,
+          });
+        }),
+      })),
+      h("div", { className: "lw-col" },
+        h(L.Panel, null, h("div", { className: "lw-score" },
+          h("div", null,
+            h("h2", { className: "lw-panel-title" }, t.logChain || "Loggkjede"),
+            h("p", { className: "lw-panel-sub" }, t.logChainSub || "Sjekk av logg"),
+            h("p", { className: "lw-score-target" },
+              lc.checkedAt
+                ? ["Sist sjekket: ", h("b", { key: "b" }, klokke(lc.checkedAt))]
+                : "Ikke sjekket ennå")),
+          h(L.StatusRing, {
+            status: lc.status, display: status(lc.status),
+            label: t.logChain || "Loggkjede",
+          }))),
+        h(L.Panel, null, h(L.StatusRows, {
+          rows: [
+            {
+              label: t.sandboxRow || "Sandkasse",
+              status: dashNum(sb.tested) + " testet, " + dashNum(sb.blocked) + " blokkert",
+            },
+            { label: t.logRow || "Logg", status: status(lg.status) },
+          ],
+        })))),
+  ];
 }
 
 function drawDashboard() {
@@ -418,15 +837,8 @@ function drawDashboard() {
   if (!dashboardRoot) {
     dashboardRoot = ReactDOM.createRoot(el("dashboard-root"));
   }
-  dashboardRoot.render(
-    React.createElement(globalThis.Lonewatch.Dashboard, {
-      data: dashboardData,
-      lang: "no",
-      /* Sidemenyen i dashbordet og fanerekka over er den samme menyen.
-       * Uten dette ville siden hatt to menyer som ikke visste om hverandre. */
-      onNavigate: (tab) => showTab(tab === "under" ? "queue" : tab),
-    })
-  );
+  const h = React.createElement;
+  dashboardRoot.render(h("div", { className: "app-dash" }, dashInnhold(h)));
 }
 
 async function refreshOverview() {
@@ -471,6 +883,9 @@ function tomtDatasett() {
     sandbox: { tested: null, blocked: null },
     log: { status: null },
     chartShapes: [],
+    /* Ikke `null`: `null` ville betydd «ingenting venter», og det vet vi ikke.
+     * «ukjent» gir feltet sin egen tekst i stedet for en beroligende loegn. */
+    waiting: "ukjent",
     text: tekst,
   };
 }
@@ -551,55 +966,202 @@ function renderCustom(list) {
   el("custom-count").textContent = list.length;
   if (!list.length) {
     el("custom-list").innerHTML =
-      '<p class="empty">Ingen ennå. Fyll ut skjemaet over.</p>';
+      '<p class="app-empty">Ingen ennå. Fyll ut skjemaet ved siden av.</p>';
     return;
   }
   el("custom-list").innerHTML = list
     .map((card) => {
       const d = card.decision;
       const r = card.request;
+      const klasse =
+        d.verdict === "block" ? "is-stopped" : d.verdict === "red" ? "is-red" : "is-yes";
       return (
-        '<div class="flat-card mine-card"><div class="line1">' +
-        '<span class="agent">' + esc(card.action_label) + "</span>" +
-        '<span class="muted">' + esc(VERDICT_TEXT[d.verdict] || d.verdict) + "</span>" +
+        '<article class="app-flat is-mine ' + klasse + '">' +
+        '<div class="app-line1">' +
+        '<span class="app-agent">' + esc(card.action_label) + "</span>" +
+        '<span class="app-muted">' + esc(VERDICT_TEXT[d.verdict] || d.verdict) + "</span>" +
         "</div>" +
-        '<div class="line2">' + esc(d.consequence_text) + "</div>" +
-        '<div class="line2 said-mini"><b>Du skrev</b> ' + esc(r.summary) + "</div>" +
+        '<div class="app-line2">' + esc(d.consequence_text) + "</div>" +
+        '<div class="app-line2 app-said-mini"><b>Du skrev</b> ' + esc(r.summary) + "</div>" +
         chips(d) +
-        "</div>"
+        "</article>"
       );
     })
     .join("");
 }
 
-/* ---------------- Etter ---------------- */
+/* ---------------- Etter ----------------
+ *
+ * Tre ting, i den rekkefoelgen et menneske trenger dem:
+ *   1. Staar loggen? (ekte /api/verify - ingen «400 dagers lagring»)
+ *   2. Hva skjedde? (ekte logglinjer, nyeste foerst)
+ *   3. Hva maa gjoeres? (ekte oppfoelging, gruppert og prioritert)
+ */
+
+function klokke(iso) {
+  if (!iso) return "–";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "–";
+  return d.toLocaleTimeString("nb-NO", {
+    hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Europe/Oslo",
+  });
+}
+
+function renderChainStrip() {
+  const v = (latest && latest.log && latest.log.last_verify) || null;
+  const lines = (latest && latest.log && latest.log.lines) || null;
+
+  if (!v) {
+    el("chain-strip").innerHTML =
+      '<div class="app-strip-main"><span class="app-strip-dot"></span>' +
+      '<div><div class="app-strip-title">Låst logg</div>' +
+      '<div class="app-strip-sub">Ikke sjekket ennå. Trykk «Sjekk loggen».</div></div></div>' +
+      '<button class="app-limits" type="button" data-limits="loggen">Begrensninger</button>';
+    return;
+  }
+
+  const ok = Boolean(v.ok);
+  el("chain-strip").className = "lw-panel app-strip " + (ok ? "is-ok" : "is-bad");
+  el("chain-strip").innerHTML =
+    '<div class="app-strip-main"><span class="app-strip-dot"></span>' +
+    "<div>" +
+    '<div class="app-strip-title">' +
+    (ok ? "Kjeden er hel" : "Kjeden er brutt") + "</div>" +
+    '<div class="app-strip-sub">' + esc(v.text || "") + "</div></div></div>" +
+    '<dl class="app-strip-facts">' +
+    "<div><dt>Siste blokk</dt><dd>#" + (lines != null ? esc(String(lines)) : "–") + "</dd></div>" +
+    (v.head
+      ? '<div><dt>Topphash</dt><dd><code class="app-hash">' + esc(v.head) + "</code></dd></div>"
+      : "") +
+    (v.seq != null
+      ? "<div><dt>Første brudd</dt><dd>#" + esc(String(v.seq)) + "</dd></div>"
+      : "") +
+    "<div><dt>Sjekket</dt><dd>" + esc(klokke(v.checked_at)) + "</dd></div>" +
+    "</dl>" +
+    '<button class="app-limits" type="button" data-limits="loggen">Begrensninger</button>';
+}
+
+const LOG_FILTRE = [
+  { id: "alle", navn: "Alle", felt: "alle" },
+  { id: "stoppet", navn: "Stoppet", felt: "stoppet" },
+  { id: "menneske", navn: "Til menneske", felt: "menneske" },
+];
+
+function renderLogTable() {
+  if (!logData || !logData.log) {
+    el("log-table").innerHTML = '<p class="app-empty">Henter logglinjer …</p>';
+    return;
+  }
+  const tall = logData.log.counts || {};
+  el("log-filter").innerHTML = LOG_FILTRE.map((f) =>
+    '<button type="button" class="app-filter-btn' + (logFilter === f.id ? " is-on" : "") +
+    '" data-logfilter="' + f.id + '">' + esc(f.navn) +
+    '<span class="app-filter-n">' + (tall[f.felt] != null ? tall[f.felt] : "–") + "</span></button>"
+  ).join("");
+
+  let rader = logData.log.rows || [];
+  if (logFilter === "stoppet") rader = rader.filter((r) => r.utfall === "block" || r.utfall === "blocked");
+  if (logFilter === "menneske") rader = rader.filter((r) => r.utfall === "red");
+
+  if (!rader.length) {
+    el("log-table").innerHTML = '<p class="app-empty">Ingen linjer med dette filteret.</p>';
+    return;
+  }
+
+  el("log-table").innerHTML =
+    '<div class="app-table-wrap"><table class="lw-table app-table app-log"><thead><tr>' +
+    "<th>Tid</th><th>#</th><th>Agent</th><th>Kall</th><th>Mål</th>" +
+    "<th>Utfall</th><th>Regel</th><th>Hash</th>" +
+    "</tr></thead><tbody>" +
+    rader.map((r) =>
+      '<tr class="is-' + esc(r.utfall) + '">' +
+      "<td>" + esc(klokke(r.ts)) + "</td>" +
+      '<td class="app-num">' + esc(String(r.seq)) + "</td>" +
+      "<td>" + esc(r.agent || "–") + "</td>" +
+      "<td>" + esc(r.kall || "–") + "</td>" +
+      '<td class="app-target">' + esc(r.maal || "–") + "</td>" +
+      '<td><span class="app-tag is-' + esc(r.utfall) + '">' +
+      esc(UTFALL_TEXT[r.utfall] || r.utfall) + "</span></td>" +
+      "<td>" + (r.regler && r.regler.length
+        ? esc(r.regler.join(", "))
+        : '<span class="app-muted">–</span>') + "</td>" +
+      '<td><code class="app-hash">' + esc(r.hash || "–") + "</code></td>" +
+      "</tr>"
+    ).join("") +
+    "</tbody></table></div>" +
+    (logData.log.truncated
+      ? '<p class="app-block-sub">Viser de nyeste ' + rader.length +
+        " linjene. Hele loggen ligger i filen.</p>"
+      : "");
+}
+
+const BOLK_KLASSE = { 0: "is-0", 1: "is-1", 2: "is-2" };
+
+function renderAfterTasks(view) {
+  if (!view || !view.bolker.length) {
+    el("after-list").innerHTML =
+      '<p class="app-empty">Ingenting å følge opp. Ingen røde eller stoppede forespørsler ennå.</p>';
+    return;
+  }
+  el("after-note").textContent =
+    view.antall + " saker, " + view.antall_oppgaver +
+    " ting å gjøre. Bygget rett fra logglinjene. Det som haster står først.";
+
+  el("after-list").innerHTML = view.bolker.map((bolk) =>
+    '<section class="app-bolk ' + (BOLK_KLASSE[bolk.nivaa] || "") + '">' +
+    '<h3 class="app-bolk-h">' + esc(bolk.navn) +
+    '<span class="app-count is-quiet">' + bolk.saker.length + "</span></h3>" +
+    bolk.saker.map((sak) => {
+      const t = sak.topp;
+      const topp = [t.agent, t.handling].filter(Boolean).join(" · ");
+      const detalj = [t.belop, t.mottaker].filter(Boolean).join(" · ");
+      return (
+        '<article class="app-case">' +
+        '<div class="app-case-top">' +
+        "<div><strong>" + esc(topp) + "</strong>" +
+        (detalj ? '<span class="app-case-detail">' + esc(detalj) + "</span>" : "") +
+        "</div>" +
+        (t.id
+          ? '<span class="app-case-id">' + esc(lwName(t.id)) +
+            '<span class="app-raw">' + esc(t.id) + "</span></span>"
+          : "") +
+        "</div>" +
+        '<ul class="app-case-tasks">' +
+        sak.oppgaver.map((o) =>
+          '<li><span class="app-role">' + esc(ROLLE_VIS[o.rolle] || o.rolle) + "</span>" +
+          '<span class="app-task-text">' + esc(o.tekst) + "</span></li>"
+        ).join("") +
+        "</ul></article>"
+      );
+    }).join("") +
+    "</section>"
+  ).join("") +
+  '<p class="app-block-sub app-suggest">' +
+  "<strong>Hvem og når er forslag.</strong> Eier er utledet av hva saken gjelder, " +
+  "og rekkefølgen av hvor alvorlig utfallet var. Lonewatch har ingen kobling til " +
+  "et oppgavesystem, ingen frister og ingen tildeling — ingenting her er sendt noe sted." +
+  "</p>";
+}
+
+/* `vault/after.py` eier engelske rollekoder. Oversettelsen bor i ui/ fordi det
+ * er visningstekst, og after_view.py har alt gjort den - dette er bare for
+ * koder den ikke kjenner. */
+const ROLLE_VIS = {
+  security: "Sikkerhet", finance: "Økonomi", employee: "Den ansatte", it: "IT",
+};
 
 async function loadAfter() {
+  renderChainStrip();
+  await hentLogg();
+  renderLogTable();
+
   const data = await api("/api/after");
   if (!data.available) {
-    el("after-note").textContent =
-      data.note === "kommer"
-        ? "Etter-listen bygges av vault.after.build_after_actions. " +
-          "Den er ikke på plass ennå: kommer."
-        : data.note;
-    el("after-list").innerHTML = '<p class="empty">Tom liste.</p>';
+    el("after-note").textContent = data.note || "Etter-listen er ikke tilgjengelig.";
+    el("after-list").innerHTML = '<p class="app-empty">Tom liste.</p>';
     return;
   }
-  el("after-note").textContent = "Hva som må gjøres når noe har skjedd.";
-  if (!data.items.length) {
-    el("after-list").innerHTML =
-      '<p class="empty">Ingenting å følge opp. Ingen røde forespørsler er behandlet.</p>';
-    return;
-  }
-  el("after-list").innerHTML = data.items
-    .map(
-      (a) =>
-        '<div class="after-row' + (a.done ? " done" : "") + '"><span class="box"></span>' +
-        '<div><div class="at">' + esc(a.title) + "</div>" +
-        '<div class="ad">' + esc(a.detail) + "</div></div>" +
-        '<span class="ao">' + esc(a.owner_role) + "</span></div>"
-    )
-    .join("");
+  renderAfterTasks(data.view);
 }
 
 /* ---------------- sjekk loggen ---------------- */
@@ -633,7 +1195,7 @@ async function verify() {
   const r = await api("/api/verify");
   const b = el("verify-banner");
   b.classList.remove("hidden");
-  b.classList.toggle("bad", !r.ok);
+  b.classList.toggle("is-bad", !r.ok);
   b.textContent = r.text;
   if (latest) {
     latest.log.last_verify = r;
@@ -642,6 +1204,7 @@ async function verify() {
   /* Ringen "Loggkjede" paa Oversikt staar som "Ikke sjekket ennaa" til noen
    * faktisk har sjekket. Naa har de det. */
   if (activeTab === "overview") refreshOverview();
+  if (activeTab === "after") loadAfter();
 }
 
 /* ---------------- hendelser fra brukeren ---------------- */
@@ -656,9 +1219,9 @@ document.addEventListener("input", (ev) => {
   const ok = amountMatches(typed[id], card.request.amount);
   const btn = document.querySelector('[data-approve="' + id + '"]');
   if (btn) btn.disabled = !ok;
-  const hint = ev.target.parentElement.querySelector(".hint");
+  const hint = ev.target.parentElement.querySelector(".app-hint");
   if (hint) {
-    hint.className = "hint" + (ok ? " ok" : "");
+    hint.className = "app-hint" + (ok ? " is-ok" : "");
     hint.textContent = ok ? "Stemmer." : "Skriv beløpet nøyaktig for å kunne godkjenne.";
   }
 });
@@ -684,31 +1247,127 @@ document.addEventListener("click", async (ev) => {
     return;
   }
 
-  const tab = t.getAttribute("data-tab");
-  if (tab) showTab(tab);
+  const pick = t.closest ? t.closest("[data-pick]") : null;
+  if (pick) {
+    valgt = pick.getAttribute("data-pick");
+    renderQueue();
+    return;
+  }
+
+  const pack = t.closest ? t.closest("[data-pack]") : null;
+  if (pack) {
+    valgtPakke = pack.getAttribute("data-pack");
+    renderBefore(latest.before);
+    return;
+  }
+
+  const lf = t.getAttribute("data-logfilter");
+  if (lf) {
+    logFilter = lf;
+    renderLogTable();
+    return;
+  }
+
+  const lim = t.getAttribute("data-limits");
+  if (lim) {
+    visLimits(lim);
+    return;
+  }
+
+  const tab = t.closest ? t.closest("[data-tab]") : null;
+  if (tab) showTab(tab.getAttribute("data-tab"));
 });
 
+const VIEW_SUB = {
+  overview: "Nordlys Forsikring · simulering",
+  before: "Tillegg testes i en lukket boks før de slipper inn",
+  queue: "Røde varsler som bare et menneske kan svare på",
+  after: "Den låste loggen, og hva som må følges opp",
+  custom: "Din egen forespørsel, gjennom samme vei som demoen",
+};
+
+const VIEW_HASH = {
+  overview: "#", before: "#foer", queue: "#godkjenning",
+  after: "#etter", custom: "#prov",
+};
+
 function showTab(tab) {
+  if (!VIEW_HASH[tab]) tab = "overview";
   activeTab = tab;
-  document.querySelectorAll(".tab-btn").forEach((b) =>
-    b.classList.toggle("on", b.getAttribute("data-tab") === tab)
+
+  document.querySelectorAll("#app-nav [data-tab]").forEach((b) =>
+    b.classList.toggle("is-active", b.getAttribute("data-tab") === tab)
   );
-  el("tab-overview").classList.toggle("hidden", tab !== "overview");
-  el("tab-before").classList.toggle("hidden", tab !== "before");
-  el("tab-queue").classList.toggle("hidden", tab !== "queue");
-  el("tab-after").classList.toggle("hidden", tab !== "after");
-  el("tab-custom").classList.toggle("hidden", tab !== "custom");
-  const hash =
-    tab === "after" ? "#etter"
-      : tab === "before" ? "#foer"
-      : tab === "custom" ? "#prov"
-      : tab === "queue" ? "#godkjenning"
-      : "#";
-  if (history.replaceState) history.replaceState(null, "", hash);
+
+  const view = VIEWS.find((v) => v.tab === tab);
+  el("app-view-title").textContent = view ? view.navn : "Oversikt";
+  document.querySelector(".app-sub").textContent = VIEW_SUB[tab];
+
+  ["overview", "before", "queue", "after", "custom"].forEach((t) =>
+    el("tab-" + t).classList.toggle("hidden", t !== tab)
+  );
+
+  if (history.replaceState) history.replaceState(null, "", VIEW_HASH[tab]);
   if (tab === "after") loadAfter();
   if (tab === "custom") loadCustomHelp();
   if (tab === "overview") refreshOverview();
+  if (tab === "queue") hentLogg();
 }
+
+/* ---------------- begrensninger ----------------
+ *
+ * Raa filstier hoerer ikke hjemme i broedteksten. Teksten her er et sammendrag
+ * av det som staar i filene, og filnavnet staar nederst for den som vil lese
+ * hele. Ingenting her er generert - det er skrevet av hand fra LIMITS-filene.
+ */
+const LIMITS = {
+  sandkassen: {
+    tittel: "Hva sandkassen ikke klarer",
+    punkter: [
+      "Den er ikke isolasjon. Tillegget kjører i en egen prosess på samme maskin, uten container og uten egen bruker.",
+      "«Rent» betyr bare at vi ikke så noe denne gangen. Et tillegg som venter, eller som bare gjør skade når det er i drift, ser rent ut her.",
+      "Et tillegg som krasjer rapporteres i dag som rent. Vi fikk ingen observasjon, men verdiktet sier ikke det.",
+      "Den kjører bare tillegg den har en fil for fra før. Et ukjent navn gir «ikke testet» — ingenting lastes ned.",
+      "Nettverk er alltid nei. Vi ser hvilken adresse tillegget prøvde på, ikke hva det ville sendt.",
+    ],
+    fil: "sandbox/LIMITS.md",
+  },
+  loggen: {
+    tittel: "Hva loggen ikke klarer",
+    punkter: [
+      "I demoen ligger loggen i minnet og i én fil ved siden av. Det finnes ingen oppbevaringstid, ingen replikering og ingen ekstern kopi.",
+      "Hash-kjeden fanger endring og fjerning inne i loggen, og hale-ankeret fanger kutting av de siste linjene. Den som har både loggen, ankeret og nøkkelen kan likevel skrive den om fra et punkt.",
+      "Mistes nøkkelen, er loggen uleselig. Det finnes ingen reservenøkkel og ingen rotasjon.",
+      "Loggen kan ikke bevise hvem som skrev en linje. Fernet har én delt nøkkel, ingen signatur per skribent.",
+      "Dataminimering gjør loggen mindre identifiserende, ikke anonym. Beløp, tidspunkt og agent står i klartekst.",
+      "Ingen logg over hvem som har lest loggen.",
+    ],
+    fil: "vault/LIMITS.md og docs/PERSONVERN.md",
+  },
+};
+
+function visLimits(navn) {
+  const l = LIMITS[navn];
+  if (!l) return;
+  el("limits-title").textContent = l.tittel;
+  el("limits-body").innerHTML =
+    "<ul>" + l.punkter.map((x) => "<li>" + esc(x) + "</li>").join("") + "</ul>" +
+    '<p class="app-block-sub">Hele teksten står i <code>' + esc(l.fil) + "</code>.</p>";
+  el("limits-dialog").classList.remove("hidden");
+  el("limits-close").focus();
+}
+
+function lukkLimits() {
+  el("limits-dialog").classList.add("hidden");
+}
+
+el("limits-close").addEventListener("click", lukkLimits);
+el("limits-dialog").addEventListener("click", (ev) => {
+  if (ev.target === el("limits-dialog")) lukkLimits();
+});
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape") lukkLimits();
+});
 
 el("custom-form").addEventListener("submit", sendCustom);
 el("c-action").addEventListener("change", syncCustomFields);
@@ -733,13 +1392,25 @@ el("btn-reset").addEventListener("click", async () => {
 
 /* ---------------- start ---------------- */
 
+/* Adressen er en del av navigasjonen, ikke bare et spor etter den: fanen staar
+ * i hash-en, saa tilbakeknappen og en delt lenke virker. */
+const TAB_FRA_HASH = {
+  "#etter": "after", "#foer": "before", "#prov": "custom", "#godkjenning": "queue",
+};
+
+function tabFraAdressen() {
+  return TAB_FRA_HASH[location.hash] || "overview";
+}
+
+window.addEventListener("hashchange", () => {
+  const onsket = tabFraAdressen();
+  if (onsket !== activeTab) showTab(onsket);
+});
+
 (async () => {
+  buildNav();
   apply(await api("/api/state"));
-  if (location.hash === "#etter") showTab("after");
-  else if (location.hash === "#foer") showTab("before");
-  else if (location.hash === "#prov") showTab("custom");
-  else if (location.hash === "#godkjenning") showTab("queue");
-  else showTab("overview");
+  showTab(tabFraAdressen());
   /* Sjekk loggen med én gang siden aapnes, saa ringen viser OK og de tolv
    * foerste tegnene av siste hash uten at noen maa trykke paa noe. */
   await verifyQuietly();

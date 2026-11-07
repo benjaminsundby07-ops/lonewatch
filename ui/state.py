@@ -24,6 +24,7 @@ from contracts import (
 )
 from gateway import evaluate
 from ui.amount import amount_matches, parse_amount
+from ui.after_view import build_after_view
 from ui.overview import build_overview
 
 # Den som sitter ved skjermen i demoen. Navnet forlater aldri denne filen:
@@ -117,6 +118,19 @@ def _import_after():
 
 class LonewatchAlreadyRunning(RuntimeError):
     """En annen Lonewatch holder allerede loggen."""
+
+
+def _kort_hash(verdi: Any) -> str | None:
+    """Tolv tegn av hashen, slik `verify()` alt gjør med hale-ankeret.
+
+    Hele hashen er 64 tegn og sprenger kolonnen uten å gi leseren noe mer:
+    den som skal regne på kjeden leser loggfilen, ikke en tabell på skjermen.
+    Tolv tegn er nok til å kjenne igjen en linje, og det er samme lengde som
+    topphashen over tabellen - to tall som ser like ut, skal være like lange.
+    """
+    if not isinstance(verdi, str):
+        return None
+    return verdi[:12]
 
 
 class DemoState:
@@ -659,6 +673,10 @@ class DemoState:
             return {
                 "available": True,
                 "items": [a.model_dump(mode="json") for a in actions],
+                # Grupperte og prioriterte oppfoelginger, bygget i ui/ fra de
+                # samme logglinjene. `items` over er uendret for den som
+                # kaller API-et utenom UI.
+                "view": build_after_view(self.vault.entries()),
                 "note": None,
             }
 
@@ -681,6 +699,186 @@ class DemoState:
                 "error": self.sandbox_error,
             }
 
+    # -- det skissene trenger, alt fra ekte tilstand -----------------------
+
+    def log_rows(self, limit: int = 200) -> dict[str, Any]:
+        """Logglinjene som en tabell: Tid, #, Agent, Kall, Mål, Utfall, Regel, Hash.
+
+        Rett fra `vault.entries()`. Merk at loggen er MINIMERT (se
+        vault/LIMITS.md punkt 7), så mottakeren står maskert og agentens egen
+        tekst er kastet. Det er loggen slik den faktisk er - ikke en pyntet
+        kopi av tilstanden i minnet.
+        """
+        with self._lock:
+            if self.vault is None:
+                return {"rows": [], "counts": {"alle": 0, "stoppet": 0, "menneske": 0}}
+
+            entries = self.vault.entries()
+            # Forespørslene, slik at en avgjørelse kan vise hvem og hva.
+            requests: dict[str, dict[str, Any]] = {}
+            for e in entries:
+                if e.kind == "request":
+                    rid = e.payload.get("id")
+                    if isinstance(rid, str):
+                        requests[rid] = e.payload
+
+            rows: list[dict[str, Any]] = []
+            for e in entries:
+                p = e.payload
+                if e.kind == "decision":
+                    req = requests.get(str(p.get("request_id")), {})
+                    rows.append({
+                        "seq": e.seq,
+                        "ts": e.ts.isoformat(),
+                        "agent": scenarios.agent_label(str(req.get("agent_id") or "")),
+                        "kall": str(req.get("action_type") or ""),
+                        "maal": req.get("recipient") or req.get("package_name")
+                                or req.get("source_doc_id") or "",
+                        "utfall": p.get("verdict"),
+                        "regler": p.get("reasons") or [],
+                        "hash": _kort_hash(e.hash),
+                        "request_id": p.get("request_id"),
+                    })
+                elif e.kind == "trap":
+                    rows.append({
+                        "seq": e.seq,
+                        "ts": e.ts.isoformat(),
+                        "agent": scenarios.agent_label(str(p.get("agent_id") or "")),
+                        "kall": "felle",
+                        "maal": p.get("doc_id") or "",
+                        "utfall": "trap",
+                        "regler": [p.get("trap_id")] if p.get("trap_id") else [],
+                        "hash": _kort_hash(e.hash),
+                        "request_id": None,
+                    })
+                elif e.kind == "sandbox":
+                    rows.append({
+                        "seq": e.seq,
+                        "ts": e.ts.isoformat(),
+                        "agent": "Sandkassen",
+                        "kall": "sandkasse",
+                        "maal": p.get("package_name") or "",
+                        "utfall": p.get("verdict"),
+                        "regler": [],
+                        "hash": _kort_hash(e.hash),
+                        "request_id": None,
+                    })
+
+            rows.reverse()  # nyeste først, som i skissen
+            stoppet = len([r for r in rows if r["utfall"] in ("block", "blocked", "trap")])
+            menneske = len([r for r in rows if r["utfall"] == "red"])
+            return {
+                "rows": rows[:limit],
+                "counts": {"alle": len(rows), "stoppet": stoppet, "menneske": menneske},
+                "truncated": len(rows) > limit,
+            }
+
+    def traps_overview(self) -> list[dict[str, Any]]:
+        """«Feller i dokumenter»: de oppdiktede dokumentene, og om de har gått av.
+
+        Dokumentene kommer fra agents/traps.py. «Sist rørt» kommer fra det som
+        faktisk har skjedd i denne kjøringen, ikke fra en liste.
+        """
+        with self._lock:
+            sist: dict[str, dict[str, Any]] = {}
+            for notis in self.notices:
+                if notis.get("kind") != "trap":
+                    continue
+            for request_id in self.order:
+                card = self.cards[request_id]
+                t = card.get("trap")
+                if t:
+                    sist[t["doc_id"]] = {"ts": t["ts"], "agent": card["agent_label"]}
+
+            ut = []
+            for doc in traps.trapped_docs():
+                markers = traps.found_markers(doc)
+                ut.append({
+                    "doc_id": doc.doc_id,
+                    "trap_id": doc.trap_id,
+                    "tittel": doc.title,
+                    "eier": doc.owner_role,
+                    "type": "Skjult instruks" if traps.MARKER_METADATA_KEY in markers
+                            else "Usynlig tekst",
+                    "intent": doc.intent,
+                    "sist": sist.get(doc.doc_id),
+                })
+            return ut
+
+    def agent_trail(self, request_id: str, limit: int = 6) -> list[dict[str, Any]]:
+        """«Dette ledet hit»: hva den samme agenten gjorde rett før.
+
+        Ekte historikk fra kortene, i rekkefølge. Ingen fortelling lagt på.
+        """
+        with self._lock:
+            card = self.cards.get(request_id)
+            if card is None:
+                return []
+            agent_id = card["request"].get("agent_id")
+            trail = []
+            for rid in self.order:
+                c = self.cards[rid]
+                if c["request"].get("agent_id") != agent_id:
+                    continue
+                trail.append({
+                    "request_id": rid,
+                    "ts": c["request"].get("ts"),
+                    "kall": c["request"].get("action_type"),
+                    "maal": c["request"].get("recipient") or c["request"].get("package_name")
+                            or c["request"].get("source_doc_id") or "",
+                    "utfall": c["decision"].get("verdict"),
+                    # Hvilken felle, ikke bare at det var en. «felle: true» sier
+                    # ingenting den som skal slå opp i loggen kan bruke.
+                    "felle": (c.get("trap") or {}).get("trap_id"),
+                    "er_denne": rid == request_id,
+                })
+                if rid == request_id:
+                    break
+            return trail[-limit:]
+
+    def waiting_for_you(self) -> dict[str, Any] | None:
+        """Det mest presserende roede varselet akkurat naa, eller None.
+
+        Rekkefoelgen er fast, saa to like kjoeringer gir samme kort:
+          1. hoeyest risiko foerst (high foer medium)
+          2. saa stoerste beloep
+          3. saa eldste forespoersel
+
+        Alt kommer fra kortene. Ingenting er regnet ut for aa se pent ut.
+        """
+        with self._lock:
+            venter = [
+                self.cards[request_id]
+                for request_id in self.order
+                if self.cards[request_id]["status"] == STATUS_WAITING
+            ]
+            if not venter:
+                return None
+
+            rang = {"high": 0, "medium": 1, "low": 2}
+
+            def noekkel(card: dict[str, Any]) -> tuple[int, float, str]:
+                return (
+                    rang.get(card["decision"].get("risk"), 9),
+                    -float(card["request"].get("amount") or 0),
+                    str(card["request"].get("ts") or ""),
+                )
+
+            card = sorted(venter, key=noekkel)[0]
+            req, dec = card["request"], card["decision"]
+            return {
+                "request_id": req["id"],
+                "agent": card["agent_label"],
+                "action": card["action_label"],
+                "amount": req.get("amount"),
+                "recipient": req.get("recipient"),
+                "recipient_known": req.get("recipient_known"),
+                "risk": dec.get("risk"),
+                "consequence_text": dec.get("consequence_text"),
+                "requires_typed_amount": dec.get("requires_typed_amount", False),
+                "waiting_total": len(venter),
+            }
+
     def overview(self) -> dict[str, Any]:
         """Tallene til dashbordet, i formen design-handoff/DATASHAPE.md beskriver.
 
@@ -689,12 +887,15 @@ class DemoState:
         """
         with self._lock:
             cards = [self.cards[request_id] for request_id in self.order]
-            return build_overview(
+            data = build_overview(
                 cards=cards,
                 before=self.before_list(),
                 verify=self.verify_result,
                 log_error=self.vault_error,
             )
+            # Kortet "Venter paa deg" paa Oversikt. Ekte tilstand, ikke et tall.
+            data["waiting"] = self.waiting_for_you()
+            return data
 
     # -- alt nettsiden trenger i ett kall ---------------------------------
 
