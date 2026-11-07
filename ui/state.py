@@ -7,7 +7,6 @@ Hvis gateway eller vault bare er skjelettet, bruker vi skjelettet.
 
 from __future__ import annotations
 
-import re
 import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -23,6 +22,7 @@ from contracts import (
     Verdict,
 )
 from gateway import evaluate
+from ui.amount import amount_matches, parse_amount
 
 # Den som sitter ved skjermen i demoen. Navnet forlater aldri denne filen:
 # det som logges er pseudonymet.
@@ -38,22 +38,9 @@ STATUS_BLOCKED = "blocked"
 CALM_LIMIT = 40
 
 
-def _digits(text: str) -> str:
-    return re.sub(r"[^0-9]", "", text)
-
-
-def amount_matches(typed: str, expected: float | None) -> bool:
-    """Sjekker at mennesket skrev riktig beløp.
-
-    Vi godtar mellomrom, punktum og "kr", fordi folk skriver beløp på mange måter.
-    Vi godtar ikke et annet tall. Poenget med å skrive beløpet er at man skal se det.
-    """
-    if expected is None:
-        return False
-    written = _digits(typed or "")
-    if not written:
-        return False
-    return int(written) == int(round(expected))
+# Beløpsregelen ligger i ui/amount.py, sammen med tvillingen sin i
+# ui/static/amount.js. Den er IKKE skrevet her, nettopp fordi nettleseren og
+# tjeneren maa tolke et skrevet beloep helt likt. Se F1 i docs/REDTEAM.md.
 
 
 def _import_after():
@@ -317,10 +304,14 @@ class DemoState:
             parsed: float | None = None
 
             if approved and decision.get("requires_typed_amount"):
-                if not amount_matches(typed_amount or "", expected):
+                if not amount_matches(typed_amount, expected):
                     card["error"] = "Beløpet stemmer ikke. Skriv det nøyaktig som det står."
                     return {"ok": False, "error": card["error"]}
-                parsed = float(int(_digits(typed_amount or "")))
+                # Beloepet er allerede bekreftet likt forventet. Vi logger det
+                # vi selv tolket, ikke raateksten, saa loggen aldri kan vise et
+                # annet tall enn det som ble vurdert.
+                ore = parse_amount(typed_amount)
+                parsed = ore / 100 if ore is not None else None
 
             card["error"] = None
             human = HumanResponse(

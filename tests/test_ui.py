@@ -639,3 +639,70 @@ def test_approving_over_http_needs_the_right_amount(server):
     assert status == 200 and out["ok"] is True
 
     _post(server, "/api/reset")
+
+
+def _waiting_transfer_id(server: str) -> str:
+    while _post(server, "/api/feed/step")[1]["card"] is not None:
+        pass
+    snap = _get(server, "/api/state")[1]
+    cards = [c for c in snap["waiting"] if c["request"]["amount"] == BIG_TRANSFER_NOK]
+    assert cards, "demoen skal ha en roed overfoering paa 10 000 000 kr"
+    return cards[0]["request"]["id"]
+
+
+@pytest.mark.parametrize(
+    "juks",
+    ["100000,00", "100000.00", "1000000,0", "-10000000", "+10000000", "abc10000000xyz"],
+)
+def test_the_amount_gate_cannot_be_bypassed_over_http(server, juks):
+    """F1 i docs/REDTEAM.md: disse ble alle godtatt mot 10 000 000.
+
+    Verre enn ingen sjekk: loggen ville etterpaa vist at operatoeren bekreftet
+    ti millioner, selv om det de skrev var et helt annet beloep.
+    """
+    _post(server, "/api/reset")
+    request_id = _waiting_transfer_id(server)
+
+    status, out = _post(
+        server, "/api/respond", {"request_id": request_id, "approved": True, "typed_amount": juks}
+    )
+    assert status == 200
+    assert out["ok"] is False
+    assert "stemmer ikke" in out["error"]
+    # Og den staar fortsatt og venter paa et menneske.
+    assert request_id in [c["request"]["id"] for c in out["state"]["waiting"]]
+
+    _post(server, "/api/reset")
+
+
+def test_a_very_long_amount_gives_a_clean_no_not_a_500(server):
+    """F3: mer enn 4300 siffer sprengte Pythons int() og ga HTTP 500."""
+    _post(server, "/api/reset")
+    request_id = _waiting_transfer_id(server)
+
+    status, out = _post(
+        server,
+        "/api/respond",
+        {"request_id": request_id, "approved": True, "typed_amount": "1" * 5000},
+    )
+    assert status == 200
+    assert out["ok"] is False
+    assert "stemmer ikke" in out["error"]
+
+    _post(server, "/api/reset")
+
+
+def test_the_log_records_the_amount_we_parsed_not_the_raw_text(server):
+    """Loggen skal vise tallet som faktisk ble vurdert."""
+    _post(server, "/api/reset")
+    request_id = _waiting_transfer_id(server)
+
+    status, out = _post(
+        server,
+        "/api/respond",
+        {"request_id": request_id, "approved": True, "typed_amount": "10.000.000 kr"},
+    )
+    assert status == 200 and out["ok"] is True
+    assert out["card"]["human"]["typed_amount"] == BIG_TRANSFER_NOK
+
+    _post(server, "/api/reset")

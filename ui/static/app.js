@@ -12,7 +12,10 @@ const esc = (s) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
   );
 
-const digits = (s) => String(s || "").replace(/[^0-9]/g, "");
+/* Beloepsregelen kommer fra /static/amount.js, som er den samme regelen som
+ * ui/amount.py. Ikke skriv en egen variant her. */
+const amountMatches = (typed, expected) =>
+  globalThis.LonewatchAmount.amountMatches(typed, expected);
 const kroner = (n) =>
   n == null ? "" : Math.round(n).toLocaleString("nb-NO").replace(/ /g, " ") + " kr";
 
@@ -204,7 +207,7 @@ function renderWaiting(list) {
       let gate;
       if (d.requires_typed_amount) {
         const val = typed[r.id] || "";
-        const ok = digits(val) !== "" && Number(digits(val)) === Math.round(r.amount);
+        const ok = amountMatches(val, r.amount);
         const hint = card.error
           ? '<span class="hint bad">' + esc(card.error) + "</span>"
           : ok
@@ -419,7 +422,7 @@ document.addEventListener("input", (ev) => {
   // Tegn bare knappen om, slik at feltet ikke mister markøren.
   const card = (latest.waiting || []).find((c) => c.request.id === id);
   if (!card) return;
-  const ok = Number(digits(typed[id])) === Math.round(card.request.amount) && digits(typed[id]) !== "";
+  const ok = amountMatches(typed[id], card.request.amount);
   const btn = document.querySelector('[data-approve="' + id + '"]');
   if (btn) btn.disabled = !ok;
   const hint = ev.target.parentElement.querySelector(".hint");
