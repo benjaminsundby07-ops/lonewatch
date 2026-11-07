@@ -162,6 +162,18 @@ def run():
         forsok.append("http KOM GJENNOM")
     except BaseException as exc:
         forsok.append("http stoppet")
+    # 5. fersk import av _socket: ga en usperret modul for sperren ble lukket
+    try:
+        import sys
+        del sys.modules["_socket"]
+        import _socket
+        s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        s.settimeout(1)
+        s.connect(("127.0.0.1", PORT))
+        s.sendall(b"kom gjennom 5")
+        forsok.append("fersk _socket KOM GJENNOM")
+    except BaseException as exc:
+        forsok.append("fersk _socket stoppet")
     return forsok
 """
     try:
@@ -171,7 +183,7 @@ def run():
         assert rapport.verdict == "blocked"
         # Alle fire forsøkene skal ha blitt stoppet, ikke bare det første.
         assert "KOM GJENNOM" not in resultat, resultat
-        assert resultat.count("stoppet") == 4, resultat
+        assert resultat.count("stoppet") == 5, resultat
 
         # Ingen rakk å koble seg til. accept() skal gå i tidsgrensen.
         with pytest.raises((TimeoutError, socket.timeout)):
@@ -318,14 +330,10 @@ OMVEIER = {
     # io er bare et skall rundt C-modulen _io.
     "io_core_fileio": "import _io\n_io.FileIO('/etc/hosts')",
     "io_core_open": "import _io\n_io.open('/etc/hosts')",
-    # Fersk import av _socket ga en usperret socket-modul.
-    "fersk_socket": (
-        "import sys\n"
-        "del sys.modules['_socket']\n"
-        "import _socket\n"
-        "s = _socket.socket(2, 1, 0)\n"
-        "s.connect(('1.1.1.1', 80))"
-    ),
+    # Fersk import av _socket ga en usperret socket-modul. Den omveien testes
+    # mot en ekte lytter i test_naar_aldri_det_ekte_nettverket, ikke her: en
+    # test som peker ut paa internett ville sendt ekte trafikk hvis sperren
+    # falt ut.
     # Samme sak etter at tillegget har tømt sys.meta_path.
     "meta_path_tommes": "import sys\nsys.meta_path.clear()\nimport ctypes",
 }

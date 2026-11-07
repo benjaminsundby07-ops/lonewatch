@@ -53,9 +53,14 @@ sperret:
 5. `del sys.modules["_socket"]; import _socket` - ga en fersk, usperret
    socket-modul.
 
-De står nå som tester i `tests/test_sandbox.py` under "kjente omveier". At vi
-fant fem på første forsøk er det sterkeste argumentet for at det finnes flere vi
-ikke har funnet.
+De fire første står som tester i `tests/test_sandbox.py` under "kjente omveier".
+Nummer 5 testes mot en ekte lytter på localhost i
+`test_naar_aldri_det_ekte_nettverket`, sammen med fire andre måter å nå nettet
+på - ingen test i prosjektet peker ut på internett, nettopp fordi en test som
+gjorde det, ville sendt ekte trafikk hvis sperren falt ut.
+
+At vi fant fem omveier på første forsøk er det sterkeste argumentet for at det
+finnes flere vi ikke har funnet.
 
 ## Tillegget kan se at miljøet er falskt
 
