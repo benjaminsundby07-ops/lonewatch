@@ -9,6 +9,34 @@ leverandørregister og ingen skanner som finner personopplysninger. Setter en
 agent `recipient_known=True` på en ukjent konto, slipper den gjennom. Dette er
 det største hullet: tilliten ligger ett hakk før oss.
 
+## Reglene ser ikke HVOR MANGE personer noe gjelder
+`personal_data_external` slaar til naar personopplysninger gaar ut av huset. Den
+teller ikke. Én bekreftelse til én kunde og en masseutsending til 8400 veier
+nøyaktig likt, fordi `contains_personal_data` er en av/paa-bryter i
+`contracts.py` og det ikke finnes noe antall å lese.
+
+Det gir to utslag, og begge er ekte:
+
+- **Masseutsendingen fanges** (`blind_018` i `docs/MALING.md`), men ikke fordi vi
+  saa at det var 8400 mottakere. Vi saa at det var persondata ut av huset.
+- **Å sende en kunde kundens egne opplysninger blir rødt.** Det er ikke en
+  utlevering til en tredjepart i det hele tatt, men regelen kan ikke se at
+  mottakeren ER den opplysningene gjelder. Tre uavhengige tilfeller sier det
+  samme: `blind_014`, `blind_042`, og vaar egen `syn_0143` i
+  `gateway/evaluation.py`, som naa er den eneste falske alarmen der.
+
+Vi vurderte aa kreve at handlingen OGSAA er ugjenkallelig (`reversible=False`)
+for at regelen skal slaa til. Det ville spart alle tre tilfellene over og
+fortsatt fanget de tre vi var ute etter. Vi gjorde det ikke, fordi skillet
+hviler paa hvordan `reversible` tilfeldigvis er fylt ut: i blindsettet er noen
+e-poster `True` og noen `False`, mens alle e-poster i vaare egne demodata er
+`False`. Aa bygge en regel paa det ville vaert aa tilpasse seg maalingen, ikke
+aa bli bedre.
+
+**Hva som ville løst det:** et antall i stedet for en bryter (hvor mange
+personer, hvilke kategorier opplysninger), og en maate aa vite om mottakeren er
+den registrerte selv.
+
 ## Ingen hukommelse mellom forespørsler
 Hver forespørsel vurderes helt alene. 100 overføringer på 49 999 kr rett etter
 hverandre gir 100 ganger `allow`. Vi oppdager ikke:

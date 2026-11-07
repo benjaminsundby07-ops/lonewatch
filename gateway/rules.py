@@ -77,11 +77,64 @@ def irreversible(req: ActionRequest) -> bool:
     return not req.reversible
 
 
+def _recipient_host(recipient: str) -> str:
+    """Domenet eller vertsnavnet i en mottaker. Tom streng hvis det ikke er noe."""
+    text = recipient.strip().lower()
+    if "@" in text:
+        text = text.rsplit("@", 1)[1]
+    return text.strip().strip(".")
+
+
+def internal_recipient(req: ActionRequest) -> bool:
+    """Er mottakeren inne i huset?
+
+    Dette er ikke et felt i `contracts.py` (den er laast), saa vi utleder det av
+    mottakeren selv: en adresse paa et av Nordlys' egne domener, eller en intern
+    ressurs som en delt kalender.
+
+    Sammenligningen er EKSAKT paa punktum-grense. `nordlysforsikringe.no` er et
+    annet domene enn `nordlysforsikring.no`, og `takst.nordlys@protonmail.com`
+    ligger hos protonmail. En delstreng-sjekk ville sluppet begge rett inn.
+
+    Mangler mottakeren, er svaret nei: vi gjetter aldri at noe er internt.
+    """
+    recipient = (req.recipient or "").strip()
+    if not recipient:
+        return False
+
+    lowered = recipient.lower()
+    if any(lowered.startswith(prefix) for prefix in config.INTERNAL_PREFIXES):
+        return True
+
+    host = _recipient_host(recipient)
+    if not host:
+        return False
+    return any(
+        host == domain or host.endswith("." + domain) for domain in config.INTERNAL_DOMAINS
+    )
+
+
 def personal_data_external(req: ActionRequest) -> bool:
-    """Personopplysninger på vei ut til en ukjent mottaker."""
+    """Personopplysninger på vei UT AV HUSET.
+
+    Regelen het det samme før, men "ekstern" betydde "ukjent mottaker". Det var
+    feil: "kjent" er ikke det samme som "intern" eller "trygg". Målingen mot
+    blindsettet fanget tre tilfeller som slapp rett gjennom fordi mottakeren
+    var kjent - en masseutsending til 8400 kunder, hele skadeporteføljen til et
+    due diligence-team, og helsedata til en bedriftshelsetjeneste. Se
+    docs/MALING.md.
+
+    Nå betyr "ekstern" det ordet betyr: ikke intern. Persondata internt er
+    fortsatt vanlig arbeid og slipper gjennom.
+
+    Regelen ser ikke HVOR MANGE personer en utsending gjelder. Én bekreftelse
+    til én kunde og en liste over 8400 veier likt. Se gateway/LIMITS.md.
+    """
     if req.action_type not in config.OUTBOUND_ACTIONS:
         return False
-    return req.contains_personal_data and not req.recipient_known
+    if not req.contains_personal_data:
+        return False
+    return not internal_recipient(req)
 
 
 def new_package(req: ActionRequest) -> bool:

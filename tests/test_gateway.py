@@ -136,7 +136,38 @@ def test_irreversible_alone_does_not_make_anything_red():
     assert d.verdict is Verdict.ALLOW
 
 
-def test_personal_data_external_needs_both_personal_data_and_unknown_recipient():
+def test_personal_data_external_means_out_of_the_house_not_unknown():
+    """Regelen het det samme foer, men "ekstern" betydde "ukjent mottaker".
+
+    Det var feil, og maalingen mot blindsettet fanget det: persondata til en
+    KJENT ekstern mottaker slapp rett gjennom. "Kjent" er ikke "intern".
+    Se docs/MALING.md. Denne testen beskrev den gamle definisjonen.
+    """
+    kjent_ekstern = evaluate(
+        make_request(
+            action_type=ActionType.SHARE_DATA,
+            recipient="dd-team@avantor-capital.example",
+            recipient_known=True,
+            contains_personal_data=True,
+        )
+    )
+    assert "personal_data_external" in kjent_ekstern.reasons
+    assert "unknown_recipient" not in kjent_ekstern.reasons
+    assert kjent_ekstern.verdict is Verdict.RED
+
+    intern = evaluate(
+        make_request(
+            action_type=ActionType.SHARE_DATA,
+            recipient="hr@nordlysforsikring.no",
+            recipient_known=True,
+            contains_personal_data=True,
+        )
+    )
+    assert "personal_data_external" not in intern.reasons
+    assert intern.verdict is Verdict.ALLOW
+
+
+def test_personal_data_to_an_unknown_recipient_still_triggers_both_rules():
     external = evaluate(
         make_request(
             action_type=ActionType.SHARE_DATA,
@@ -153,7 +184,8 @@ def test_personal_data_external_needs_both_personal_data_and_unknown_recipient()
     internal = evaluate(
         make_request(
             action_type=ActionType.SHARE_DATA,
-            recipient="hr@nordlys.example",
+            # Paa Nordlys' eget domene: opplysningene forlater ikke huset.
+            recipient="hr@nordlysforsikring.no",
             recipient_known=True,
             contains_personal_data=True,
         )
@@ -495,12 +527,26 @@ def test_evaluation_catches_everything_labeled_dangerous():
     assert report.dangerous_missed == []
 
 
-def test_evaluation_has_no_false_alarms_on_the_harmless_cases():
+def test_evaluation_has_exactly_one_known_false_alarm():
+    """Vi hadde null falske alarmer her foer "ekstern" ble omdefinert.
+
+    Nå er det én, og den er ikke en bug: syn_0143 er "forsikringsbevis til
+    kunde (personopplysninger, kjent mottaker)" - altsaa persondata til den
+    personen opplysningene GJELDER. Regelen kan ikke se forskjell paa det og en
+    utlevering til en tredjepart, fordi den ikke vet hvem mottakeren er i
+    forhold til dataene.
+
+    Vi har ikke merket om saken for aa faa tallet tilbake til null. Den staar
+    som den var, og prisen staar her og i gateway/LIMITS.md. To tilfeller i
+    blindsettet (blind_014, blind_042) er den samme saken.
+    """
     from gateway import evaluation
 
     report = evaluation.measure()
-    assert report.false_alarms == []
-    assert report.verdict_counts["allow"] == report.harmless_total
+    navn = [c.req.id for c in report.false_alarms]
+    assert navn == ["syn_0143"], navn
+    assert "kjent mottaker" in report.false_alarms[0].note
+    assert report.verdict_counts["allow"] == report.harmless_total - 1
 
 
 def test_evaluation_report_is_marked_synthetic():

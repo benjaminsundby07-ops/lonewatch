@@ -44,6 +44,26 @@ PACKAGE_BLOCKLIST: frozenset[str] = frozenset(
     }
 )
 
+# Nordlys' egne domener. En mottaker paa et av disse er INTERN: da forlater
+# ikke opplysningene huset, og det er vanlig arbeid.
+#
+# Sammenligningen er eksakt paa punktum-grense, aldri delstreng. Blindsettet
+# inneholder bade "kunde@nordlysforsikringe.no" (skrivefeil-domene) og
+# "takst.nordlys@protonmail.com" - to adresser som ser interne ut for et oeye
+# i fart, og som en delstreng-sjekk ville sluppet rett inn.
+#
+# Oppdiktet, som resten av demoen.
+INTERNAL_DOMAINS: frozenset[str] = frozenset(
+    {
+        "nordlysforsikring.no",
+        "nordlys.no",
+    }
+)
+
+# Mottakere som ikke er adresser i det hele tatt, men interne ressurser.
+# "kalender:drift-felles" er en delt kalender inne i huset.
+INTERNAL_PREFIXES: tuple[str, ...] = ("kalender:",)
+
 # Handlinger som sender noe ut av huset. Bare disse kan ha en "mottaker" som betyr noe.
 OUTBOUND_ACTIONS: frozenset[ActionType] = frozenset(
     {
