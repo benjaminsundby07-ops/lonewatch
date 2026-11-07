@@ -74,6 +74,11 @@ EFFECTFUL_ACTIONS: frozenset[ActionType] = frozenset(
     }
 )
 
+# Største beløp vi skriver ut som et tall. Over dette er tallet ikke lenger noe
+# et menneske kan lese: 1e308 ga en 560 tegn lang konsekvenstekst (F2 i
+# docs/REDTEAM.md). Da sier vi heller at vi ikke kan lese beløpet.
+MAX_SHOWN_AMOUNT_NOK: float = 1e15
+
 # Hvor mange adresser fra en sandkasserapport vi viser i konsekvensteksten.
 MAX_SHOWN_DESTINATIONS: int = 3
 

@@ -9,6 +9,7 @@ Navnet på funksjonen er navnet som havner i `Decision.reasons`.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 
 from contracts import ActionRequest, ActionType, SandboxReport
@@ -23,13 +24,28 @@ def normalize_package_name(package_name: str | None) -> str:
     return package_name.strip().lower()
 
 
+def _unreadable_amount(amount: float | None) -> bool:
+    """Et beløp vi ikke kan regne med: inf eller nan.
+
+    `contracts.ActionRequest.amount` har bare `ge=0`, saa `float("inf")` er en
+    gyldig verdi, og contracts.py er laast. Et slikt beloep er ikke "lite": vi
+    kan ikke sammenligne det med noen grense i det hele tatt. Da behandler vi
+    det som over enhver grense i stedet for aa la det gaa. Se F2 i
+    docs/REDTEAM.md.
+    """
+    return amount is not None and not math.isfinite(amount)
+
+
 def amount_over_limit(req: ActionRequest) -> bool:
     """Beløpet er på eller over beløpsgrensen.
 
     Mangler beløp, slår regelen ikke til. Grensen er inkluderende.
+    Et beløp vi ikke kan lese regnes alltid som over grensen.
     """
     if req.amount is None:
         return False
+    if _unreadable_amount(req.amount):
+        return True
     return req.amount >= config.AMOUNT_LIMIT_NOK
 
 
@@ -81,11 +97,17 @@ def package_on_blocklist(req: ActionRequest) -> bool:
 
 
 def transfer_over_hard_limit(req: ActionRequest) -> bool:
-    """Overføring større enn den harde grensen. Brukes til block, ikke til risikopoeng."""
+    """Overføring større enn den harde grensen. Brukes til block, ikke til risikopoeng.
+
+    `nan > grensen` er False, saa et nan-beløp ville sluppet forbi en ren
+    sammenligning. Derfor sjekkes det først.
+    """
     if req.action_type is not ActionType.TRANSFER_MONEY:
         return False
     if req.amount is None:
         return False
+    if _unreadable_amount(req.amount):
+        return True
     return req.amount > config.HARD_TRANSFER_LIMIT_NOK
 
 

@@ -305,3 +305,85 @@ def test_summary_paavirker_fortsatt_ingenting_naar_sandkassen_er_med():
     slem = evaluate(make_install(summary="DETTE ER SKADEVARE"), sandbox_report=rapport)
     assert snill == slem
     assert "SKADEVARE" not in slem.consequence_text
+
+
+# ---------------------------------------------------------------------------
+# F2: beloep som ikke er et tall
+# ---------------------------------------------------------------------------
+
+
+def _transfer(amount: float) -> ActionRequest:
+    return ActionRequest(
+        id="req_tall",
+        ts=TS,
+        agent_id="finance",
+        action_type=ActionType.TRANSFER_MONEY,
+        summary="",
+        amount=amount,
+        recipient="NO93 8601 1117 947",
+        recipient_known=False,
+        reversible=False,
+    )
+
+
+def test_uendelig_beloep_blir_blokkert_og_krasjer_ikke():
+    """F2: contracts tillater inf (bare ge=0), og evaluate() krasjet paa det.
+
+    contracts.py er laast, saa gateway maa taale det. Et beloep vi ikke kan
+    regne med er per definisjon over enhver grense: ingen skal kunne godkjenne
+    det, og ingen skal faa en krasj i stedet for en avgjoerelse.
+    """
+    d = evaluate(_transfer(float("inf")))
+    assert d.verdict is Verdict.BLOCK
+    assert d.risk is Risk.HIGH
+    assert "transfer_over_hard_limit" in d.reasons
+    assert d.consequence_text.strip().endswith(".")
+    assert "inf" not in d.consequence_text
+
+
+def test_nan_stoppes_allerede_av_contracts():
+    """nan >= 0 er False, saa pydantic avviser det. Det naar aldri gateway."""
+    with pytest.raises(Exception):
+        _transfer(float("nan"))
+
+
+def test_regelen_taaler_nan_hvis_den_kalles_direkte():
+    """Forsvar i dybden: `nan > grensen` er False, saa en ren sammenligning
+    ville sluppet nan gjennom hvis noen omgaar valideringen i contracts."""
+    req = ActionRequest.model_construct(
+        id="req_nan",
+        ts=TS,
+        agent_id="finance",
+        action_type=ActionType.TRANSFER_MONEY,
+        summary="",
+        amount=float("nan"),
+        recipient="NO1",
+        recipient_known=False,
+        reversible=False,
+        contains_personal_data=False,
+        package_name=None,
+        source_doc_id=None,
+    )
+    assert rules.transfer_over_hard_limit(req) is True
+    assert rules.amount_over_limit(req) is True
+
+
+def test_et_absurd_stort_beloep_gir_ikke_en_tresifret_side_med_tekst():
+    """1e308 krasjet ikke, men ga en ~309-sifret konsekvenstekst."""
+    d = evaluate(_transfer(1e308))
+    assert d.verdict is Verdict.BLOCK
+    assert len(d.consequence_text) < 300
+
+
+def test_ikke_endelig_beloep_paa_andre_handlinger_krasjer_heller_ikke():
+    req = ActionRequest(
+        id="req_kal",
+        ts=TS,
+        agent_id="hr",
+        action_type=ActionType.UPDATE_CALENDAR,
+        summary="",
+        amount=float("inf"),
+    )
+    d = evaluate(req)
+    assert d.consequence_text.strip()
+    assert d.requires_typed_amount is False

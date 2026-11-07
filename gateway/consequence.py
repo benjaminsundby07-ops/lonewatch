@@ -7,6 +7,8 @@ teksten mennesket leser før det godkjenner.
 
 from __future__ import annotations
 
+import math
+
 from contracts import ActionRequest, ActionType, SandboxReport
 
 from . import config
@@ -14,6 +16,7 @@ from . import config
 UNKNOWN_ACCOUNT = "ukjent konto"
 UNKNOWN_RECIPIENT = "ukjent mottaker"
 UNKNOWN_AMOUNT = "ukjent beløp"
+UNREADABLE_AMOUNT = "et beløp vi ikke kan lese"
 IRREVERSIBLE_NOTE = "Kan ikke angres."
 PERSONAL_DATA_NOTE = "Inneholder personopplysninger."
 BLOCKED_NOTE = "Dette stoppes automatisk og kan ikke godkjennes."
@@ -62,9 +65,16 @@ def _sandbox_text(report: SandboxReport) -> str:
 
 
 def format_amount(amount: float | None) -> str:
-    """10000000 -> '10 000 000 kr'. Hele kroner, mellomrom som tusenskille."""
+    """10000000 -> '10 000 000 kr'. Hele kroner, mellomrom som tusenskille.
+
+    Et beløp vi ikke kan lese (inf, nan) eller som er saa stort at tallet ikke
+    lenger betyr noe for et menneske, skrives ut som tekst i stedet. Uten dette
+    krasjet `int(round(inf))` hele evaluate(). Se F2 i docs/REDTEAM.md.
+    """
     if amount is None:
         return UNKNOWN_AMOUNT
+    if not math.isfinite(amount) or abs(amount) >= config.MAX_SHOWN_AMOUNT_NOK:
+        return UNREADABLE_AMOUNT
     return f"{int(round(amount)):,}".replace(",", " ") + " kr"
 
 
