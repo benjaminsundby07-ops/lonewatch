@@ -112,94 +112,79 @@ derfor ikke:
 
 ## Rapporten sier bare ja eller nei
 
-`SandboxReport.verdict` er `clean` eller `blocked`, og én enkelt hendelse er nok
-til `blocked`. Det gir noen rare utfall:
+`SandboxReport.verdict` er `clean`, `blocked` eller `not_tested`, og én enkelt
+hendelse er nok til `blocked`. Det gir noen rare utfall:
 
 - et tillegg som leser `~/.env` fordi det *skal* lese konfigurasjon, blir
   `blocked`. Vi kan ikke se forskjell på god og dårlig grunn.
 - et tillegg som trenger nettverket for å gjøre jobben sin (hente en kurs, slå
   opp en adresse) kan aldri bli `clean`. Sandkassen har ingen tillatelsesliste.
-- et tillegg som krasjer med en gang blir `clean`, for det rakk ikke å gjøre noe
-  galt. "Clean" betyr altså "vi så ingenting", ikke "dette er trygt".
-  Dette hullet er stort nok til å stå for seg selv - se neste avsnitt.
+- et tillegg som krasjer med en gang blir `not_tested`, ikke `clean`. Se neste
+  avsnitt. "Clean" betyr "vi så etter og fant ingenting", og det skal bare stå
+  når tillegget faktisk kjørte ferdig.
 
-## Et tillegg som krasjer blir `clean` (uløst)
+## Et tillegg som krasjer blir `not_tested`, ikke `clean`
 
-Dette er verdt å si tydelig, fordi `clean` ser ut som et svar og ikke er det.
+Dette var lenge et uløst hull, og det er nå lukket.
 
 `report.build_report()` setter `blocked` når tillegget gjorde noe vi ikke
-tillater, eller når delprosessen ikke ble ferdig. Et tillegg som *starter, feiler
-og avslutter pent* har ikke gjort noe av delene. Da blir svaret `clean`.
+tillater, eller når delprosessen ikke ble ferdig i tide. Et tillegg som
+*starter, feiler og avslutter pent* har ikke gjort noe av delene — og før ble
+svaret da `clean`. Det var feil: «clean» betyr «vi så etter og fant ingenting»,
+og her fikk vi aldri sett etter.
 
-Tre varianter vi har prøvd, alle `clean`:
+Rapporten har nå tre utfall:
 
-| Tillegget | Hendelser | Notat i rapporten |
+| verdict | betyr | eksempel |
 |---|---|---|
-| `run()` kaster en feil | `start, plugin_error, done` | «Tillegget krasjet: RuntimeError: …» |
-| krasjer allerede ved import | `start, plugin_error, done` | «Tillegget krasjet: RuntimeError: …» |
-| har ingen `run()` i det hele tatt | `start, no_entry_point, done` | «Ingen forsøk på nettverk, ingen lesing av de falske hemmelighetene og ingenting utenfor boksen.» |
+| `blocked` | vi så noe vi ikke tillater | prøvde å nå nettet, leste et agn, hang |
+| `clean` | vi så etter og fant ingenting | `pdf-helper`, `date-utils` |
+| `not_tested` | vi fikk aldri sett etter | tillegget krasjet, eller mangler `run()` |
 
-Den siste raden er den farligste. Notatet sier ordrett at vi ikke så noe
-mistenkelig — og det er sant, men bare fordi **ingenting ble kjørt**. Leser du
-den linjen uten å vite dette, ser det ut som tillegget ble undersøkt og
-godkjent.
-
-Hva det betyr i praksis:
-
-- Et tillegg kan krasje med vilje hos oss og oppføre seg annerledes et sted
-  hvor det ikke krasjer. Det er samme familie som sandkassegjenkjenning over,
-  bare enklere: `if sandkasse(): raise`.
-- `clean` sier aldri «tillegget virker». Det sier «vi så ingenting galt i det
-  ene øyeblikket vi så».
-- Mellomstasjonen gjør riktig med dette: en `clean`-rapport senker ikke
-  risikoen. `new_package` gjelder fortsatt, og tillegget blir rødt uansett.
-  Et krasjende tillegg slipper altså ikke gjennom *på grunn av* rapporten -
-  men rapporten hjelper heller ikke mennesket som skal bestemme.
-
-**Vi har ikke endret verdiktet**, og det er ikke et valg: `SandboxReport.verdict`
-er `Literal["clean", "blocked"]` i `contracts.py`, som er låst. Et krasjende
-tillegg er fortsatt `clean`.
-
-**Det vi HAR endret:** rapporten sier det nå rett ut. Krasjer tillegget, eller
-mangler det `run()`, begynner `notes` med
+`not_tested` settes når hendelsene inneholder `plugin_error` eller
+`no_entry_point` (`report.INCONCLUSIVE_EVENTS`). Notatet begynner med
 
 > IKKE TESTET: sandkassen fikk ikke kjørt tillegget ferdig, så vi vet ikke hva
 > det ville gjort. Dette er ikke det samme som at vi så etter og ikke fant noe.
 
-Og den gamle klareringen — «Ingen forsøk på nettverk, ingen lesing av de falske
+Den gamle klareringen — «Ingen forsøk på nettverk, ingen lesing av de falske
 hemmelighetene og ingenting utenfor boksen» — står nå **bare** når tillegget
-faktisk kjørte ferdig. Det var den farligste delen: den setningen var sann, men
-bare fordi ingenting ble kjørt, og den leste som en godkjenning.
+faktisk kjørte ferdig. Det var den farligste varianten: setningen var sann,
+men bare fordi ingenting ble kjørt, og den leste som en godkjenning.
 
-`SandboxRun.inconclusive` gir det samme maskinlesbart til den som kan bruke det
-(`sandbox.is_inconclusive(events)`).
+### Rekkefølgen: et funn slår «ikke testet»
 
-**Det som fortsatt mangler, og hva som skal til.** Mellomstasjonen kan ikke se
-forskjell: `gateway.evaluate()` får en `SandboxReport`, og der står det `clean`.
-I praksis gjør det lite — en `clean`-rapport senker aldri risikoen, og
-`new_package` gjør tillegget rødt uansett — men et menneske som leser
-konsekvensteksten får «Sandkassen kjørte tillegget i en lukket boks og så
-ingenting mistenkelig», og det er feil for et tillegg som aldri kom i gang.
+Prøver et tillegg å nå nettet og krasjer rett etterpå, blir svaret `blocked` —
+ikke `not_tested`. Vi så noe, og det vi så var nok. `not_tested` er bare for
+tilfellene der vi **ikke** så noe, fordi tillegget aldri kom i gang.
 
-For å rette det trengs **én endring i `contracts.py`**:
+En **tidsgrense** er heller ikke `not_tested`. Et tillegg som henger har gjort
+noe vi observerte: det nektet å gi seg. Det blir `blocked` som før.
 
-```python
-class SandboxReport(Strict):
-    ...
-    verdict: Literal["clean", "blocked", "not_tested"]
-```
+### Hva det betyr videre
 
-(Alternativt et nytt felt `tested: bool = True`, som er mindre inngripende for
-alt som allerede leser `verdict`.) Med den på plass kan `build_report()` sette
-`not_tested`, `gateway/consequence.py` få en egen setning, og
-`tests/test_sandbox.py::test_en_tredje_status_krever_contracts` snus til å
-kreve den nye verdien. Vi har ikke gjort endringen selv — `contracts.py` er
-låst, og det er ikke vår fil å låse opp.
+- **Mellomstasjonen** ser forskjellen. `sandbox_blocked` utløses bare av
+  `blocked`; `not_tested` legger ingenting til. Men konsekvensteksten sier nå
+  «Sandkassen fikk ikke testet tillegget: det kom aldri i gang», i stedet for
+  «så ingenting mistenkelig». `new_package` gjelder uansett, så tillegget blir
+  rødt.
+- **«Før»-listen i UI** viser «ikke testet» som egen tilstand, og teller det
+  ikke som `clean`. Dashbordets «{tested} testet» teller bare de vi faktisk
+  fikk testet.
+- **Gamle logger og `examples/`** leses fortsatt. Vi la til en verdi, vi
+  fjernet ingen, så en linje med `clean` eller `blocked` validerer som før.
 
-**Hvorfor ikke bare gjøre krasj blokkerende:** da blir et tillegg med en vanlig
-bug behandlet som ondsinnet, og vi har ingen måte å skille dem på. «Vi vet
-ikke» er et ærligere svar enn «nei».
+Dette krevde den eneste endringen som er gjort i `contracts.py`:
+`verdict: Literal["clean", "blocked", "not_tested"]`.
 
+### Hvorfor ikke bare gjøre krasj blokkerende
+
+Da blir et tillegg med en helt vanlig bug behandlet som ondsinnet, og vi har
+ingen måte å skille dem på. «Vi vet ikke» er et ærligere svar enn «nei».
+
+Og hullet som gjenstår: **et tillegg kan krasje med vilje.** `if sandkasse():
+raise` gir `not_tested` hos oss og vanlig oppførsel på en ekte maskin. Nå sier
+rapporten i det minste at vi ikke vet — før sa den at alt så fint ut.
 ## Hva vi måler, og hva vi ikke måler
 
 Vi måler hva tillegget *gjorde* - adresser det prøvde å nå, filer det leste.

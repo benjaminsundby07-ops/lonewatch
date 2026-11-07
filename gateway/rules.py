@@ -177,11 +177,14 @@ def sandbox_blocked(req: ActionRequest, sandbox_report: SandboxReport | None) ->
 
     Dette er den eneste regelen som ser på noe utenfor ActionRequest, og den ser
     bare paa hva tillegget FAKTISK gjorde (`verdict`), ikke paa hva noen skriver
-    om det. Rapporten kommer fra sandbox/, som avgjør clean/blocked med faste
-    regler. Ingen AI, og tilleggets egen beskrivelse av seg selv leses aldri.
+    om det. Rapporten kommer fra sandbox/, som avgjør clean/blocked/not_tested
+    med faste regler. Ingen AI, og tilleggets egen beskrivelse av seg selv
+    leses aldri.
 
-    Uten rapport slaar regelen ikke til: "ikke testet" er ikke det samme som
-    "stoppet".
+    BARE "blocked" slaar til. Verken en manglende rapport eller `not_tested`
+    gjoer det: "vi fikk ikke testet det" er ikke det samme som "nei". Tillegget
+    blir uansett roedt saa lenge `new_package` gjelder - vi later bare ikke som
+    vi har sett noe vi ikke har sett.
     """
     if req.action_type is not ActionType.INSTALL_PACKAGE:
         return False

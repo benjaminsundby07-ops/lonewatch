@@ -1,7 +1,8 @@
 """Tall og navn sandkassen bruker. Alt som kan justeres står her.
 
 Ingenting her bestemmer allow/red/block i mellomstasjonen. Sandkassen svarer
-bare "clean" eller "blocked" om et tillegg, og gjør det med faste regler.
+bare "clean", "blocked" eller "not_tested" om et tillegg, og gjør det med
+faste regler.
 """
 
 from __future__ import annotations

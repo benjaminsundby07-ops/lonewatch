@@ -670,11 +670,14 @@ class DemoState:
         """
         with self._lock:
             scanned = list(self._scanned.values())
+            # `not_tested` telles for seg. Det er IKKE clean: sandkassen kjørte
+            # tillegget, men det kom aldri i gang, så vi fikk ikke sett etter.
             return {
                 "scanned": scanned,
                 "untested": list(self._untested.values()),
                 "blocked": len([r for r in scanned if r["verdict"] == "blocked"]),
                 "clean": len([r for r in scanned if r["verdict"] == "clean"]),
+                "not_tested": len([r for r in scanned if r["verdict"] == "not_tested"]),
                 "error": self.sandbox_error,
             }
 

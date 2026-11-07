@@ -24,7 +24,7 @@ def main(argv: list[str]) -> int:
             print(f"  {pakke}: {exc}")
             print(f"  Kjente tillegg: {', '.join(available_packages())}")
             return 1
-        merke = "OK    " if rapport.verdict == "clean" else "STOPP "
+        merke = {"clean": "OK    ", "blocked": "STOPP ", "not_tested": "?     "}[rapport.verdict]
         print(f"{merke} {pakke:<18} {rapport.verdict}")
         if rapport.destinations:
             print(f"         adresser: {', '.join(rapport.destinations)}")

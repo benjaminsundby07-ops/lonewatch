@@ -21,7 +21,7 @@ finnes fem slags linjer (`LogKind` i `contracts.py`):
 | `decision` | mellomstasjonen har bestemt seg | verdikt, risiko, hvilke regler som slo til |
 | `human` | et menneske svarte på et rødt varsel | pseudonym, godkjent/avvist, beløpet som ble skrevet, sekunder brukt |
 | `trap` | en felle i et dokument gikk av | dokument-id, agent-id, hva fella forsøkte |
-| `sandbox` | et tillegg ble kjørt i den lukkede boksen | pakkenavn, adresser, clean/blocked, notat |
+| `sandbox` | et tillegg ble kjørt i den lukkede boksen | pakkenavn, adresser, clean/blocked/not_tested, notat |
 
 **I hvilken form:**
 
@@ -105,7 +105,11 @@ rødt varsel. Det er ikke en utlevering til en tredjepart i det hele tatt, men
 regelen kan ikke se at mottakeren **er** den opplysningene gjelder. Vi valgte
 det bevisst (A-valget i `docs/MALING.md`): alternativet krevde at handlingen
 også var ugjenkallelig, og det skillet viste seg å hvile på hvordan et felt
-tilfeldigvis var fylt ut. Prisen er tre kjente falske alarmer.
+tilfeldigvis var fylt ut.
+
+Prisen er målt: **sju falske alarmer over tre uavhengige sett.** Et ekte
+produkt måtte la koblingen mot kunderegisteret avgjøre om mottakeren er kunden
+selv — det er et oppslag, ikke en regel.
 
 Reglene teller heller ikke: **én bekreftelse til én kunde og en masseutsending
 til 8400 veier likt.** Det finnes ikke noe antall å lese.

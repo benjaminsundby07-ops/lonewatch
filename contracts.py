@@ -105,7 +105,7 @@ class SandboxReport(Strict):
     package_name: str
     attempted_network: bool
     destinations: list[str] = Field(default_factory=list)
-    verdict: Literal["clean", "blocked"]
+    verdict: Literal["clean", "blocked", "not_tested"]
     notes: str = ""
 
 

@@ -198,6 +198,8 @@ def test_nettverksforsoek_og_dom_er_alltid_enige(navn):
     """Invarianten: en rapport kan ikke si baade "proevde nett" og "clean"."""
     rapport = sandbox.scan(navn)
     if rapport.attempted_network:
+        # Saa vi et nettverksforsoek, er det et funn. Da kan svaret verken
+        # vaere "clean" eller "not_tested".
         assert rapport.verdict == "blocked", navn
 
 
@@ -396,11 +398,18 @@ def test_noklene_til_lonewatch_foelger_ikke_med_inn():
 
 
 def test_et_tillegg_som_krasjer_blir_rapportert():
+    """Testen slo foer fast at en krasj ble `clean`.
+
+    Det var hullet: "clean" betyr "vi saa etter og fant ingenting", og her fikk
+    vi aldri sett etter. `contracts.SandboxReport.verdict` har naa en tredje
+    verdi for nettopp det.
+    """
     kilde = "def run():\n    raise RuntimeError('noe gikk galt')\n"
     rapport = sandbox.run_plugin_source("krasjtest", kilde, timeout_s=10.0)
     assert "krasjet" in rapport.notes
-    # En krasj alene er ikke mistenkelig: tillegget kom ingen vei.
-    assert rapport.verdict == "clean"
+    # En krasj alene er ikke mistenkelig - men den er heller ikke en klarering.
+    assert rapport.verdict == "not_tested"
+    assert rapport.verdict != "clean"
 
 
 # ----------------------------------------------------------- de falske filene
@@ -617,12 +626,47 @@ def test_demotilleggene_kommer_alle_i_gang(navn):
     assert sandbox.run_in_box(navn, kilde, timeout_s=15).inconclusive is False
 
 
-def test_en_tredje_status_krever_contracts():
-    """Dokumenterer hvorfor dette bare er et notat og ikke et verdikt.
+def test_contracts_har_den_tredje_statusen():
+    """Testen krevde foer at kontrakten BARE hadde clean/blocked.
 
-    Endres contracts.py til Literal["clean", "blocked", "not_tested"], kan
-    denne testen snus til aa kreve det nye verdiktet.
+    Den er snudd: `not_tested` er naa en del av kontrakten, og det er den
+    eneste endringen som ble gjort i den ellers laaste contracts.py.
     """
     from contracts import SandboxReport
 
-    assert SandboxReport.model_fields["verdict"].annotation.__args__ == ("clean", "blocked")
+    assert SandboxReport.model_fields["verdict"].annotation.__args__ == (
+        "clean",
+        "blocked",
+        "not_tested",
+    )
+
+
+def test_gamle_rapporter_validerer_fortsatt():
+    """Logger og eksempler skrevet foer den tredje statusen maa kunne leses.
+
+    Vi la til en verdi, vi fjernet ingen. En logglinje fra i gaar med
+    verdict="clean" skal fortsatt gaa gjennom modellen.
+    """
+    from datetime import datetime, timezone
+
+    from contracts import SandboxReport
+
+    for gammel in ("clean", "blocked"):
+        r = SandboxReport(
+            ts=datetime(2026, 11, 7, 9, 0, tzinfo=timezone.utc),
+            package_name="noe-gammelt",
+            attempted_network=False,
+            destinations=[],
+            verdict=gammel,
+            notes="skrevet foer not_tested fantes",
+        )
+        assert r.verdict == gammel
+        # Og rundturen gjennom JSON, slik loggen lagrer dem.
+        assert SandboxReport.model_validate(r.model_dump(mode="json")).verdict == gammel
+
+    with pytest.raises(Exception):
+        SandboxReport(
+            ts=datetime(2026, 11, 7, 9, 0, tzinfo=timezone.utc),
+            package_name="x", attempted_network=False, destinations=[],
+            verdict="finnes_ikke", notes="",
+        )

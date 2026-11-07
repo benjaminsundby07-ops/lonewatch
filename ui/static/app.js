@@ -28,6 +28,11 @@ const RULE_TEXT = {
   irreversible: "kan ikke angres",
   personal_data_external: "personopplysninger ut av huset",
   new_package: "ukjent tillegg",
+  destructive_change: "sletter eller overskriver, kan ikke angres",
+  incomplete_request: "ufullstendig forespørsel",
+  sandbox_blocked: "stoppet i sandkassen",
+  package_on_blocklist: "tillegg på blokklisten",
+  transfer_over_hard_limit: "over den harde grensen",
 };
 
 let latest = null;
@@ -55,7 +60,13 @@ async function api(path, body) {
 function startFeed() {
   stopFeed();
   feedTimer = setInterval(async () => {
-    if (latest && latest.feed && latest.feed.done) return stopFeed();
+    if (latest && latest.feed && latest.feed.done) {
+      stopFeed();
+      /* Alt er gjennom. Sjekk loggen én gang til, slik at ringen viser
+       * tilstanden for HELE kjoeringen og ikke bare starten. */
+      await verifyQuietly();
+      return;
+    }
     try {
       const out = await api("/api/feed/step", {});
       apply(out.state);
@@ -343,14 +354,23 @@ function renderBefore(b) {
     );
   }
 
+  /* Tre tilstander, og de sier tre forskjellige ting: vi stoppet det, vi saa
+   * etter og fant ingenting, eller vi fikk aldri sett etter. Den siste maa
+   * aldri se ut som en klarering. */
+  const TILSTAND = {
+    blocked: { tittel: "stoppet i sandkassen", merke: "blokkert" },
+    clean: { tittel: "ingenting mistenkelig", merke: "rent" },
+    not_tested: { tittel: "ikke testet", merke: "ikke testet" },
+  };
+
   b.scanned.forEach((r) => {
-    const blocked = r.verdict === "blocked";
+    const t = TILSTAND[r.verdict] || { tittel: r.verdict, merke: r.verdict };
     rows.push(
       '<div class="after-row"><span class="box"></span><div>' +
         '<div class="at">' +
         esc(r.package_name) +
         " &middot; " +
-        (blocked ? "stoppet i sandkassen" : "ingenting mistenkelig") +
+        esc(t.tittel) +
         "</div>" +
         '<div class="ad">' +
         esc(r.notes) +
@@ -358,7 +378,7 @@ function renderBefore(b) {
           ? " Adresser: " + esc(r.destinations.join(", ")) + "."
           : "") +
         "</div></div>" +
-        '<span class="ao">' + (blocked ? "blokkert" : "rent") + "</span></div>"
+        '<span class="ao">' + esc(t.merke) + "</span></div>"
     );
   });
 
@@ -584,6 +604,31 @@ async function loadAfter() {
 
 /* ---------------- sjekk loggen ---------------- */
 
+/* Kjoerer sjekken i bakgrunnen, uten aa vise banneret.
+ *
+ * Hvorfor i det hele tatt: ringen "Loggkjede" paa Oversikt staar som "Ikke
+ * sjekket ennaa" til noen har kjoert sjekken, og det SKAL den - vi viser
+ * aldri OK for noe vi ikke har sett paa. Men aa kreve at noen trykker en knapp
+ * foer ringen kan si noe, gjoer at den staar tom gjennom hele demoen.
+ *
+ * Dette er den ekte sjekken: samme /api/verify, samme lesing og dekryptering
+ * av hele filen fra disk. Den er bare ikke utloest av et klikk. */
+async function verifyQuietly() {
+  try {
+    const r = await api("/api/verify");
+    if (latest && latest.log) {
+      latest.log.last_verify = r;
+      latest.log.lines = r.lines;
+    }
+    if (activeTab === "overview") await refreshOverview();
+    return r;
+  } catch (e) {
+    /* Feiler den, lar vi ringen staa som "Ikke sjekket ennaa". Det er riktig:
+     * vi vet ikke om loggen stemmer. */
+    return null;
+  }
+}
+
 async function verify() {
   const r = await api("/api/verify");
   const b = el("verify-banner");
@@ -679,6 +724,9 @@ el("btn-reset").addEventListener("click", async () => {
   el("story-band").classList.add("hidden");
   dashboardData = null;
   apply(await api("/api/reset", {}));
+  /* Ny, tom logg. Sjekken kjoeres paa nytt, saa ringen ikke viser et svar som
+   * gjaldt loggen fra foer nullstillingen. */
+  await verifyQuietly();
   if (activeTab === "overview") await refreshOverview();
   startFeed();
 });
@@ -692,5 +740,8 @@ el("btn-reset").addEventListener("click", async () => {
   else if (location.hash === "#prov") showTab("custom");
   else if (location.hash === "#godkjenning") showTab("queue");
   else showTab("overview");
+  /* Sjekk loggen med én gang siden aapnes, saa ringen viser OK og de tolv
+   * foerste tegnene av siste hash uten at noen maa trykke paa noe. */
+  await verifyQuietly();
   startFeed();
 })();

@@ -6,8 +6,9 @@
 Tillegget kjøres i en egen delprosess. Der inne er nettverket byttet ut med en
 vegg som bare skriver ned hvilken adresse tillegget prøvde å nå, og
 hjemmemappen er en falsk mappe med oppdiktede filer som ligner et
-utviklermiljø. Alt tillegget gjør skrives ned, og rapporten sier `clean` eller
-`blocked`.
+utviklermiljø. Alt tillegget gjør skrives ned, og rapporten sier `clean`,
+`blocked` eller `not_tested` (tillegget kom aldri i gang, så vi fikk ikke sett
+hva det ville gjort).
 
 Avgjørelsen er en fast regel på det tillegget faktisk gjorde - aldri en
 AI-modell, og aldri tilleggets egen beskrivelse av seg selv.

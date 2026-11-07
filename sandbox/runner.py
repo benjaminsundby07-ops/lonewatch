@@ -72,9 +72,8 @@ class SandboxRun:
     def inconclusive(self) -> bool:
         """Kom tillegget aldri i gang? Da har vi ikke testet det.
 
-        `SandboxReport.verdict` kan bare vaere "clean" eller "blocked"
-        (contracts.py er laast), saa dette er det naermeste en tredje status vi
-        kommer uten den endringen. Se sandbox/LIMITS.md.
+        Det samme som `report.verdict == "not_tested"`, bare lest rett ut av
+        hendelsene. Se sandbox/LIMITS.md.
         """
         return is_inconclusive(self.events)
 
@@ -251,7 +250,7 @@ def run_plugin_source(
 
 
 def scan(package_name: str, timeout_s: float | None = None) -> SandboxReport:
-    """Kjører et av demotilleggene i boksen og sier clean eller blocked."""
+    """Kjører et av demotilleggene i boksen: clean, blocked eller not_tested."""
     path = package_path(package_name)
     return run_plugin_source(package_name, path.read_text(encoding="utf-8"), timeout_s=timeout_s)
 

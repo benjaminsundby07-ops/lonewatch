@@ -260,8 +260,11 @@ def build_overview(
         },
         "agents": _agents(cards),
         "logChain": _log_chain(verify),
+        # "testet" er de vi FAKTISK fikk testet. Et tillegg som aldri kom i
+        # gang (`not_tested`) telles ikke med - da ville tallet lovet mer enn
+        # sandkassen gjorde.
         "sandbox": {
-            "tested": len(before.get("scanned", [])),
+            "tested": before.get("clean", 0) + before.get("blocked", 0),
             "blocked": before.get("blocked"),
         },
         # Raden «Logg» er en annen opplysning enn ringen over: her spør vi om

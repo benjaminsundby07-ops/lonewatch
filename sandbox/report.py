@@ -23,13 +23,13 @@ NETWORK_EVENTS = ("network_connect", "network_lookup", "network_send", "network_
 OUTBOUND_EVENTS = ("network_connect", "network_lookup", "network_send")
 
 # Hendelser som betyr at tillegget aldri kom i gang. Da har vi ikke TESTET det:
-# vi har sett at det ikke virket. "Clean" i et slikt tilfelle betyr "vi saa
-# ingenting", og det er ikke det samme som "vi saa etter og fant ingenting".
+# vi har sett at det ikke virket.
 #
-# `SandboxReport.verdict` er Literal["clean", "blocked"] i den laaste
-# contracts.py, saa vi kan ikke si det i selve verdiktet. Vi sier det i
-# `notes`, som er det et menneske faktisk leser - og `SandboxRun.inconclusive`
-# gir det maskinlesbart til den som kan bruke det. Se sandbox/LIMITS.md.
+# Dette er et eget verdikt, `not_tested`. "Clean" ville betydd "vi saa etter og
+# fant ingenting", og det er noe helt annet enn "vi fikk aldri sett etter".
+#
+# En tidsgrense er IKKE med her. Et tillegg som henger har faktisk gjort noe vi
+# saa - det nektet aa gi seg - og det blir `blocked` som foer.
 INCONCLUSIVE_EVENTS = ("plugin_error", "no_entry_point")
 
 NOT_TESTED_NOTE = (
@@ -184,6 +184,12 @@ def build_report(
         package_name=package_name,
         attempted_network=attempted_network,
         destinations=destinations,
-        verdict="blocked" if blocked else "clean",
+        # Rekkefoelgen betyr noe: BLOCKED slaar alt.
+        #
+        # Saa vi et forsoek paa aa naa nettet eller lese et agn, er det et ekte
+        # funn, og det gjelder selv om tillegget krasjet rett etterpaa. Det er
+        # bare naar vi IKKE saa noe - fordi tillegget aldri kom i gang - at
+        # svaret er at vi ikke fikk testet det.
+        verdict="blocked" if blocked else ("not_tested" if inconclusive else "clean"),
         notes=" ".join(notes),
     )

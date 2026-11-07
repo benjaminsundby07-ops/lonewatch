@@ -43,6 +43,13 @@ SANDBOX_CLEAN = (
     "Det betyr ikke at tillegget er trygt."
 )
 SANDBOX_BLOCKED_PLAIN = "Sandkassen kjørte tillegget i en lukket boks og stoppet det."
+
+# Tillegget kom aldri i gang. Dette maa ALDRI leses som en klarering: vi fikk
+# ikke sett etter, og det er noe annet enn aa ha sett etter uten aa finne noe.
+SANDBOX_INCONCLUSIVE = (
+    "Sandkassen fikk ikke testet tillegget: det kom aldri i gang. Vi vet derfor "
+    "ikke hva det ville gjort."
+)
 UNSHOWABLE_DESTINATION = "en adresse vi ikke kan vise trygt"
 UNSHOWABLE_PACKAGE = "et tillegg med et navn vi ikke kan vise trygt"
 
@@ -80,7 +87,13 @@ def _sandbox_text(report: SandboxReport) -> str:
 
     `report.notes` brukes ikke her: den er lang og hører hjemme i Før-listen.
     Her trenger mennesket bare det korte svaret.
+
+    Tre utfall, og de sier tre forskjellige ting: vi stoppet det, vi så etter og
+    fant ingenting, eller vi fikk aldri sett etter.
     """
+    if report.verdict == "not_tested":
+        return SANDBOX_INCONCLUSIVE
+
     if report.verdict == "clean":
         return SANDBOX_CLEAN
 

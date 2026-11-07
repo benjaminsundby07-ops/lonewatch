@@ -41,8 +41,11 @@ noe som skriver ned adressen og sier nei, `open` avviser lesing og skriving uten
 på en falsk hjemmemappe med ni oppdiktede filer som sier «FALSK DEMOFIL» i første linje. Fem av dem er agn
 (falsk ssh-nøkkel, miljøfil, lommebok, nettleserdata, skynøkkel): blir en av dem lest, skrives det ned.
 
-Resultatet er en `SandboxReport` med `clean` eller `blocked`, avgjort av en fast regel på hva tillegget
-*gjorde*. Én enkelt hendelse er nok til `blocked`: et forsøk på å koble seg ut eller slå opp et navn, en
+Resultatet er en `SandboxReport` med `clean`, `blocked` eller `not_tested`, avgjort av en fast regel på
+hva tillegget *gjorde*. `not_tested` betyr at tillegget aldri kom i gang — det krasjet, eller mangler
+`run()` — og den skal aldri leses som en klarering.
+
+Én enkelt hendelse er nok til `blocked`: et forsøk på å koble seg ut eller slå opp et navn, en
 agnfil lest, en fil utenfor boksen, et program startet, en sperret modul importert, en port åpnet for å ta
 imot innkommende trafikk — eller en kjøring som ikke ble ferdig innen 6 sekunder. Rapporten går med inn
 i `evaluate()`, der regelen `sandbox_blocked` gir `block`.
@@ -206,9 +209,14 @@ loggen; sett `LONEWATCH_LOG_PATH` til en annen fil hvis du vil kjøre to.
 python -m eval.measure
 ```
 
-Kjører 60 forespørsler skrevet av noen som ikke hadde sett reglene, med deres egen fasit, og skriver treff,
-bom og falske alarmer. Resultatet — og viktigere, hva det *ikke* beviser — står i
-[docs/MALING.md](docs/MALING.md).
+Kjører forespørsler skrevet av noen som ikke hadde sett reglene, med deres egen fasit, og skriver treff,
+bom og falske alarmer. Det finnes tre sett (`tests/data/blind_set_{1,2,3}.json`).
+
+**Det ærlige tallet er sett 3**, det eneste som ikke er brukt til å rette reglene etterpå:
+**11 av 15 farlige stoppet, 4 falske alarmer av 15 harmløse.** De fire som slapp gjennom er farlige
+på grunn av *innholdet* — et delt passord, en uverifisert påloggingslenke, navnet på en varsler, en
+skriftlig aksept av et forlik på 900 000 kr — og det ser ikke feltbaserte regler. Resultatet, og
+viktigere hva det *ikke* beviser, står i [docs/MALING.md](docs/MALING.md).
 
 ### 5. Testene
 
@@ -216,7 +224,7 @@ bom og falske alarmer. Resultatet — og viktigere, hva det *ikke* beviser — s
 pytest -q
 ```
 
-535 tester går gjennom, og én er `xfail`: `test_sperrene_kan_ikke_omgaas_via_globals` i
+556 tester går gjennom, og én er `xfail`: `test_sperrene_kan_ikke_omgaas_via_globals` i
 `tests/test_sandbox.py`. Den står som forventet feil med vilje, fordi hullet den beskriver ikke er lukket —
 se neste seksjon. Testene lager egne nøkler og skriver til en midlertidig mappe, så de krever ingen
 miljøvariabler og rører ikke loggen din.
@@ -257,11 +265,10 @@ Vi ser bare ett kort øyeblikk: én kjøring, noen sekunder, `run()` kalt én ga
 første 100 gangene, venter til en bestemt dato, eller gjør noe først ved installasjon, går gjennom. Vi
 skanner én gang per pakkenavn per prosess, så to forespørsler om samme tillegg deler ett resultat og én
 logglinje. Vi leser aldri koden i tillegget. `clean` betyr «vi så ingenting», ikke «dette er trygt» — et
-tillegg som krasjer med én gang blir `clean`, fordi det ikke rakk å gjøre noe. Det samme gjelder
-et tillegg som mangler `run()` helt: da sier notatet «ingen forsøk på nettverk …», og det er sant
-bare fordi ingenting ble kjørt. Vi har ikke endret regelen, fordi en vanlig bug og et ondsinnet
-tillegg ville sett like ut; det riktige svaret er en tredje verdi («kunne ikke vurderes»), og
-`SandboxReport.verdict` er låst til `clean`/`blocked`. Motsatt kan et tillegg som
+tillegg som krasjer med én gang, eller som mangler `run()`, blir `not_tested` — ikke `clean`. Vi
+gjør det ikke til `blocked`, fordi en vanlig bug og et ondsinnet tillegg ville sett like ut; «vi vet
+ikke» er et ærligere svar enn «nei». Hullet som gjenstår er at et tillegg kan krasje med vilje.
+Motsatt kan et tillegg som
 trenger nettverket for å gjøre jobben sin aldri bli `clean`; det finnes ingen tillatelsesliste.
 
 Demoen er snillere mot oss enn virkeligheten: tillegget fella ber om, har vi tilfeldigvis liggende, fordi
@@ -422,7 +429,7 @@ lonewatch/
 │   ├── runner.py         Setter opp boksen, starter delprosessen, scan / scan_cached
 │   ├── harness.py        Koden som kjører inne i delprosessen, med sperrene
 │   ├── fake_home.py      Falsk hjemmemappe med oppdiktede filer og agn
-│   ├── report.py         Hendelser -> SandboxReport (clean / blocked)
+│   ├── report.py         Hendelser -> SandboxReport (clean / blocked / not_tested)
 │   ├── config.py         Tidsgrense, grenser, demotillegg
 │   ├── packages/         Demotilleggene, ufarlige etterligninger
 │   └── LIMITS.md         Hvorfor dette ikke er isolasjon
@@ -436,5 +443,5 @@ lonewatch/
 │   └── static/           index.html, app.js, amount.js, style.css,
 │                         dashboard/ (design-handoff + skrift), vendor/ (React, MIT)
 ├── examples/             Eksempler på JSON for hver type i contracts
-└── tests/                535 tester + 1 xfail. test_contracts.py røres ikke
+└── tests/                556 tester + 1 xfail. test_contracts.py røres ikke
 ```
