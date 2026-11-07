@@ -7,7 +7,9 @@ ekte lytter på localhost og sjekker at ingen koblet seg til den.
 
 from __future__ import annotations
 
+import pathlib
 import socket
+import sys
 import time
 from datetime import timezone
 
@@ -549,3 +551,23 @@ def test_tillegg_som_later_som_det_er_standardbiblioteket():
     rapport, resultat = _kjor("navnejuks", kilde)
     assert "KOM GJENNOM" not in resultat, resultat  # sperren holder
     assert rapport.verdict == "clean"  # men vi roper ikke
+
+
+# ------------------------------------------------- krav til Python-versjonen
+
+def test_sandkassen_krever_python_3_11():
+    """Eldre Python skal gi en tydelig feil ved import, ikke en stille krasj."""
+    assert sandbox.MIN_PYTHON == (3, 11)
+    assert sys.version_info >= sandbox.MIN_PYTHON
+
+
+def test_versjonsfeilen_sier_hva_som_er_galt_og_hva_man_gjoer():
+    """Meldingen maa navngi baade versjonen som kjoerer og veien videre.
+
+    Vi kan ikke kjoere paa en eldre Python her, saa vi leser teksten som ville
+    blitt kastet, og sjekker at den faktisk hjelper noen.
+    """
+    kilde = pathlib.Path(sandbox.__file__).read_text(encoding="utf-8")
+    assert "sys.version_info < MIN_PYTHON" in kilde
+    for del_av_meldingen in ("krever Python", "men kjoerer paa", "venv", "requirements.txt"):
+        assert del_av_meldingen in kilde

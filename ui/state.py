@@ -199,13 +199,15 @@ class DemoState:
         for å krasje.
         """
         try:
-            from vault import Vault, archive_log, load_log_key
+            from vault import Vault, archive_log, load_log_key, redact_enabled
 
             # Sjekk nøkkelen FØR vi flytter noe. Kan vi ikke starte en logg,
             # skal den gamle filen bli liggende der den lå.
             load_log_key()
             archived = archive_log() if archive else None
-            return Vault(), None, str(archived) if archived else None
+            # Demoen minimerer det den logger. Se vault/LIMITS.md punkt 7 for
+            # hva det betyr - og hva det IKKE betyr.
+            return Vault(redact=redact_enabled()), None, str(archived) if archived else None
         except Exception as exc:  # pragma: no cover - avhenger av økt C
             return None, f"Loggen kunne ikke startes: {exc}", None
 
@@ -693,5 +695,8 @@ class DemoState:
                     "last_verify": self.verify_result,
                     # Hvor forrige logg ble lagt da demoen ble nullstilt. Ingenting slettes.
                     "archived": self.log_archived,
+                    # Minimeres det vi logger? Vises i "Sjekk loggen", slik at
+                    # ingen tror loggen inneholder mer enn den gjør.
+                    "redacted": bool(getattr(self.vault, "_redact", False)),
                 },
             }

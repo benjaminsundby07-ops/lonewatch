@@ -62,12 +62,48 @@ laas, ikke en transaksjon:
 Det finnes fortsatt ingen transaksjon: to skrivere som kommer forbi laasen,
 knekker kjeden på samme måte som før.
 
-## 7. Dataminimering er valgfri og ufullstendig
-`redact_payload()` finnes, men `Vault(redact=True)` maa slaas paa av den som logger. I demoen
-logges full payload. Og naar en forespørsel logges, vet vi ennaa ikke avgjørelsen, saa en
-forespørsel kan ikke minimeres like hardt som en `allow`-avgjørelse: vi beholder feltene
-reglene trenger, maskerer mottakeren og kaster agentens frie tekst (`summary`).
-Beløp, agent-id og dokument-id blir staaende.
+## 7. Dataminimering er paa i demoen, men det er ikke anonymisering
+Demoen (`ui/` og `run_demo.py`) logger med `Vault(redact=True)`. `Vault()` selv har den
+fortsatt av som standard, saa den som lager en Vault direkte faar full payload.
+Bryteren er `LONEWATCH_REDACT`; den er paa med mindre den settes til `0`/`false`/`nei`/`av`.
+
+**Hva som faktisk fjernes:**
+- `summary` (agentens frie tekst) kastes helt. Den brukes aldri til noe, og kan
+  inneholde hva som helst et dokument har skrevet for agenten.
+- `recipient` maskeres til siste fire tegn: `NO93 8601 1117 947` blir `**** 947`.
+  Det samme gjelder `destinations` i en sandkasserapport.
+- `consequence_text` kastes fra avgjørelser. Den skriver ut mottakeren i klartekst
+  naar mottakeren er kjent («Overfører 112 500 kr til NO55 1122 3344 556»), og uten
+  dette ville vi maskert kontoen i forespørselen og lagt den tilbake to linjer senere.
+- En `allow`-avgjørelse krympes til `request_id`, `risk` og `verdict`. Ingen mottaker,
+  ingen beløp, ingen begrunnelse.
+
+**Hva som blir staaende, med vilje:**
+- **beløpet** i klartekst. `10 000 000` staar der. Det er ofte det mest identifiserende
+  feltet i en overføring, og vi beholder det fordi Etter-listen og enhver gransking
+  trenger det.
+- **`agent_id`**, ogsaa `jury` fra «Prøv selv».
+- **`source_doc_id`**, saa et dokument kan spores.
+- **`package_name`** raatt, fordi reglene og Etter-listen bruker det.
+- **`recipient_known`, `reversible`, `contains_personal_data`, `action_type`** - alt
+  reglene faktisk brukte.
+- **fellenes `what_happened`**, som kan inneholde en e-postadresse fra den skjulte
+  teksten i dokumentet. Den maskeres ikke: den er selve funnet.
+- **sandkassens `notes`**, der adressen staar i klartekst inne i setningen selv om
+  `destinations` er maskert.
+- **pseudonymet** (`emp_xxxx`), som punkt 5 allerede sier er svakt.
+
+**Dette er altsaa ikke anonymisering.** Siste fire sifre av et kontonummer, pluss
+beløp, pluss tidspunkt, pluss hvilken agent - det peker ofte paa én transaksjon.
+Minimeringen gjoer at loggen ikke er en kopi av kundebasen; den gjoer den ikke anonym.
+
+**Prisen vi betaler:** med minimering husker ikke loggen den eksakte setningen
+mennesket ble vist foer det godkjente. Reglene som slo til (`reasons`), risikoen,
+beløpet og den maskerte mottakeren staar fortsatt, saa det gaar an aa granske hva
+som skjedde - men ikke aa sitere ordrett hva skjermen sa.
+
+**Og naar en forespørsel logges, vet vi ennaa ikke avgjørelsen**, saa den kan ikke
+minimeres like hardt som en `allow`-avgjørelse. Vi beholder feltene reglene trenger.
 
 ## 8. Loggen er ikke slettbar paa forespørsel
 En logg som bare vokser og som er hash-kjedet, kan ikke rette seg etter et krav om sletting
@@ -78,7 +114,8 @@ versjonen ikke løser.
 `archive_log()` gir den gamle loggfilen et nytt navn (`lonewatch_log.<tidsstempel>.jsonl`)
 og lar neste `Vault()` begynne paa linje 0. Den sletter ingenting, og UI viser hvor den
 gamle loggen ble lagt. Dette skjer BARE naar noen trykker Nullstill: aa starte appen
-arkiverer ingenting, og en app som ikke faar loggen (punkt 6) roerer ingen fil. Men: den nye kjeden har ingen peker tilbake til den forrige, saa
+arkiverer ingenting, og en app som ikke faar loggen (punkt 6) roerer ingen fil.
+Men: den nye kjeden har ingen peker tilbake til den forrige, saa
 rekkefølgen MELLOM to logger er ikke sikret av hashene. Noen med skrivetilgang kan fjerne
 en arkivfil uten at `verify()` merker det (samme hull som punkt 1).
 

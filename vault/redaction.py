@@ -2,7 +2,8 @@
 
 Tre nivaaer:
 - allow (harmløst): bare type, risiko og avgjørelse. Ingen mottaker, ingen beløp.
-- red / block: detaljene beholdes, men mottakeren maskeres (bare siste 4 tegn vises).
+- red / block: detaljene beholdes, men mottakeren maskeres (bare siste 4 tegn vises),
+  og konsekvensteksten kastes fordi den skriver ut mottakeren i klartekst.
 - forespørsler (vi vet ikke avgjørelsen ennaa): felt reglene trenger beholdes,
   mottakeren maskeres, og agentens frie tekst (summary) kastes.
 """
@@ -32,8 +33,22 @@ REQUEST_KEEP = (
     "source_doc_id",
 )
 
-# Felt som er fri tekst og derfor aldri trengs i loggen.
-DROP_ALWAYS = ("summary",)
+# Felt som kastes naar vi minimerer.
+#
+# `summary` er agentens frie tekst. Den brukes aldri til noe, og kan inneholde
+# hva som helst et dokument har skrevet for agenten.
+#
+# `consequence_text` er generert av maler, men den SKRIVER UT mottakeren i
+# klartekst naar mottakeren er kjent: "Overfører 112 500 kr til NO55 1122 3344
+# 556." Uten dette ville vi maskert kontonummeret i forespørselen og lagt det
+# tilbake i loggen to linjer senere. Alternativet - aa vaske kontonumre ut av
+# setningen med et moenster - ville sett ut som om det virket helt til det ikke
+# gjorde det, og det er verre enn aa miste teksten.
+#
+# Prisen staar i vault/LIMITS.md punkt 7: med minimering husker ikke loggen den
+# eksakte setningen mennesket ble vist. Reglene som slo til (`reasons`),
+# risikoen og beloepet staar fortsatt.
+DROP_ALWAYS = ("summary", "consequence_text")
 
 
 def mask_recipient(value: Any) -> Any:

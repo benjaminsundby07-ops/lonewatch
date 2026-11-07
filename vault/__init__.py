@@ -32,6 +32,7 @@ from vault.redaction import mask_recipient, redact_payload
 from vault.store import (
     DEFAULT_LOG_PATH,
     ENV_LOG_PATH,
+    ENV_REDACT,
     LogLock,
     LogLocked,
     Vault,
@@ -39,6 +40,7 @@ from vault.store import (
     archive_log,
     lock_path,
     log_path,
+    redact_enabled,
 )
 
 __all__ = [
@@ -46,6 +48,7 @@ __all__ = [
     "DEFAULT_LOG_PATH",
     "ENV_LOG_KEY",
     "ENV_LOG_PATH",
+    "ENV_REDACT",
     "ENV_PSEUDONYM_KEY",
     "LogLock",
     "LogLocked",
@@ -65,6 +68,7 @@ __all__ = [
     "new_log_key",
     "new_pseudonym_key",
     "pseudonymize",
+    "redact_enabled",
     "redact_payload",
     "register_employee",
     "reveal",

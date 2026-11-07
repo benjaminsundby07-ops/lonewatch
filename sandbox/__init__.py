@@ -17,6 +17,28 @@ Les `sandbox/LIMITS.md` før du tror dette er ekte isolasjon. Det er det ikke.
 
 from __future__ import annotations
 
+import sys
+
+# Sandkassen starter en delprosess med `python -I` og bygger miljoeet fra null.
+# Paa eldre Python feiler det paa maater som er vanskelige aa lese: delprosessen
+# doer uten hendelser, og rapporten sier bare "Delprosessen stoppet foer
+# tillegget var ferdig". Da er det bedre aa si fra med én gang hva som er galt.
+#
+# ui/state.py fanger denne og viser den i UI; `python -m sandbox` skriver den
+# til stderr. Begge steder blir den altsaa synlig, ikke en stille krasj.
+MIN_PYTHON = (3, 11)
+
+if sys.version_info < MIN_PYTHON:  # pragma: no cover - avhenger av tolkeren
+    raise RuntimeError(
+        "Lonewatch sandkassen krever Python "
+        f"{MIN_PYTHON[0]}.{MIN_PYTHON[1]} eller nyere, men kjoerer paa "
+        f"{sys.version_info.major}.{sys.version_info.minor}."
+        f"{sys.version_info.micro} ({sys.executable}). "
+        "Lag et nytt venv med en nyere Python: "
+        "python3.11 -m venv .venv && source .venv/bin/activate && "
+        "pip install -r requirements.txt"
+    )
+
 from . import config, fake_home
 from .runner import (
     SandboxRun,
@@ -34,6 +56,7 @@ DEMO_PACKAGES = config.DEMO_PACKAGES
 HANGING_PACKAGE = config.HANGING_PACKAGE
 
 __all__ = [
+    "MIN_PYTHON",
     "scan",
     "scan_cached",
     "clear_scan_cache",

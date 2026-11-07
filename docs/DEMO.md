@@ -129,6 +129,12 @@ linje endret, peker svaret på `seq` til den første.
 Vær ærlig med det samme: *kjeden oppdager en endret eller fjernet linje. Den oppdager ikke at hele filen er
 slettet. Det står i `vault/LIMITS.md`.*
 
+Og si hva loggen faktisk inneholder, hvis noen spør: *den er minimert. Agentens forklaring er
+kastet, kontonummeret står som `**** 947`, og teksten mennesket fikk se er ikke lagret.
+Men beløpet, hvilken agent og hvilket dokument står der — det er nødvendig for å granske.
+Minimering, ikke anonymisering.* Vil du vise forskjellen: start appen med `LONEWATCH_REDACT=0`,
+så står alt i klartekst.
+
 ## 2:00 — Etter: hva mennesker må gjøre (ca. 15 s)
 
 Bytt til fanen **Etter**.

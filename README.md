@@ -152,6 +152,9 @@ med `VaultKeyError` og en melding om hvordan du lager nøkkelen.
 Loggfilen havner i `lonewatch_log.jsonl` i prosjektmappen (gitignorert). Den kan flyttes med
 `LONEWATCH_LOG_PATH`.
 
+Demoen minimerer det den logger. Sett `LONEWATCH_REDACT=0` hvis du vil se den samme loggen med
+full payload — nyttig når noen spør hva som faktisk blir lagret.
+
 ### 2. Hele flyten i terminalen
 
 ```bash
@@ -184,7 +187,7 @@ loggen; sett `LONEWATCH_LOG_PATH` til en annen fil hvis du vil kjøre to.
 pytest -q
 ```
 
-399 tester går gjennom, og én er `xfail`: `test_sperrene_kan_ikke_omgaas_via_globals` i
+419 tester går gjennom, og én er `xfail`: `test_sperrene_kan_ikke_omgaas_via_globals` i
 `tests/test_sandbox.py`. Den står som forventet feil med vilje, fordi hullet den beskriver ikke er lukket —
 se neste seksjon. Testene lager egne nøkler og skriver til en midlertidig mappe, så de krever ingen
 miljøvariabler og rører ikke loggen din.
@@ -225,7 +228,11 @@ Vi ser bare ett kort øyeblikk: én kjøring, noen sekunder, `run()` kalt én ga
 første 100 gangene, venter til en bestemt dato, eller gjør noe først ved installasjon, går gjennom. Vi
 skanner én gang per pakkenavn per prosess, så to forespørsler om samme tillegg deler ett resultat og én
 logglinje. Vi leser aldri koden i tillegget. `clean` betyr «vi så ingenting», ikke «dette er trygt» — et
-tillegg som krasjer med én gang blir `clean`, fordi det ikke rakk å gjøre noe. Motsatt kan et tillegg som
+tillegg som krasjer med én gang blir `clean`, fordi det ikke rakk å gjøre noe. Det samme gjelder
+et tillegg som mangler `run()` helt: da sier notatet «ingen forsøk på nettverk …», og det er sant
+bare fordi ingenting ble kjørt. Vi har ikke endret regelen, fordi en vanlig bug og et ondsinnet
+tillegg ville sett like ut; det riktige svaret er en tredje verdi («kunne ikke vurderes»), og
+`SandboxReport.verdict` er låst til `clean`/`blocked`. Motsatt kan et tillegg som
 trenger nettverket for å gjøre jobben sin aldri bli `clean`; det finnes ingen tillatelsesliste.
 
 Demoen er snillere mot oss enn virkeligheten: tillegget fella ber om, har vi tilfeldigvis liggende, fordi
@@ -294,8 +301,15 @@ Hele nettappen er uautentisert, og det gjelder også `POST /api/reset`, som arki
 ny. Appen binder bare `127.0.0.1` som standard, og nullstilling er synlig — ingenting slettes, og UI viser
 hvor den gamle loggen ble lagt — men en uautentisert «start ny logg» er et problem i seg selv.
 
-Dataminimering (`redact_payload`) finnes, men må slås på med `Vault(redact=True)`; i demoen logges
-full payload. En hash-kjedet logg som bare vokser, kan heller ikke rette seg etter et krav om sletting av
+Demoen logger med dataminimering på (`LONEWATCH_REDACT`, av med `=0`): agentens frie tekst
+(`summary`) kastes, mottakeren maskeres til siste fire tegn, konsekvensteksten kastes fordi den
+skriver ut mottakeren i klartekst, og en `allow`-avgjørelse krympes til id, risiko og verdikt.
+Men **beløpet, `agent_id`, `source_doc_id` og pakkenavnet blir stående**, og fellenes tekst og
+sandkassens notat maskeres ikke. Siste fire sifre pluss beløp pluss tidspunkt peker ofte på én
+transaksjon: dette er minimering, ikke anonymisering. Prisen er at loggen ikke lenger husker den
+eksakte setningen mennesket ble vist. `Vault()` selv har minimering av som standard.
+
+En hash-kjedet logg som bare vokser, kan heller ikke rette seg etter et krav om sletting av
 persondata uten å knekke kjeden — en reell personvernkonflikt denne versjonen ikke løser. «Nullstill» i UI
 gir den gamle loggfilen et nytt navn og starter på linje 0; ingenting slettes, og UI viser hvor den gamle
 ble lagt, men den nye kjeden har ingen peker tilbake, så rekkefølgen *mellom* to logger er ikke sikret.
@@ -357,7 +371,7 @@ lonewatch/
 │   │                     acquire_log_lock (én Lonewatch om gangen)
 │   ├── crypto.py         Nøkler fra miljøvariabler, ingen standardnøkkel
 │   ├── identity.py       pseudonymize / register_employee / reveal
-│   ├── redaction.py      Dataminimering (valgfri)
+│   ├── redaction.py      Dataminimering (på i demoen, LONEWATCH_REDACT)
 │   ├── after.py          Etter-listen, bygget kun fra logglinjer
 │   ├── gen_key.py        python -m vault.gen_key
 │   └── LIMITS.md         Hull i loggen
@@ -377,5 +391,5 @@ lonewatch/
 │   ├── amount.py         Hvordan et skrevet beløp tolkes (fasiten)
 │   └── static/           index.html, app.js, amount.js, style.css
 ├── examples/             Eksempler på JSON for hver type i contracts
-└── tests/                399 tester + 1 xfail. test_contracts.py røres ikke
+└── tests/                419 tester + 1 xfail. test_contracts.py røres ikke
 ```

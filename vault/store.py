@@ -27,6 +27,25 @@ from vault.redaction import redact_payload
 ENV_LOG_PATH = "LONEWATCH_LOG_PATH"
 DEFAULT_LOG_PATH = Path("lonewatch_log.jsonl")
 
+# Dataminimering. `Vault(redact=...)` er fortsatt av som standard, slik at den
+# som lager en Vault direkte faar full payload og ingen overraskelser. Men
+# DEMOEN (ui/ og run_demo.py) spør denne, og den er PÅ med mindre noen sier noe
+# annet: en logg skal ikke inneholde mer persondata enn den trenger.
+#
+# Hvorfor en miljøvariabel og ikke bare hardkodet på: under en demo er det verdt
+# noe å kunne slå den av og vise forskjellen på den samme loggen med og uten
+# minimering. `LONEWATCH_REDACT=0` gjør det.
+ENV_REDACT = "LONEWATCH_REDACT"
+_REDACT_OFF = {"0", "false", "no", "nei", "off", "av"}
+
+
+def redact_enabled() -> bool:
+    """Skal demoen minimere det den logger? Paa med mindre noen slaar det av."""
+    raw = os.environ.get(ENV_REDACT)
+    if raw is None:
+        return True
+    return raw.strip().lower() not in _REDACT_OFF
+
 
 def log_path() -> Path:
     """Hvor loggfilen ligger. Kan overstyres med LONEWATCH_LOG_PATH."""

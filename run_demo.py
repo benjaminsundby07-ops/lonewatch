@@ -11,7 +11,7 @@ from agents.scenarios import all_scenarios
 from contracts import ActionRequest, ActionType, Decision, HumanResponse, SandboxReport, Verdict
 from gateway import evaluate
 from sandbox import UnknownPackage, scan_cached
-from vault import Vault, pseudonymize
+from vault import Vault, pseudonymize, redact_enabled
 
 LINE = "-" * 72
 
@@ -53,7 +53,8 @@ def _scan(req: ActionRequest, vault: Vault, seen: set[str]) -> SandboxReport | N
 
 def run(vault: Vault | None = None) -> Vault:
     """Spiller alle scenarioene gjennom mellomstasjonen og logger alt."""
-    vault = vault if vault is not None else Vault()
+    # Samme minimering som nettsiden. Se vault/LIMITS.md punkt 7.
+    vault = vault if vault is not None else Vault(redact=redact_enabled())
     scanned: set[str] = set()
 
     for req in all_scenarios():
@@ -92,7 +93,8 @@ def main() -> int:
     vault = run()
 
     print(LINE)
-    print(f"Logg: {len(vault)} linjer")
+    minimert = "ja" if redact_enabled() else "nei (LONEWATCH_REDACT er av)"
+    print(f"Logg: {len(vault)} linjer   dataminimering: {minimert}")
     broken = vault.verify()
     if broken is None:
         print("Sjekk av logg: OK, ingen linjer er endret.")

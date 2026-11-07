@@ -121,6 +121,51 @@ til `blocked`. Det gir noen rare utfall:
   opp en adresse) kan aldri bli `clean`. Sandkassen har ingen tillatelsesliste.
 - et tillegg som krasjer med en gang blir `clean`, for det rakk ikke å gjøre noe
   galt. "Clean" betyr altså "vi så ingenting", ikke "dette er trygt".
+  Dette hullet er stort nok til å stå for seg selv - se neste avsnitt.
+
+## Et tillegg som krasjer blir `clean` (uløst)
+
+Dette er verdt å si tydelig, fordi `clean` ser ut som et svar og ikke er det.
+
+`report.build_report()` setter `blocked` når tillegget gjorde noe vi ikke
+tillater, eller når delprosessen ikke ble ferdig. Et tillegg som *starter, feiler
+og avslutter pent* har ikke gjort noe av delene. Da blir svaret `clean`.
+
+Tre varianter vi har prøvd, alle `clean`:
+
+| Tillegget | Hendelser | Notat i rapporten |
+|---|---|---|
+| `run()` kaster en feil | `start, plugin_error, done` | «Tillegget krasjet: RuntimeError: …» |
+| krasjer allerede ved import | `start, plugin_error, done` | «Tillegget krasjet: RuntimeError: …» |
+| har ingen `run()` i det hele tatt | `start, no_entry_point, done` | «Ingen forsøk på nettverk, ingen lesing av de falske hemmelighetene og ingenting utenfor boksen.» |
+
+Den siste raden er den farligste. Notatet sier ordrett at vi ikke så noe
+mistenkelig — og det er sant, men bare fordi **ingenting ble kjørt**. Leser du
+den linjen uten å vite dette, ser det ut som tillegget ble undersøkt og
+godkjent.
+
+Hva det betyr i praksis:
+
+- Et tillegg kan krasje med vilje hos oss og oppføre seg annerledes et sted
+  hvor det ikke krasjer. Det er samme familie som sandkassegjenkjenning over,
+  bare enklere: `if sandkasse(): raise`.
+- `clean` sier aldri «tillegget virker». Det sier «vi så ingenting galt i det
+  ene øyeblikket vi så».
+- Mellomstasjonen gjør riktig med dette: en `clean`-rapport senker ikke
+  risikoen. `new_package` gjelder fortsatt, og tillegget blir rødt uansett.
+  Et krasjende tillegg slipper altså ikke gjennom *på grunn av* rapporten -
+  men rapporten hjelper heller ikke mennesket som skal bestemme.
+
+**Vi har ikke endret regelen.** Å gjøre `plugin_error` eller `no_entry_point`
+blokkerende hadde vært lett, men da ville et tillegg med en vanlig bug blitt
+behandlet som ondsinnet, og vi har ingen måte å skille dem på. Det riktige
+svaret er en tredje verdi («kunne ikke vurderes»), og den finnes ikke:
+`SandboxReport.verdict` er `Literal["clean", "blocked"]` og `contracts.py` er
+låst.
+
+**Hva som ville løst det:** en tredje verdi i `SandboxReport.verdict`, og at UI
+viser «ikke vurdert» i stedet for «ingenting mistenkelig» når tillegget aldri
+kom i gang.
 
 ## Hva vi måler, og hva vi ikke måler
 
@@ -163,6 +208,10 @@ svetter.
 - **Agnlisten er hardkodet.** Et tillegg som leser `~/.ssh/id_ed25519` i stedet
   for `id_rsa` treffer ikke et agn. Vi skriver det ned som vanlig fillesing, og
   rapporten blir `clean`.
+- **Krever Python 3.11.** `import sandbox` stopper med en tydelig melding på
+  eldre tolkere. Før gikk importen gjennom, og delprosessen døde først senere
+  uten hendelser, slik at rapporten bare sa «Delprosessen stoppet før tillegget
+  var ferdig» — altså `blocked` av feil grunn.
 - **Rapporten er ikke signert.** `scan()` returnerer et vanlig objekt. Den som
   kaller mellomstasjonen kan finne på en `clean`-rapport selv, og gateway kan
   ikke se forskjell. Se `gateway/LIMITS.md`.

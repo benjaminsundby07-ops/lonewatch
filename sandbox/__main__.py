@@ -8,7 +8,11 @@ from __future__ import annotations
 
 import sys
 
-from . import DEMO_PACKAGES, UnknownPackage, available_packages, scan
+try:
+    from . import DEMO_PACKAGES, UnknownPackage, available_packages, scan
+except RuntimeError as exc:  # for gammel Python - si fra, ikke krasj stille
+    print(f"Sandkassen startet ikke: {exc}", file=sys.stderr)
+    raise SystemExit(1) from None
 
 
 def main(argv: list[str]) -> int:
