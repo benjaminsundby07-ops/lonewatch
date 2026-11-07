@@ -1,0 +1,476 @@
+"""Tester for ui/: tilstanden bak nettsiden, og at HTTP-endepunktene svarer.
+
+Logikken testes direkte mot DemoState. Det er der alt skjer: app.py er bare et
+tynt lag med ruter over den.
+
+Testene bruker skjelettets gateway og vault hvis de ekte ikke er flettet inn
+ennaa, saa de sjekker flyten, ikke hvor gode reglene er.
+"""
+
+from __future__ import annotations
+
+import json
+import socket
+import threading
+import urllib.error
+import urllib.request
+
+import pytest
+
+from contracts import Verdict
+from ui.state import (
+    STATUS_ALLOW,
+    STATUS_APPROVED,
+    STATUS_BLOCKED,
+    STATUS_REJECTED,
+    STATUS_WAITING,
+    DemoState,
+    amount_matches,
+)
+
+# ---------------------------------------------------------------------------
+# beloepet mennesket maa skrive
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "written",
+    ["10000000", "10 000 000", "10 000 000 kr", "10.000.000", " 10000000 "],
+)
+def test_the_amount_can_be_written_the_way_people_write_amounts(written):
+    assert amount_matches(written, 10_000_000) is True
+
+
+@pytest.mark.parametrize("written", ["", "   ", "1000000", "100000000", "kr", "ti millioner"])
+def test_a_different_or_empty_amount_is_not_accepted(written):
+    assert amount_matches(written, 10_000_000) is False
+
+
+def test_no_expected_amount_means_nothing_matches():
+    assert amount_matches("0", None) is False
+
+
+# ---------------------------------------------------------------------------
+# den rolige stroemmen
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def state() -> DemoState:
+    return DemoState()
+
+
+def _drain(state: DemoState) -> int:
+    count = 0
+    while state.step_feed() is not None:
+        count += 1
+    return count
+
+
+def test_the_feed_runs_through_every_scenario_once_and_then_stops(state):
+    from agents.scenarios import all_scenarios
+
+    assert state.feed_done is False
+    assert _drain(state) == len(all_scenarios())
+    assert state.feed_done is True
+    assert state.step_feed() is None
+
+
+def test_each_card_gets_a_decision_and_a_norwegian_label(state):
+    card = state.step_feed()
+    assert card is not None
+    assert card["decision"]["request_id"] == card["request"]["id"]
+    assert card["agent_label"]
+    assert card["action_label"]
+    assert card["status"] in (STATUS_ALLOW, STATUS_WAITING, STATUS_BLOCKED)
+
+
+def test_allow_goes_to_the_calm_list_and_red_goes_to_the_queue(state):
+    _drain(state)
+    snap = state.snapshot()
+    assert snap["calm_total"] > 0
+    for card in snap["calm"]:
+        assert card["decision"]["verdict"] == Verdict.ALLOW.value
+    for card in snap["waiting"]:
+        assert card["decision"]["verdict"] == Verdict.RED.value
+    for card in snap["blocked"]:
+        assert card["decision"]["verdict"] == Verdict.BLOCK.value
+
+
+def test_most_requests_pass_quietly(state):
+    """Roedt skal vaere sjeldent, ellers slaar folk av varselet."""
+    _drain(state)
+    snap = state.snapshot()
+    total = snap["feed"]["total"]
+    loud = len(snap["waiting"]) + len(snap["blocked"])
+    assert loud / total <= 0.25
+
+
+def test_reading_a_trapped_document_shows_up_as_a_notice(state):
+    _drain(state)
+    notices = state.snapshot()["notices"]
+    assert any(n["kind"] == "trap" for n in notices)
+
+
+def test_everything_is_written_to_the_log(state):
+    _drain(state)
+    snap = state.snapshot()
+    # minst én linje for forespoerselen og én for avgjoerelsen, per forespoersel
+    assert snap["log"]["lines"] >= 2 * snap["feed"]["total"]
+    kinds = {e.kind for e in state.vault.entries()}
+    assert {"request", "decision"} <= kinds
+    assert "trap" in kinds
+
+
+# ---------------------------------------------------------------------------
+# svaret fra mennesket
+# ---------------------------------------------------------------------------
+
+
+def _first_waiting(state: DemoState) -> dict:
+    _drain(state)
+    waiting = state.snapshot()["waiting"]
+    assert waiting, "demoen skal gi minst én roed forespoersel"
+    return waiting[0]
+
+
+def test_a_typed_amount_request_cannot_be_approved_with_the_wrong_amount(state):
+    card = _first_waiting(state)
+    assert card["decision"]["requires_typed_amount"] is True
+    out = state.respond(card["request"]["id"], approved=True, typed_amount="1")
+    assert out["ok"] is False
+    assert "stemmer ikke" in out["error"]
+    # Den staar fortsatt i koeen.
+    assert state.cards[card["request"]["id"]]["status"] == STATUS_WAITING
+
+
+def test_an_empty_amount_is_also_refused(state):
+    card = _first_waiting(state)
+    assert state.respond(card["request"]["id"], approved=True, typed_amount="")["ok"] is False
+    assert state.respond(card["request"]["id"], approved=True, typed_amount=None)["ok"] is False
+
+
+def test_the_right_amount_approves_it_and_lands_in_the_log(state):
+    card = _first_waiting(state)
+    request_id = card["request"]["id"]
+    before = len(state.vault.entries())
+
+    out = state.respond(request_id, approved=True, typed_amount="10 000 000", seconds_to_decide=9.5)
+    assert out["ok"] is True
+    assert state.cards[request_id]["status"] == STATUS_APPROVED
+    assert len(state.vault.entries()) == before + 1
+
+    human = state.vault.entries()[-1]
+    assert human.kind == "human"
+    assert human.payload["approved"] is True
+    assert human.payload["typed_amount"] == 10_000_000
+    assert human.payload["seconds_to_decide"] == pytest.approx(9.5)
+
+
+def test_the_log_never_contains_the_employee_name_only_the_pseudonym(state):
+    card = _first_waiting(state)
+    state.respond(card["request"]["id"], approved=False)
+    human = state.vault.entries()[-1]
+    assert human.payload["employee_pseudonym"].startswith("emp_")
+    assert "ansatt" not in json.dumps(human.payload)
+
+
+def test_rejecting_needs_no_amount(state):
+    card = _first_waiting(state)
+    out = state.respond(card["request"]["id"], approved=False)
+    assert out["ok"] is True
+    assert state.cards[card["request"]["id"]]["status"] == STATUS_REJECTED
+
+
+def test_the_same_request_cannot_be_answered_twice(state):
+    card = _first_waiting(state)
+    request_id = card["request"]["id"]
+    assert state.respond(request_id, approved=False)["ok"] is True
+    again = state.respond(request_id, approved=False)
+    assert again["ok"] is False
+    assert "allerede" in again["error"]
+
+
+def test_an_unknown_request_id_is_handled_without_crashing(state):
+    out = state.respond("finnes_ikke", approved=True, typed_amount="1")
+    assert out["ok"] is False
+    assert out["error"]
+
+
+def test_answered_requests_leave_the_queue(state):
+    card = _first_waiting(state)
+    request_id = card["request"]["id"]
+    state.respond(request_id, approved=False)
+    snap = state.snapshot()
+    assert request_id not in [c["request"]["id"] for c in snap["waiting"]]
+    assert request_id in [c["request"]["id"] for c in snap["answered"]]
+
+
+# ---------------------------------------------------------------------------
+# sjekk loggen
+# ---------------------------------------------------------------------------
+
+
+def test_verify_is_green_on_an_untouched_log(state):
+    _drain(state)
+    result = state.verify()
+    assert result["ok"] is True
+    assert result["seq"] is None
+    assert result["lines"] > 0
+    assert "stemmer" in result["text"]
+
+
+def test_verify_points_at_the_changed_line(state):
+    _drain(state)
+    entries = state.vault._entries  # vi roerer loggen med vilje for aa teste sjekken
+    entries[3] = entries[3].model_copy(update={"payload": {"tuklet": True}})
+    result = state.verify()
+    assert result["ok"] is False
+    assert result["seq"] == 3
+    assert "seq=3" in result["text"]
+
+
+def test_the_last_verify_is_remembered_in_the_snapshot(state):
+    assert state.snapshot()["log"]["last_verify"] is None
+    state.verify()
+    assert state.snapshot()["log"]["last_verify"]["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# Etter-listen
+# ---------------------------------------------------------------------------
+
+
+def test_after_list_says_kommer_until_vault_after_exists(state):
+    """Oekt C eier vault/after.py. Finnes den ikke, skal UI si 'kommer', ikke krasje."""
+    data = state.after_actions()
+    assert isinstance(data["items"], list)
+    assert isinstance(data["available"], bool)
+    if not data["available"]:
+        assert data["items"] == []
+        assert data["note"]
+    else:
+        for item in data["items"]:
+            assert {"title", "detail", "owner_role", "done"} <= set(item)
+
+
+# ---------------------------------------------------------------------------
+# hendelsen
+# ---------------------------------------------------------------------------
+
+
+def test_the_story_plays_every_step_and_then_says_done(state):
+    snap = state.story_start()
+    assert snap["running"] is True
+    assert snap["index"] == 0
+    total = snap["total_steps"]
+
+    for _ in range(total):
+        snap = state.story_step()
+
+    assert snap["done"] is True
+    assert snap["running"] is False
+    assert snap["index"] == total
+    assert len(snap["log"]) == total
+    # Ett steg for mye skal ikke krasje.
+    assert state.story_step()["done"] is True
+
+
+def test_the_story_writes_traps_and_the_sandbox_to_the_log(state):
+    state.story_start()
+    while not state.story_step()["done"]:
+        pass
+    kinds = [e.kind for e in state.vault.entries()]
+    assert kinds.count("trap") == 2
+    assert kinds.count("sandbox") == 1
+    assert state.verify() is not None
+    assert state.verify()["ok"] is True
+
+
+def test_the_story_ends_with_a_transfer_waiting_for_a_human(state):
+    state.story_start()
+    while not state.story_step()["done"]:
+        pass
+    waiting = state.snapshot()["waiting"]
+    assert waiting, "overfoeringen i historien skal vente paa et menneske"
+    assert any(c["decision"]["requires_typed_amount"] for c in waiting)
+    assert all(c["source"] == "story" for c in waiting)
+
+
+def test_the_story_clock_never_passes_ninety_seconds(state):
+    state.story_start()
+    seconds = []
+    snap = state.story_snapshot()
+    while not snap["done"]:
+        snap = state.story_step()
+        seconds.append(snap["current_second"])
+    assert seconds == sorted(seconds)
+    assert max(seconds) <= 90
+
+
+def test_starting_the_story_again_replays_it_from_the_top(state):
+    state.story_start()
+    state.story_step()
+    snap = state.story_start()
+    assert snap["index"] == 0
+    assert snap["log"] == []
+
+
+# ---------------------------------------------------------------------------
+# nullstilling
+# ---------------------------------------------------------------------------
+
+
+def test_reset_empties_the_queue_the_log_and_the_story(state):
+    _drain(state)
+    state.story_start()
+    state.story_step()
+    state.verify()
+
+    state.reset()
+    snap = state.snapshot()
+    assert snap["waiting"] == []
+    assert snap["calm"] == []
+    assert snap["calm_total"] == 0
+    assert snap["notices"] == []
+    assert snap["log"]["lines"] == 0
+    assert snap["log"]["last_verify"] is None
+    assert snap["story"]["index"] == 0
+    assert snap["feed"]["seen"] == 0
+
+
+def test_the_snapshot_has_everything_the_page_needs(state):
+    snap = state.snapshot()
+    assert {
+        "company",
+        "waiting",
+        "blocked",
+        "answered",
+        "calm",
+        "calm_total",
+        "notices",
+        "feed",
+        "story",
+        "log",
+    } <= set(snap)
+    assert snap["company"] == "Nordlys Forsikring"
+    # Snapshot maa kunne sendes som JSON uten videre behandling.
+    json.dumps(snap)
+
+
+# ---------------------------------------------------------------------------
+# HTTP: appen svarer faktisk
+# ---------------------------------------------------------------------------
+
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+@pytest.fixture(scope="module")
+def server() -> str:
+    """Starter den ekte appen paa en ledig port. Hopper over testen hvis den ikke kommer opp."""
+    uvicorn = pytest.importorskip("uvicorn")
+    from ui.app import app
+
+    port = _free_port()
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
+    srv = uvicorn.Server(config)
+    thread = threading.Thread(target=srv.run, daemon=True)
+    thread.start()
+
+    base = f"http://127.0.0.1:{port}"
+    for _ in range(100):
+        if srv.started:
+            break
+        threading.Event().wait(0.05)
+    else:
+        srv.should_exit = True
+        pytest.skip("appen kom ikke opp")
+
+    yield base
+
+    srv.should_exit = True
+    thread.join(timeout=5)
+
+
+def _get(base: str, path: str):
+    with urllib.request.urlopen(base + path, timeout=5) as res:
+        return res.status, json.loads(res.read())
+
+
+def _post(base: str, path: str, body: dict | None = None):
+    data = json.dumps(body or {}).encode()
+    req = urllib.request.Request(
+        base + path, data=data, headers={"Content-Type": "application/json"}
+    )
+    with urllib.request.urlopen(req, timeout=5) as res:
+        return res.status, json.loads(res.read())
+
+
+def test_the_page_and_its_files_are_served(server):
+    for path in ("/", "/static/style.css", "/static/app.js"):
+        with urllib.request.urlopen(server + path, timeout=5) as res:
+            assert res.status == 200
+            assert res.read()
+
+
+def test_the_endpoints_answer(server):
+    _post(server, "/api/reset")
+
+    status, snap = _get(server, "/api/state")
+    assert status == 200 and snap["company"] == "Nordlys Forsikring"
+
+    status, out = _post(server, "/api/feed/step")
+    assert status == 200 and out["card"] is not None
+
+    status, result = _get(server, "/api/verify")
+    assert status == 200 and result["ok"] is True
+
+    status, after = _get(server, "/api/after")
+    assert status == 200 and isinstance(after["items"], list)
+
+    status, story = _post(server, "/api/story/start")
+    assert status == 200 and story["story"]["index"] == 0
+
+    status, story = _post(server, "/api/story/step")
+    assert status == 200 and story["story"]["index"] == 1
+
+    status, story = _get(server, "/api/story")
+    assert status == 200 and story["story_id"] == "binance_inspired"
+
+    _post(server, "/api/reset")
+
+
+def test_approving_over_http_needs_the_right_amount(server):
+    _post(server, "/api/reset")
+    while _post(server, "/api/feed/step")[1]["card"] is not None:
+        pass
+
+    snap = _get(server, "/api/state")[1]
+    waiting = snap["waiting"]
+    assert waiting
+    request_id = waiting[0]["request"]["id"]
+
+    status, out = _post(
+        server,
+        "/api/respond",
+        {"request_id": request_id, "approved": True, "typed_amount": "42"},
+    )
+    assert status == 200 and out["ok"] is False
+
+    status, out = _post(
+        server,
+        "/api/respond",
+        {
+            "request_id": request_id,
+            "approved": True,
+            "typed_amount": "10 000 000",
+            "seconds_to_decide": 4.0,
+        },
+    )
+    assert status == 200 and out["ok"] is True
+
+    _post(server, "/api/reset")

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lonewatch</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <span class="mark" aria-hidden="true"></span>
+    <h1>Lonewatch</h1>
+    <span class="sub">Nordlys Forsikring <span class="sep">&middot;</span> simulering</span>
+  </div>
+  <div class="actions">
+    <button id="btn-story" class="primary">Spill av hendelsen</button>
+    <button id="btn-verify">Sjekk loggen</button>
+    <button id="btn-reset" class="ghost">Nullstill</button>
+  </div>
+</header>
+
+<div id="verify-banner" class="banner hidden" role="status"></div>
+<div id="log-error" class="banner bad hidden" role="status"></div>
+
+<section id="story-band" class="story hidden" aria-live="polite">
+  <div class="story-head">
+    <span id="story-clock" class="clock">0 s</span>
+    <strong id="story-title">Hendelsen</strong>
+    <span id="story-step-count" class="muted"></span>
+    <button id="btn-story-next" class="mini">Neste steg</button>
+  </div>
+  <p id="story-detail" class="story-detail"></p>
+  <div class="bar"><div id="story-fill" class="fill"></div></div>
+</section>
+
+<nav class="tabs" role="tablist">
+  <button class="tab-btn on" data-tab="queue" role="tab">Køen</button>
+  <button class="tab-btn" data-tab="after" role="tab">Etter</button>
+</nav>
+
+<main>
+
+  <section id="tab-queue" class="tab">
+    <div class="grid">
+
+      <div class="col-main">
+        <h2 class="h-red">Trenger et menneske <span id="waiting-count" class="count"></span></h2>
+        <div id="waiting"></div>
+
+        <div id="blocked-wrap" class="hidden">
+          <h2 class="h-quiet">Stoppet av Lonewatch</h2>
+          <div id="blocked"></div>
+        </div>
+
+        <div id="answered-wrap" class="hidden">
+          <h2 class="h-quiet">Besvart</h2>
+          <div id="answered"></div>
+        </div>
+      </div>
+
+      <aside class="col-side">
+        <h2 class="h-quiet">Går gjennom <span id="calm-count" class="count quiet"></span></h2>
+        <div id="calm" class="calm-list"></div>
+
+        <h2 class="h-quiet">Hendelser</h2>
+        <div id="notices" class="notice-list"></div>
+      </aside>
+
+    </div>
+  </section>
+
+  <section id="tab-after" class="tab hidden">
+    <h2 class="h-quiet">Etter</h2>
+    <p id="after-note" class="lead">Hva som må gjøres når noe har skjedd.</p>
+    <div id="after-list" class="after-list"></div>
+  </section>
+
+</main>
+
+<footer>
+  Simulering. Nordlys Forsikring er oppdiktet. Ingen ekte penger, ingen ekte
+  personopplysninger, ingen ekte skadevare. Loggen ligger i minnet i denne demoen
+  og kan fortsatt slettes &mdash; se <code>vault/LIMITS.md</code>.
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

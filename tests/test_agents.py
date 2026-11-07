@@ -112,8 +112,8 @@ def test_find_scenario_and_labels():
     assert scenarios.find_scenario("finnes_ikke") is None
     assert scenarios.agent_label("hr") == "HR"
     assert scenarios.agent_label("ukjent_agent") == "ukjent_agent"
-    assert scenarios.action_label(ActionType.TRANSFER_MONEY) == "Overfoerer penger"
-    assert scenarios.action_label("transfer_money") == "Overfoerer penger"
+    assert scenarios.action_label(ActionType.TRANSFER_MONEY) == "Overfører penger"
+    assert scenarios.action_label("transfer_money") == "Overfører penger"
 
 
 # ---------------------------------------------------------------------------
