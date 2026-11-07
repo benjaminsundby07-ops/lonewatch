@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ except ImportError:  # pragma: no cover - Windows har ikke fcntl
 from cryptography.fernet import Fernet
 
 from contracts import GENESIS_HASH, LogEntry, LogKind, compute_entry_hash, make_log_entry, verify_chain
+from vault.anchor import AnchorInvalid, derive_anchor_key, move_anchor, read_anchor, write_anchor
 from vault.crypto import VaultDecryptError, decrypt_line, encrypt_line, load_log_key, validate_log_key
 from vault.redaction import redact_payload
 
@@ -160,7 +162,60 @@ def archive_log(path: str | Path | None = None, ts: datetime | None = None) -> P
         counter += 1
 
     target.rename(candidate)
+    # Ankeret maa følge loggen sin. Blir det liggende igjen, ville den nye,
+    # tomme loggen arvet et anker som sa at den skulle hatt linjer.
+    move_anchor(target, candidate)
     return candidate
+
+
+# Hvorfor verifiseringen svarte som den gjorde. `verify()` gir bare et
+# sekvensnummer; dette er for den som skal vise noe til et menneske.
+VERIFY_TEXTS: dict[str, str] = {
+    "ok": "Loggen stemmer. {lines} linjer, ingen er endret.",
+    "ok_empty": "Loggen er tom.",
+    "ok_one_unanchored": (
+        "Loggen stemmer. {lines} linjer. Siste linje har ikke rukket inn i "
+        "hale-ankeret ennå - det skjer hvis noe stoppet mellom de to skrivingene."
+    ),
+    "unreadable_line": "Linje {seq} kan ikke leses med denne nøkkelen.",
+    "chain": "Loggen er endret. Første ødelagte linje er seq={seq}.",
+    "memory_vs_disk": "Loggen på disk er ikke den vi har skrevet. Første avvik er seq={seq}.",
+    "log_truncated": (
+        "Loggen er kortere enn hale-ankeret sier. {anchor_lines} linjer skulle vært der, "
+        "{lines} er igjen: noen har kuttet halen."
+    ),
+    "unanchored_lines": (
+        "{extra} linjer er lagt til uten at hale-ankeret ble oppdatert. "
+        "Første linje uten dekning er seq={seq}."
+    ),
+    "anchor_missing": (
+        "Hale-ankeret mangler, men loggen har {lines} linjer. Enten er ankeret slettet, "
+        "eller så er loggen laget før ankeret fantes. Kjeden stemmer, men vi kan ikke "
+        "se om noen har kuttet halen."
+    ),
+    "anchor_bad_signature": "Hale-ankeret kan ikke stoles på: {detail}",
+    "anchor_hash_mismatch": (
+        "Hale-ankeret peker på en annen siste linje enn den som ligger der. "
+        "Halen er byttet ut. Forventet hash fra seq={seq}."
+    ),
+}
+
+
+@dataclass(frozen=True)
+class VerifyResult:
+    """Hele svaret fra en verifisering, ikke bare sekvensnummeret.
+
+    `Vault.verify()` returnerer fortsatt `int | None` slik CLAUDE.md krever.
+    Denne er for den som skal vise noe: den sier HVORFOR, og den gir siste hash
+    slik at et menneske kan sammenligne den med noe utenfor maskinen.
+    """
+
+    ok: bool
+    broken_seq: int | None
+    reason: str
+    text: str
+    lines: int
+    head_hash: str | None
 
 
 class Vault:
@@ -184,6 +239,9 @@ class Vault:
         else:
             raw_key = validate_log_key(key.encode("utf-8") if isinstance(key, str) else key)
         self._fernet = Fernet(raw_key)
+        # Signeringsnøkkelen til hale-ankeret er AVLEDET fra loggnøkkelen, ikke
+        # den samme. Se vault/anchor.py.
+        self._anchor_key = derive_anchor_key(raw_key)
         self._redact = redact
         self._entries: list[LogEntry] = self._read_disk()[0]
 
@@ -201,34 +259,136 @@ class Vault:
         )
         self._write_disk(entry)
         self._entries.append(entry)
+        # Ankeret skrives ETTER linjen, med vilje. Krasjer vi imellom, er loggen
+        # én linje foran ankeret, og det kan vi kjenne igjen som et avbrudd.
+        # Motsatt rekkefølge ville gitt et anker som peker på en linje som ikke
+        # finnes - og det er ikke til å skille fra at noen har kuttet halen.
+        self._write_anchor()
         return entry
+
+    def _write_anchor(self) -> None:
+        if not self._entries:
+            return
+        last = self._entries[-1]
+        write_anchor(
+            self._path, self._anchor_key, last.seq, last.hash, len(self._entries), ts=last.ts
+        )
+
+    def head_hash(self) -> str | None:
+        """Hashen til siste linje, eller None hvis loggen er tom.
+
+        Dette er tallet som er verdt å vise fram: skriver du det ned et sted
+        utenfor maskinen, kan du siden se om loggen er den samme.
+        """
+        return self._entries[-1].hash if self._entries else None
 
     def verify(self) -> int | None:
         """seq til første ødelagte linje, ellers None.
 
-        Leser og dekrypterer hele filen paa nytt. Sjekker tre ting:
-        en linje som ikke kan dekrypteres, en kjede som ikke stemmer (verify_chain),
-        og at det vi har i minnet er likt det som staar paa disk.
+        Grensesnittet i CLAUDE.md. `verify_detail()` gir det samme svaret med
+        en forklaring og siste hash.
+        """
+        return self.verify_detail().broken_seq
+
+    def verify_detail(self) -> VerifyResult:
+        """Hele svaret: om det stemmer, hvorfor, hvor mange linjer, siste hash.
+
+        Leser og dekrypterer hele filen paa nytt og sjekker, i denne rekkefølgen:
+
+        1. en linje som ikke kan dekrypteres
+        2. en kjede som ikke stemmer (verify_chain)
+        3. at det vi har i minnet er likt det som staar paa disk
+        4. hale-ankeret: at ingen har kuttet bort de SISTE linjene
+
+        Rekkefølgen er med vilje. De tre første peker paa NØYAKTIG hvilken linje
+        som er gal. Ankeret vet bare at halen er feil, saa det svarer sist - da
+        fanger det bare det de andre sa var greit.
         """
         disk, first_unreadable = self._read_disk()
 
         if first_unreadable is not None:
             # En linje som ikke kan dekrypteres: posisjonen i filen er seq'en den skulle hatt.
             broken_chain = verify_chain(disk[:first_unreadable])
-            return broken_chain if broken_chain is not None else first_unreadable
+            seq = broken_chain if broken_chain is not None else first_unreadable
+            reason = "chain" if broken_chain is not None else "unreadable_line"
+            return self._fail(reason, seq, disk)
 
         broken = verify_chain(disk)
         if broken is not None:
-            return broken
+            return self._fail("chain", broken, disk)
 
         for entry in self._entries:
             if entry.seq >= len(disk) or disk[entry.seq].hash != entry.hash:
-                return entry.seq
+                return self._fail("memory_vs_disk", entry.seq, disk)
             if entry.hash != compute_entry_hash(
                 entry.seq, entry.ts, entry.kind, entry.payload, entry.prev_hash
             ):
-                return entry.seq
-        return None
+                return self._fail("memory_vs_disk", entry.seq, disk)
+
+        return self._check_anchor(disk)
+
+    # ---------- hale-anker ----------
+
+    def _check_anchor(self, disk: list[LogEntry]) -> VerifyResult:
+        """Siste sjekk: har noen kuttet bort halen?
+
+        Hash-kjeden kan ikke se det. Fjerner du de tre siste linjene, er resten
+        fortsatt en perfekt kjede fra linje 0.
+        """
+        try:
+            anchor = read_anchor(self._path, self._anchor_key)
+        except AnchorInvalid as exc:
+            return self._fail("anchor_bad_signature", 0, disk, detail=str(exc))
+
+        if anchor is None:
+            if not disk:
+                return self._ok("ok_empty", disk)
+            return self._fail("anchor_missing", 0, disk)
+
+        if len(disk) < anchor.lines:
+            # Ankeret kan ALDRI vaere foran loggen av seg selv: det skrives
+            # etter linjen. Er det foran, mangler det linjer.
+            return self._fail("log_truncated", len(disk), disk, anchor_lines=anchor.lines)
+
+        extra = len(disk) - anchor.lines
+        if extra > 1:
+            # Hver append skriver ankeret, saa mer enn én uanker-linje er ikke
+            # et avbrudd - det er linjer som er lagt til utenom.
+            return self._fail("unanchored_lines", anchor.lines, disk, extra=extra)
+
+        if anchor.seq >= len(disk) or disk[anchor.seq].hash != anchor.hash:
+            return self._fail("anchor_hash_mismatch", anchor.seq, disk)
+
+        if extra == 1:
+            # Krasj mellom linjen og ankeret. Kjeden over har alt bekreftet at
+            # den ekstra linjen henger riktig paa, saa dette er trygt.
+            return self._ok("ok_one_unanchored", disk)
+
+        return self._ok("ok", disk)
+
+    # ---------- svar ----------
+
+    def _ok(self, reason: str, disk: list[LogEntry]) -> VerifyResult:
+        head = disk[-1].hash if disk else None
+        return VerifyResult(
+            ok=True,
+            broken_seq=None,
+            reason=reason,
+            text=VERIFY_TEXTS[reason].format(lines=len(disk)),
+            lines=len(disk),
+            head_hash=head,
+        )
+
+    def _fail(self, reason: str, seq: int, disk: list[LogEntry], **extra: Any) -> VerifyResult:
+        head = disk[-1].hash if disk else None
+        return VerifyResult(
+            ok=False,
+            broken_seq=seq,
+            reason=reason,
+            text=VERIFY_TEXTS[reason].format(seq=seq, lines=len(disk), **extra),
+            lines=len(disk),
+            head_hash=head,
+        )
 
     def entries(self) -> list[LogEntry]:
         """Kopi av loggen, slik at ingen kan endre den innenfra."""

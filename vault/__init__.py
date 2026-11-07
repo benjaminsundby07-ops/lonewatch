@@ -29,6 +29,8 @@ from vault.crypto import (
 )
 from vault.identity import ADMIN_ROLE, NotAuthorized, pseudonymize, register_employee, reveal
 from vault.redaction import mask_recipient, redact_payload
+from vault import anchor
+from vault.anchor import AnchorInvalid, anchor_path, read_anchor, write_anchor
 from vault.store import (
     DEFAULT_LOG_PATH,
     ENV_LOG_PATH,
@@ -36,6 +38,7 @@ from vault.store import (
     LogLock,
     LogLocked,
     Vault,
+    VerifyResult,
     acquire_log_lock,
     archive_log,
     lock_path,
@@ -57,6 +60,12 @@ __all__ = [
     "VaultDecryptError",
     "VaultError",
     "VaultKeyError",
+    "VerifyResult",
+    "AnchorInvalid",
+    "anchor",
+    "anchor_path",
+    "read_anchor",
+    "write_anchor",
     "acquire_log_lock",
     "archive_log",
     "build_after_actions",

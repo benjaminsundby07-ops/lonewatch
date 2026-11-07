@@ -6,4 +6,6 @@ env.sh
 lonewatch_log.jsonl
 lonewatch_log.*.jsonl
 lonewatch_log.jsonl.lock
+lonewatch_log.jsonl.head
+lonewatch_log.*.jsonl.head
 lonewatch_pseudonyms.enc

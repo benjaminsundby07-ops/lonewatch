@@ -99,11 +99,14 @@ def main() -> int:
     print(LINE)
     minimert = "ja" if redact_enabled() else "nei (LONEWATCH_REDACT er av)"
     print(f"Logg: {len(vault)} linjer   dataminimering: {minimert}")
-    broken = vault.verify()
-    if broken is None:
-        print("Sjekk av logg: OK, ingen linjer er endret.")
+    detail = vault.verify_detail()
+    head = detail.head_hash[:12] if detail.head_hash else "-"
+    if detail.ok:
+        print(f"Sjekk av logg: OK, ingen linjer er endret.  Siste hash: {head}")
+        print("  (skriv den ned utenfor maskinen - det er det eneste som fanger")
+        print("   en som har både loggen, hale-ankeret og nøkkelen)")
         return 0
-    print(f"Sjekk av logg: FEIL, første ødelagte linje er seq={broken}.")
+    print(f"Sjekk av logg: FEIL. {detail.text}  Siste hash: {head}")
     return 1
 
 

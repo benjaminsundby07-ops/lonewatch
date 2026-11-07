@@ -3,16 +3,39 @@
 Dette er en hackathon-simulering. Loggen er ekte kryptert og ekte hash-kjedet, men den
 er ikke et revisjonssikkert arkiv. Her er de ærlige hullene, slik at ingen tror noe annet.
 
-## 1. Hele loggen kan slettes
-Hash-kjeden oppdager at en linje er **endret** eller **fjernet fra midten**. Den oppdager
-ikke at hele filen er borte, eller at noen har kuttet den siste delen av filen og beholdt
-en gyldig kjede fra linje 0. Det finnes ingen kopi noe annet sted, ingen ekstern vitne-tjeneste
-og ingen "append only"-rettighet paa filsystemet. Den som har skrivetilgang til filen og
-nøkkelen kan lage en ny, kortere, helt gyldig logg.
+## 1. Ankeret hever listen, det lukker ikke hullet
+Hash-kjeden oppdager at en linje er **endret** eller **fjernet fra midten**. Den oppdaget
+ikke at noen kuttet bort de SISTE linjene: det som staar igjen er fortsatt en perfekt kjede
+fra linje 0.
 
-**Hva som ville løst det:** skrive hver linje (eller hashen av siste linje) til et sted
-Lonewatch ikke selv kan skrive over: en annen maskin, et objektlager med object lock,
-eller en utskrift.
+Det er nå delvis lukket. Ved siden av loggen ligger et **hale-anker** (`<logg>.head`) som
+sier hvor mange linjer loggen hadde og hva siste hash var, signert med HMAC-SHA256 med en
+nøkkel avledet fra loggnøkkelen (HKDF, egen `info`-streng - signering og kryptering deler
+aldri nøkkelmateriale). Ankeret skrives atomisk etter hver linje: midlertidig fil, `fsync`,
+`os.replace`. `verify()` feiler nå hvis loggen er kortere enn ankeret sier, hvis siste hash
+ikke stemmer, hvis ankeret mangler mens loggen har linjer, eller hvis signaturen er ugyldig.
+
+**Men:** den som har skrivetilgang til **begge** filene og nøkkelen kan skrive om begge.
+Da er en kortere logg med et matchende anker like gyldig som den ekte. Ankeret tvinger en
+angriper til å gjøre to ting i stedet for én, og det er alt. Det er ikke et bevis.
+
+Fire ting ankeret heller ikke løser:
+
+- **Hele mappen kan slettes.** Logg og anker forsvinner sammen, og det finnes ingen kopi.
+- **Ankeret er like lokalt som loggen.** Samme disk, samme bruker, samme rettigheter.
+- **Nøkkelen gir begge deler.** Den som kan dekryptere loggen kan også signere et anker,
+  fordi signeringsnøkkelen er avledet fra den samme loggnøkkelen. Det er et bevisst
+  kompromiss for en demo med én nøkkel; en ekte versjon ville hatt to nøkler i to hender.
+- **Én linje uten anker godtas.** Krasjer prosessen mellom linjen og ankeret, er loggen én
+  linje foran. Vi godtar det som gyldig, fordi alternativet er at et avbrudd ser ut som et
+  angrep. Prisen er at nøyaktig én ekstra linje kan legges til uten at ankeret sier fra -
+  men kjeden må fortsatt stemme, så linjen kan ikke være hva som helst.
+
+**Hva som ville løst det:** et anker UTENFOR maskinen. Siste hash skrevet ned på papir,
+sendt til en annen maskin, lagt i et objektlager med object lock, eller lest opp i et møte.
+`run_demo.py` og «Sjekk loggen» i appen viser derfor de tolv første tegnene av siste hash:
+noterer du dem, kan du siden se om loggen er den samme. Det er den eneste varianten som
+faktisk fanger en som har alt lokalt.
 
 ## 2. Nøkkelen ligger i en miljøvariabel, bare for demo
 `LONEWATCH_LOG_KEY` og `LONEWATCH_PSEUDONYM_KEY` leses fra miljøet. Det er bedre enn

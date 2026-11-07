@@ -608,27 +608,37 @@ class DemoState:
     # -- loggen -----------------------------------------------------------
 
     def verify(self) -> dict[str, Any]:
-        """Kaller vault.verify() og oversetter svaret til noe som kan vises."""
+        """Kaller vault.verify_detail() og oversetter svaret til noe som kan vises.
+
+        `head` er de første tolv tegnene av siste hash. Skriver du den ned et
+        sted utenfor maskinen, kan du siden se om loggen er den samme - det er
+        det eneste som faktisk fanger en som har både loggen, hale-ankeret og
+        nøkkelen. Se vault/LIMITS.md.
+        """
         with self._lock:
             if self.vault is None:
-                result = {"ok": False, "seq": None, "lines": 0, "text": self.vault_error}
+                result = {
+                    "ok": False,
+                    "seq": None,
+                    "lines": 0,
+                    "text": self.vault_error,
+                    "head": None,
+                    "reason": "no_vault",
+                }
             else:
-                broken = self.vault.verify()
-                lines = len(self.vault.entries())
-                if broken is None:
-                    result = {
-                        "ok": True,
-                        "seq": None,
-                        "lines": lines,
-                        "text": f"Loggen stemmer. {lines} linjer, ingen er endret.",
-                    }
-                else:
-                    result = {
-                        "ok": False,
-                        "seq": broken,
-                        "lines": lines,
-                        "text": f"Loggen er endret. Første ødelagte linje er seq={broken}.",
-                    }
+                detail = self.vault.verify_detail()
+                head = detail.head_hash[:12] if detail.head_hash else None
+                text = detail.text
+                if head:
+                    text = f"{text} Siste hash: {head}."
+                result = {
+                    "ok": detail.ok,
+                    "seq": detail.broken_seq,
+                    "lines": detail.lines,
+                    "text": text,
+                    "head": head,
+                    "reason": detail.reason,
+                }
             result["checked_at"] = datetime.now(timezone.utc).isoformat()
             self.verify_result = result
             return result
