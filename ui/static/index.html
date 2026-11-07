@@ -40,6 +40,7 @@
   <button class="tab-btn" data-tab="before" role="tab">Før</button>
   <button class="tab-btn on" data-tab="queue" role="tab">Under</button>
   <button class="tab-btn" data-tab="after" role="tab">Etter</button>
+  <button class="tab-btn" data-tab="custom" role="tab">Prøv selv</button>
 </nav>
 
 <main>
@@ -82,6 +83,76 @@
       </aside>
 
     </div>
+  </section>
+
+  <section id="tab-custom" class="tab hidden">
+    <h2 class="h-quiet">Prøv selv</h2>
+    <p class="lead">
+      Skriv din egen forespørsel. Den går gjennom <em>nøyaktig samme vei</em> som
+      de 40 i demoen: sandkassen først hvis det er et tillegg, så de samme
+      reglene i <code>gateway.evaluate()</code>, så loggen. Ingenting her er
+      skrevet på forhånd.
+    </p>
+
+    <form id="custom-form" autocomplete="off">
+      <div class="field">
+        <label for="c-action">Handling</label>
+        <select id="c-action" name="action_type"></select>
+      </div>
+
+      <div class="field" id="c-amount-wrap">
+        <label for="c-amount">Beløp</label>
+        <input id="c-amount" name="amount" maxlength="64" placeholder="10 000 000">
+        <span class="field-note">Samme tolkning som beløpsporten: mellomrom og
+          punktum er tusenskille, komma er desimalskille.</span>
+      </div>
+
+      <div class="field" id="c-recipient-wrap">
+        <label for="c-recipient">Mottaker</label>
+        <input id="c-recipient" name="recipient" maxlength="120"
+               placeholder="NO93 8601 1117 947 eller noen@eksempel.no">
+        <span class="field-note" id="c-known-note"></span>
+      </div>
+
+      <div class="field" id="c-package-wrap">
+        <label for="c-package">Pakkenavn</label>
+        <input id="c-package" name="package_name" maxlength="64"
+               placeholder="nordlys-mail-connector-patch">
+        <span class="field-note">Sandkassen kjører bare tillegg den har en fil
+          for fra før. Et navn den ikke har gir «ikke testet» — ingenting
+          lastes ned, og ingenting kjøres.</span>
+      </div>
+
+      <div class="field">
+        <label for="c-summary">Agenten sier</label>
+        <input id="c-summary" name="summary" maxlength="200"
+               placeholder="Betaler samleoppgjør, haster før forfall">
+        <span class="field-note warn">Dette feltet vises i kortet, men brukes
+          <strong>aldri</strong> i vurderingen. Skriv gjerne noe overbevisende —
+          avgjørelsen blir den samme.</span>
+      </div>
+
+      <div class="field check">
+        <label><input type="checkbox" id="c-personal" name="contains_personal_data">
+          Inneholder personopplysninger</label>
+        <span class="field-note">Denne kan bare gjøre forespørselen rødere,
+          aldri grønnere.</span>
+      </div>
+
+      <div class="field">
+        <button type="submit" class="primary" id="c-send">Send gjennom Lonewatch</button>
+        <span id="c-error" class="hint bad hidden"></span>
+      </div>
+    </form>
+
+    <p class="lead quiet-note">
+      To felt settes av Lonewatch, ikke av deg: om mottakeren er <em>kjent</em>
+      regnes ut mot demoens liste, og om handlingen <em>kan angres</em> følger
+      av handlingstypen. Ellers kunne man krysset seg forbi reglene.
+    </p>
+
+    <h2 class="h-quiet">Dine forespørsler <span id="custom-count" class="count quiet"></span></h2>
+    <div id="custom-list" class="calm-list"></div>
   </section>
 
   <section id="tab-after" class="tab hidden">

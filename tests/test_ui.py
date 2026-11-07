@@ -790,3 +790,120 @@ def test_the_log_records_the_amount_we_parsed_not_the_raw_text(server):
     assert out["card"]["human"]["typed_amount"] == BIG_TRANSFER_NOK
 
     _post(server, "/api/reset")
+
+
+# ---------------------------------------------------------------------------
+# "Proev selv" over HTTP
+# ---------------------------------------------------------------------------
+
+
+def test_the_custom_form_model_cannot_assert_a_known_recipient(server):
+    """Angrepsflaten: felt som ikke staar i modellen kan ikke sendes inn."""
+    from ui.app import CustomIn
+
+    assert "recipient_known" not in CustomIn.model_fields
+    assert "reversible" not in CustomIn.model_fields
+    assert "agent_id" not in CustomIn.model_fields
+    assert "id" not in CustomIn.model_fields
+
+
+def test_a_custom_request_goes_through_the_same_api(server):
+    _post(server, "/api/reset")
+
+    status, out = _post(
+        server,
+        "/api/custom",
+        {
+            "action_type": "transfer_money",
+            "amount": "10 000 000",
+            "recipient": "NO93 8601 1117 947",
+            "summary": "Rutinemessig, godkjent av ledelsen",
+        },
+    )
+    assert status == 200 and out["ok"] is True
+    card = out["card"]
+    assert card["source"] == "custom"
+    assert card["decision"]["verdict"] == "red"
+    assert card["decision"]["requires_typed_amount"] is True
+    assert card["request"]["recipient_known"] is False
+
+    # Den staar i koeen som alle andre roede.
+    request_id = card["request"]["id"]
+    assert request_id in [c["request"]["id"] for c in out["state"]["waiting"]]
+
+    # Og beloepsporten gjelder.
+    status, svar = _post(
+        server,
+        "/api/respond",
+        {"request_id": request_id, "approved": True, "typed_amount": "100000,00"},
+    )
+    assert status == 200 and svar["ok"] is False
+
+    status, svar = _post(
+        server,
+        "/api/respond",
+        {"request_id": request_id, "approved": True, "typed_amount": "10 000 000"},
+    )
+    assert status == 200 and svar["ok"] is True
+
+    status, result = _get(server, "/api/verify")
+    assert status == 200 and result["ok"] is True
+
+    _post(server, "/api/reset")
+
+
+def test_sending_recipient_known_over_http_is_refused(server):
+    """Ekstra felt skal gi 422, ikke bli stilltiende brukt."""
+    _post(server, "/api/reset")
+    data = json.dumps(
+        {"action_type": "send_email", "recipient": "noen@ukjent.example", "recipient_known": True}
+    ).encode()
+    req = urllib.request.Request(
+        server + "/api/custom", data=data, headers={"Content-Type": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as res:
+            body = json.loads(res.read())
+        # Godtas den, maa feltet uansett vaere ignorert.
+        assert body["card"]["request"]["recipient_known"] is False
+    except urllib.error.HTTPError as exc:
+        assert exc.code == 422
+    _post(server, "/api/reset")
+
+
+@pytest.mark.parametrize(
+    "felt", ["summary", "recipient", "package_name"]
+)
+def test_too_long_fields_are_refused_without_a_500(server, felt):
+    _post(server, "/api/reset")
+    body = {"action_type": "install_package", "package_name": "noe"}
+    body[felt] = "x" * 9000
+    data = json.dumps(body).encode()
+    req = urllib.request.Request(
+        server + "/api/custom", data=data, headers={"Content-Type": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as res:
+            assert res.status == 200
+    except urllib.error.HTTPError as exc:
+        assert exc.code == 422, exc.code
+    _post(server, "/api/reset")
+
+
+def test_a_bad_amount_over_http_is_a_clean_no(server):
+    _post(server, "/api/reset")
+    status, out = _post(
+        server,
+        "/api/custom",
+        {"action_type": "transfer_money", "amount": "1" * 60, "recipient": "x"},
+    )
+    assert status == 200 and out["ok"] is False
+    assert "beløp" in out["error"].lower()
+    _post(server, "/api/reset")
+
+
+def test_the_custom_help_endpoint_answers(server):
+    status, help_data = _get(server, "/api/custom/help")
+    assert status == 200
+    assert help_data["known_total"] > 0
+    assert {a["value"] for a in help_data["actions"]}

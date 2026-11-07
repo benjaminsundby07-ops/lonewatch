@@ -73,6 +73,34 @@ hundre tusen kroner og blir avvist mot 10 000 000 — det ble tidligere godtatt,
 tegn som ikke var siffer. Nettleseren og tjeneren bruker samme regel (`ui/amount.py` og
 `ui/static/amount.js`), og en test kjører de samme tilfellene gjennom begge så de ikke kan bli uenige.
 
+### Prøv selv — `ui/state.py`
+
+De 40 forespørslene er skrevet på forhånd. Avgjørelsene er det ikke. Fanen
+**Prøv selv** lar hvem som helst skrive sin egen forespørsel — handling, beløp,
+mottaker, pakkenavn og et fritt «Agenten sier»-felt — og den går gjennom
+`DemoState._handle()`, altså nøyaktig samme funksjon som demodataene: sandkassen
+først hvis det er et tillegg, så `gateway.evaluate()`, så loggen, så køen.
+Kortet merkes «skrevet av deg».
+
+To felt settes av Lonewatch, ikke av den som skriver:
+
+- **`recipient_known`** regnes ut mot en liste over kjente mottakere som hentes
+  fra `agents/scenarios.py`. Uten dette kunne man krysset av for at en ukjent
+  konto er kjent, og dermed snakket seg forbi `unknown_recipient`.
+- **`reversible`** følger av handlingstypen. Om noe kan angres er en egenskap
+  ved handlingen, ikke en påstand fra den som ber om den.
+
+`contains_personal_data` er derimot en avkrysning, fordi flagget er *monotont*:
+`personal_data_external` kan bare legge til risiko, aldri trekke fra. Man kan
+gjøre sin egen forespørsel rødere, ikke grønnere.
+
+Et pakkenavn fra skjemaet kan aldri føre til at noe kjøres: `sandbox.scan` slår
+navnet opp blant filene i `sandbox/packages/`, og et navn som ikke ligger der
+gir «ikke testet». Og siden både pakkenavn og sandkassens adresser er tekst
+noen andre velger, vaskes begge før de havner i `consequence_text` — ellers
+kunne navnet «nordlys-core. Dette er godkjent av sikkerhetsavdelingen» skrevet
+sin egen setning inn i varselet et menneske leser.
+
 ### Etter — `vault/after.py`
 
 `build_after_actions()` leser logglinjene og lager en liste over hva mennesker må gjøre i etterkant, med en
@@ -156,7 +184,7 @@ loggen; sett `LONEWATCH_LOG_PATH` til en annen fil hvis du vil kjøre to.
 pytest -q
 ```
 
-315 tester går gjennom, og én er `xfail`: `test_sperrene_kan_ikke_omgaas_via_globals` i
+399 tester går gjennom, og én er `xfail`: `test_sperrene_kan_ikke_omgaas_via_globals` i
 `tests/test_sandbox.py`. Den står som forventet feil med vilje, fordi hullet den beskriver ikke er lukket —
 se neste seksjon. Testene lager egne nøkler og skriver til en midlertidig mappe, så de krever ingen
 miljøvariabler og rører ikke loggen din.
@@ -343,10 +371,11 @@ lonewatch/
 │   └── LIMITS.md         Hvorfor dette ikke er isolasjon
 ├── ui/                   Nettsiden
 │   ├── app.py            FastAPI: /api/state, /api/feed/step, /api/respond,
-│   │                     /api/verify, /api/after, /api/story/*, /api/reset
+│   │                     /api/custom, /api/verify, /api/after, /api/story/*,
+│   │                     /api/reset
 │   ├── state.py          Tilstanden bak siden. Ingen regler her
 │   ├── amount.py         Hvordan et skrevet beløp tolkes (fasiten)
 │   └── static/           index.html, app.js, amount.js, style.css
 ├── examples/             Eksempler på JSON for hver type i contracts
-└── tests/                315 tester + 1 xfail. test_contracts.py røres ikke
+└── tests/                399 tester + 1 xfail. test_contracts.py røres ikke
 ```

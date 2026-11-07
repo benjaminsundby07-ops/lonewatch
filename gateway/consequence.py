@@ -28,6 +28,21 @@ SANDBOX_CLEAN = (
 )
 SANDBOX_BLOCKED_PLAIN = "Sandkassen kjørte tillegget i en lukket boks og stoppet det."
 UNSHOWABLE_DESTINATION = "en adresse vi ikke kan vise trygt"
+UNSHOWABLE_PACKAGE = "et tillegg med et navn vi ikke kan vise trygt"
+
+
+def safe_package_name(package_name: str | None) -> str | None:
+    """Pakkenavnet, gjort trygt å vise til et menneske.
+
+    Den som ber om en installasjon velger selv navnet, så dette er tekst vi
+    ikke stoler på. Ser navnet ikke ut som et pakkenavn, viser vi det ikke.
+    Reglene (`new_package`, `package_on_blocklist`) sammenligner fortsatt det
+    EKTE navnet - det er bare visningen som holdes i tømme.
+    """
+    text = (package_name or "").strip()
+    if not config.PACKAGE_NAME_PATTERN.match(text):
+        return None
+    return text
 
 
 def safe_destination(destination: str) -> str:
@@ -100,9 +115,11 @@ def _base_text(req: ActionRequest) -> str:
         return f"Deler data med {_recipient_phrase(req, UNKNOWN_RECIPIENT)}."
 
     if req.action_type is ActionType.INSTALL_PACKAGE:
-        name = (req.package_name or "").strip()
-        if not name:
+        if not (req.package_name or "").strip():
             return "Installerer et tillegg uten navn."
+        name = safe_package_name(req.package_name)
+        if name is None:
+            return f"Installerer {UNSHOWABLE_PACKAGE}."
         return f"Installerer tillegget {name}."
 
     if req.action_type is ActionType.READ_DOCUMENT:

@@ -290,3 +290,62 @@ footer {
   max-width: 95ch;
 }
 footer code { background: #ecebe5; padding: .05rem .3rem; border-radius: 4px; }
+
+/* ---------- Prøv selv ---------- */
+
+#custom-form {
+  display: grid;
+  gap: 1.1rem;
+  max-width: 46rem;
+  margin: 0 0 1.6rem;
+  padding: 1.3rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.field { display: grid; gap: .35rem; }
+.field > label { font-weight: 600; font-size: .95rem; }
+
+.field input[type="text"],
+.field input:not([type]),
+.field select {
+  font: inherit;
+  padding: .55rem .7rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.field input:focus, .field select:focus {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+.field-note { color: var(--faint); font-size: .85rem; max-width: 60ch; }
+.field-note.warn { color: var(--amber); }
+
+.field.check > label {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  font-weight: 500;
+}
+
+.quiet-note { font-size: .9rem; margin-top: -.6rem; }
+
+/* Juryens egne: tydelig merket, slik at de ikke forveksles med demodataene. */
+.mine {
+  background: var(--green-soft);
+  color: var(--green);
+  border-radius: 999px;
+  padding: .05rem .5rem;
+  font-size: .8rem;
+  font-weight: 600;
+}
+
+.mine-card { border-left: 3px solid var(--green); }
+.said-mini { color: var(--muted); font-size: .88rem; margin-top: .3rem; }
+.said-mini b { color: var(--faint); font-weight: 600; margin-right: .3rem; }

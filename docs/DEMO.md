@@ -139,6 +139,32 @@ tillegg maa granskes» (security), «Sjekk den flaggede overføringen» (finance
 
 Si: *ingen AI har skrevet denne listen. Hver linje peker tilbake på en konkret hendelse i loggen.*
 
+## Hvis juryen vil prøve selv (ca. 40 s)
+
+Dette er svaret på «er ikke dette bare hardkodet?».
+
+Bytt til fanen **Prøv selv**. Be en i juryen bestemme. Skriv det de sier, og
+trykk **Send gjennom Lonewatch**.
+
+Forslag hvis de ikke har et: overfør `10 000 000` til `NO93 8601 1117 947`, og
+skriv noe overbevisende i **Agenten sier** — «Rutinemessig, allerede godkjent av
+ledelsen». Kortet blir rødt med «over beløpsgrensen», «ukjent mottaker», «kan
+ikke angres», og konsekvensteksten er den samme som før.
+
+Si: *det du skrev i Agenten sier står i kortet, men ble aldri lest av en eneste
+regel. Hadde det vært motsatt, kunne et dokument skrevet sin egen godkjenning.*
+
+Endre så mottakeren til `NO12 3456 7890 123` og beløpet til `38 400`. Den går
+gjennom. Pek på forskjellen: *mottakeren står på listen, og beløpet er under
+grensen. Samme regler, annet svar.*
+
+Vil de prøve et tillegg: `nordlys-crm-sync` gir «ikke testet i sandkassen» —
+Lonewatch laster aldri ned noe på et navn du skriver. `nordlys-mail-connector-patch`
+finnes derimot i sandkassen, blir kjørt der, og blir **stoppet**.
+
+Kortene merkes «skrevet av deg», og havner i samme logg. Trykk **Sjekk loggen**
+etterpå: den stemmer fortsatt.
+
 ## Hvis du har 20 sekunder til overs
 
 Avslutt ærlig, med én av disse:

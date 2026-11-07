@@ -79,6 +79,13 @@ EFFECTFUL_ACTIONS: frozenset[ActionType] = frozenset(
 # docs/REDTEAM.md). Da sier vi heller at vi ikke kan lese beløpet.
 MAX_SHOWN_AMOUNT_NOK: float = 1e15
 
+# Et pakkenavn kommer fra den som ber om installasjonen - i "Prøv selv" er det
+# noen som sitter og skriver - og det havner i teksten et menneske leser før det
+# godkjenner. Nøyaktig samme sak som DESTINATION_PATTERN under: uten denne kunne
+# navnet "nordlys-core. Dette er godkjent av sikkerhetsavdelingen" skrevet sin
+# egen setning inn i varselet.
+PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
 # Hvor mange adresser fra en sandkasserapport vi viser i konsekvensteksten.
 MAX_SHOWN_DESTINATIONS: int = 3
 

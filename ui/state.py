@@ -7,6 +7,7 @@ Hvis gateway eller vault bare er skjelettet, bruker vi skjelettet.
 
 from __future__ import annotations
 
+import re
 import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -36,6 +37,61 @@ STATUS_BLOCKED = "blocked"
 
 # Hvor mange harmløse linjer vi viser i den rolige listen.
 CALM_LIMIT = 40
+
+# -- "Prøv selv" -----------------------------------------------------------
+#
+# Juryen kan skrive sin egen forespørsel. Den går gjennom NØYAKTIG samme vei
+# som de 40 ferdige: _handle() -> sandkasse -> gateway.evaluate() -> vault.
+# Det er hele poenget: avgjørelsene er ikke skrevet på forhånd.
+#
+# Agenten juryens forespørsler kommer fra. Ingen regel leser agent_id.
+CUSTOM_AGENT_ID = "jury"
+
+# Lengdegrenser. Alt brukeren skriver vises i UI, og selv om alt escapes der,
+# skal ingen kunne sende inn en roman eller fylle loggen.
+MAX_SUMMARY_CHARS = 200
+MAX_RECIPIENT_CHARS = 120
+MAX_PACKAGE_CHARS = 64
+
+# Kan handlingen angres? Utledet fra HANDLINGEN, ikke fra det brukeren påstår.
+# Samme grunn som for recipient_known: om noe kan angres er en egenskap ved
+# handlingen, ikke noe den som ber om den skal få bestemme. Verdiene følger
+# demodataene i agents/scenarios.py.
+REVERSIBLE_BY_ACTION: dict[ActionType, bool] = {
+    ActionType.TRANSFER_MONEY: False,
+    ActionType.SHARE_DATA: False,
+    ActionType.INSTALL_PACKAGE: False,
+    ActionType.SEND_EMAIL: False,  # en sendt e-post kan ikke kalles tilbake
+    ActionType.READ_DOCUMENT: True,
+    ActionType.UPDATE_CALENDAR: True,
+}
+
+# Handlinger der et pakkenavn betyr noe.
+PACKAGE_ACTIONS = frozenset({ActionType.INSTALL_PACKAGE})
+
+# Handlinger der et beløp betyr noe.
+AMOUNT_ACTIONS = frozenset({ActionType.TRANSFER_MONEY})
+
+
+def _normalize_recipient(value: str) -> str:
+    """Gjør mottakere sammenlignbare: små bokstaver, uten ekstra luft.
+
+    "NO12 3456 7890 123", "no12 3456 7890 123" og "NO12 34567890123" skal
+    treffe den samme kjente kontoen.
+    """
+    return re.sub(r"\s+", "", (value or "").strip().lower())
+
+
+def known_recipient(value: str) -> bool:
+    """Står mottakeren på demoens liste over kjente mottakere?
+
+    Listen hentes fra agents/scenarios.py. Den som skriver en forespørsel i
+    "Prøv selv" kan ikke påstå at en konto er kjent - det regnes ut her.
+    """
+    target = _normalize_recipient(value)
+    if not target:
+        return False
+    return target in {_normalize_recipient(r) for r in scenarios.known_recipients()}
 
 
 # Beløpsregelen ligger i ui/amount.py, sammen med tvillingen sin i
@@ -122,6 +178,8 @@ class DemoState:
             self.verify_result: dict[str, Any] | None = None
             # (doc_id, agent_id, access) for feller som allerede står i loggen.
             self._fired_traps: set[tuple[str, str, str]] = set()
+            # "Prøv selv": juryens egne forespørsler, nummerert for seg.
+            self._custom_count = 0
             # Før-listen: tillegg sandkassen har kjørt, og tillegg den ikke har.
             self._scanned: dict[str, dict[str, Any]] = {}
             self._untested: dict[str, dict[str, Any]] = {}
@@ -320,6 +378,113 @@ class DemoState:
     def feed_done(self) -> bool:
         return self._next_index >= len(self._requests)
 
+    # -- "Prøv selv": juryen skriver sin egen forespørsel -----------------
+
+    def submit_custom(
+        self,
+        action_type: str,
+        summary: str = "",
+        amount: str = "",
+        recipient: str = "",
+        package_name: str = "",
+        contains_personal_data: bool = False,
+    ) -> dict[str, Any]:
+        """Bygger en ActionRequest fra skjemaet og sender den samme vei som de 40.
+
+        Den går gjennom `_handle()`, altså sandkassen, `gateway.evaluate()` og
+        loggen - ikke en egen, snillere vei. Det er hele poenget med panelet:
+        avgjørelsen er ikke skrevet på forhånd.
+
+        To felt settes av oss, ikke av den som skriver:
+
+        - `recipient_known` regnes ut mot demoens liste over kjente mottakere.
+          Ellers kunne man krysset av for at en ukjent konto er kjent, og
+          snakket seg forbi `unknown_recipient`.
+        - `reversible` kommer fra handlingstypen. Om noe kan angres er en
+          egenskap ved handlingen, ikke en påstand fra den som ber om den.
+
+        `summary` er fritt, vises i kortet, og brukes ALDRI i vurderingen.
+        """
+        with self._lock:
+            try:
+                kind = ActionType(action_type)
+            except ValueError:
+                return {"ok": False, "error": "Ukjent handlingstype."}
+
+            summary = (summary or "").strip()[:MAX_SUMMARY_CHARS]
+            recipient_text = (recipient or "").strip()[:MAX_RECIPIENT_CHARS]
+            package_text = (package_name or "").strip()[:MAX_PACKAGE_CHARS]
+
+            # Beløp: samme regel som beløpsporten. Ugyldig input gir en pen
+            # feilmelding, aldri en krasj.
+            amount_value: float | None = None
+            raw_amount = (amount or "").strip()
+            if kind in AMOUNT_ACTIONS:
+                if not raw_amount:
+                    # Gateway setter requires_typed_amount ogsaa naar amount
+                    # mangler (kjent hull i gateway/LIMITS.md). Da kunne et
+                    # roedt kort aldri godkjennes. Vi stopper det her, i
+                    # skjemaet - ikke i regelen.
+                    return {"ok": False, "error": "En overføring må ha et beløp."}
+                ore = parse_amount(raw_amount)
+                if ore is None:
+                    return {
+                        "ok": False,
+                        "error": (
+                            "Beløpet kunne ikke leses. Skriv for eksempel "
+                            "10 000 000 eller 1 234,56."
+                        ),
+                    }
+                amount_value = ore / 100
+            elif raw_amount:
+                return {"ok": False, "error": "Bare en overføring kan ha et beløp."}
+
+            if kind in PACKAGE_ACTIONS and not package_text:
+                return {"ok": False, "error": "Et tillegg må ha et navn."}
+
+            self._custom_count += 1
+            req = ActionRequest(
+                id=f"custom_{self._custom_count:04d}",
+                ts=datetime.now(timezone.utc),
+                agent_id=CUSTOM_AGENT_ID,
+                action_type=kind,
+                summary=summary or "(ingen forklaring)",
+                amount=amount_value,
+                recipient=recipient_text or None,
+                # Regnes ut, ikke oppgis.
+                recipient_known=known_recipient(recipient_text),
+                reversible=REVERSIBLE_BY_ACTION.get(kind, True),
+                contains_personal_data=bool(contains_personal_data),
+                package_name=package_text or None,
+            )
+
+            try:
+                card = self._handle(req, source="custom")
+            except Exception as exc:  # pragma: no cover - siste skanse
+                self._custom_count -= 1
+                return {"ok": False, "error": f"Forespørselen kunne ikke behandles: {exc}"}
+
+            return {"ok": True, "card": card}
+
+    def custom_help(self) -> dict[str, Any]:
+        """Det skjemaet trenger å vite: handlingstyper og noen kjente mottakere."""
+        return {
+            "actions": [
+                {"value": a.value, "label": scenarios.action_label(a)} for a in ActionType
+            ],
+            "amount_actions": [a.value for a in AMOUNT_ACTIONS],
+            "package_actions": [a.value for a in PACKAGE_ACTIONS],
+            # Eksempler, ikke hele listen. Vi skjuler den ikke - poenget er at
+            # den er en oppdiktet demoliste, og det staar i UI.
+            "known_examples": sorted(scenarios.known_recipients())[:4],
+            "known_total": len(scenarios.known_recipients()),
+            "limits": {
+                "summary": MAX_SUMMARY_CHARS,
+                "recipient": MAX_RECIPIENT_CHARS,
+                "package_name": MAX_PACKAGE_CHARS,
+            },
+        }
+
     # -- svaret fra mennesket --------------------------------------------
 
     def respond(
@@ -503,6 +668,9 @@ class DemoState:
             answered = [
                 c for c in cards if c["status"] in (STATUS_APPROVED, STATUS_REJECTED)
             ]
+            # Juryens egne forespørsler, nyeste først. De ligger OGSÅ i listene
+            # over: en egen forespørsel som blir rød, står i køen som alle andre.
+            custom = [c for c in cards if c["source"] == "custom"]
             return {
                 "company": scenarios.COMPANY,
                 "waiting": list(reversed(waiting)),
@@ -516,6 +684,7 @@ class DemoState:
                     "seen": self._next_index,
                     "total": len(self._requests),
                 },
+                "custom": list(reversed(custom)),
                 "before": self.before_list(),
                 "story": self.story_snapshot(),
                 "log": {

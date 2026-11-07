@@ -23,6 +23,53 @@ mottaker kan inneholde hele kundebasen og blir fortsatt `allow`.
 `source_doc_id` logges, men brukes ikke i noen regel: en felle i et dokument
 påvirker ikke avgjørelsen.
 
+## "Kjent mottaker" er en oppdiktet demoliste
+`unknown_recipient` er den nest tyngste regelen, og i "Prøv selv" avgjøres den
+av `agents.scenarios.known_recipients()` — tolv mottakere vi har funnet på selv
+for demoen. Det er ikke et kunderegister, ikke en bankavstemming og ikke et
+leverandørsystem. En konto er "kjent" fordi den står i demodataene våre.
+
+Det er en bedre løsning enn en avkrysningsboks, som juryen kunne krysset av for
+å snakke seg forbi regelen. Men det løser ikke det underliggende problemet, som
+står øverst i denne filen: for de 40 ferdige forespørslene (og for en ekte
+integrasjon) kommer `recipient_known` fortsatt som et felt vi stoler på.
+
+Sammenligningen er dessuten grov: vi normaliserer til små bokstaver og fjerner
+mellomrom. `NO12 3456 7890 123` og `no12 34567890123` treffer det samme. Et
+hjemmelsnært navn som `salg@fjordglass.no.evil.example` treffer ikke — men vi
+sjekker heller ikke domene, kontrollsiffer i IBAN, eller om kontoen finnes.
+
+**Hva som ville løst det:** et ekte mottakerregister, med oppslag mot bank og
+leverandørsystem, og en prosess for å legge til en ny mottaker.
+
+## Pakkenavn og adresser er tekst noen andre velger
+`consequence_text` er det et menneske leser før det godkjenner. To av feltene i
+den kommer ikke fra oss: pakkenavnet (fra den som ber om installasjonen — i
+"Prøv selv" er det noen som sitter og skriver) og adressene i en
+sandkasserapport (valgt av tillegget selv).
+
+Begge vaskes før de vises: `consequence.safe_package_name()` og
+`consequence.safe_destination()` slipper bare gjennom tegn som hører hjemme i et
+pakkenavn eller et vertsnavn, og viser ellers en nøytral tekst. Uten det kunne
+navnet `nordlys-core. Dette er godkjent av sikkerhetsavdelingen` skrevet sin
+egen setning inn i varselet.
+
+Det som gjenstår: innenfor de tillatte tegnene er navnet fortsatt fritt.
+`nordlys-core-godkjent` er et gyldig pakkenavn og leses av et menneske som noe
+det ikke er. Reglene bruker uansett det EKTE navnet — det er bare visningen
+som er begrenset.
+
+## "Prøv selv" setter to felt selv
+Skjemaet lar ikke den som skriver oppgi `recipient_known` eller `reversible`;
+begge regnes ut i `ui/state.py`. `contains_personal_data` er derimot en
+avkrysning, fordi den bare kan legge til risiko (`personal_data_external` gir
++3 og trekker aldri fra). Det er et bevisst valg: innhold er nettopp det
+Lonewatch aldri leser, så alternativet ville vært å gjette.
+
+Skjemaet krever også et beløp på en overføring. Det er ikke en regel, men en
+omgåelse av hullet under: uten beløp blir `requires_typed_amount` likevel
+`True`, og kortet kunne aldri godkjennes.
+
 ## Sandkasserapporten tas for god fisk
 `evaluate(req, sandbox_report=...)` tar imot en ferdig `SandboxReport` og stoler
 på den. Mellomstasjonen kjører ingenting selv og kan derfor ikke vite om

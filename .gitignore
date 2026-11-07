@@ -5,4 +5,5 @@ __pycache__/
 env.sh
 lonewatch_log.jsonl
 lonewatch_log.*.jsonl
+lonewatch_log.jsonl.lock
 lonewatch_pseudonyms.enc

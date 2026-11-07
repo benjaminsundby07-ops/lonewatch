@@ -122,6 +122,7 @@ function render() {
   renderCalm(latest.calm, latest.calm_total);
   renderNotices(latest.notices);
   renderBefore(latest.before);
+  renderCustom(latest.custom || []);
 
   document.body.classList.toggle("alert", latest.waiting.length > 0);
 
@@ -174,6 +175,7 @@ function who(card) {
   ];
   if (r.recipient) bits.push("til " + esc(r.recipient));
   if (card.source === "story") bits.push("hendelsen");
+  if (card.source === "custom") bits.push('<span class="mine">skrevet av deg</span>');
   return '<div class="who">' + bits.join(' <span class="sep">&middot;</span> ') + "</div>";
 }
 
@@ -369,6 +371,103 @@ function renderBefore(b) {
     : '<p class="empty">Ingen tillegg er forsøkt installert ennå.</p>';
 }
 
+/* ---------------- Prøv selv ---------------- */
+
+let customHelp = null;
+
+async function loadCustomHelp() {
+  if (customHelp) return customHelp;
+  customHelp = await api("/api/custom/help");
+
+  el("c-action").innerHTML = customHelp.actions
+    .map((a) => '<option value="' + esc(a.value) + '">' + esc(a.label) + "</option>")
+    .join("");
+  el("c-action").value = "transfer_money";
+
+  el("c-known-note").textContent =
+    "Om mottakeren er kjent regnes ut mot demoens liste på " +
+    customHelp.known_total +
+    " oppdiktede mottakere, for eksempel " +
+    customHelp.known_examples.join(", ") +
+    ". Alt annet er ukjent.";
+
+  syncCustomFields();
+  return customHelp;
+}
+
+/* Viser bare feltene handlingen faktisk bruker. */
+function syncCustomFields() {
+  if (!customHelp) return;
+  const valgt = el("c-action").value;
+  el("c-amount-wrap").classList.toggle(
+    "hidden",
+    customHelp.amount_actions.indexOf(valgt) === -1
+  );
+  el("c-package-wrap").classList.toggle(
+    "hidden",
+    customHelp.package_actions.indexOf(valgt) === -1
+  );
+  /* Mottaker gir bare mening for det som sendes ut av huset. */
+  const utgaaende = ["transfer_money", "send_email", "share_data"];
+  el("c-recipient-wrap").classList.toggle("hidden", utgaaende.indexOf(valgt) === -1);
+}
+
+async function sendCustom(ev) {
+  ev.preventDefault();
+  const feil = el("c-error");
+  const knapp = el("c-send");
+  knapp.disabled = true;
+  try {
+    const out = await api("/api/custom", {
+      action_type: el("c-action").value,
+      summary: el("c-summary").value,
+      amount: el("c-amount").value,
+      recipient: el("c-recipient").value,
+      package_name: el("c-package").value,
+      contains_personal_data: el("c-personal").checked,
+    });
+    feil.classList.toggle("hidden", out.ok);
+    if (!out.ok) feil.textContent = out.error;
+    apply(out.state);
+    if (out.ok) {
+      el("c-amount").value = "";
+      el("c-recipient").value = "";
+      el("c-package").value = "";
+      el("c-summary").value = "";
+      el("c-personal").checked = false;
+    }
+  } finally {
+    knapp.disabled = false;
+  }
+}
+
+const VERDICT_TEXT = { allow: "gikk gjennom", red: "venter på et menneske", block: "stoppet" };
+
+function renderCustom(list) {
+  el("custom-count").textContent = list.length;
+  if (!list.length) {
+    el("custom-list").innerHTML =
+      '<p class="empty">Ingen ennå. Fyll ut skjemaet over.</p>';
+    return;
+  }
+  el("custom-list").innerHTML = list
+    .map((card) => {
+      const d = card.decision;
+      const r = card.request;
+      return (
+        '<div class="flat-card mine-card"><div class="line1">' +
+        '<span class="agent">' + esc(card.action_label) + "</span>" +
+        '<span class="muted">' + esc(VERDICT_TEXT[d.verdict] || d.verdict) + "</span>" +
+        "</div>" +
+        '<div class="line2">' + esc(d.consequence_text) + "</div>" +
+        '<div class="line2 said-mini"><b>Du skrev</b> ' + esc(r.summary) + "</div>" +
+        chips(d) +
+        "</div>"
+      );
+    })
+    .join("");
+}
+
 /* ---------------- Etter ---------------- */
 
 async function loadAfter() {
@@ -465,11 +564,16 @@ function showTab(tab) {
   el("tab-before").classList.toggle("hidden", tab !== "before");
   el("tab-queue").classList.toggle("hidden", tab !== "queue");
   el("tab-after").classList.toggle("hidden", tab !== "after");
-  const hash = tab === "after" ? "#etter" : tab === "before" ? "#foer" : "#";
+  el("tab-custom").classList.toggle("hidden", tab !== "custom");
+  const hash =
+    tab === "after" ? "#etter" : tab === "before" ? "#foer" : tab === "custom" ? "#prov" : "#";
   if (history.replaceState) history.replaceState(null, "", hash);
   if (tab === "after") loadAfter();
+  if (tab === "custom") loadCustomHelp();
 }
 
+el("custom-form").addEventListener("submit", sendCustom);
+el("c-action").addEventListener("change", syncCustomFields);
 el("btn-verify").addEventListener("click", verify);
 el("btn-story").addEventListener("click", storyPlay);
 el("btn-story-next").addEventListener("click", storyNext);
@@ -490,5 +594,6 @@ el("btn-reset").addEventListener("click", async () => {
   apply(await api("/api/state"));
   if (location.hash === "#etter") showTab("after");
   if (location.hash === "#foer") showTab("before");
+  if (location.hash === "#prov") showTab("custom");
   startFeed();
 })();

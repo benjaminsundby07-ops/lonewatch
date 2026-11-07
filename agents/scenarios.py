@@ -39,6 +39,10 @@ AGENT_LABELS: dict[str, str] = {
     "finance": "Økonomi",
     "hr": "HR",
     "it_helper": "IT-hjelp",
+    # Ikke en av demoens agenter: brukes av "Prøv selv" i UI, slik at en
+    # forespørsel juryen har skrevet har en tydelig avsender. Ingen regel
+    # leser agent_id, så dette påvirker ingen avgjørelse.
+    "jury": "Juryen",
 }
 
 ACTION_LABELS: dict[str, str] = {
@@ -261,6 +265,23 @@ def find_scenario(request_id: str) -> ActionRequest | None:
         if req.id == request_id:
             return req
     return None
+
+
+def known_recipients() -> frozenset[str]:
+    """Mottakerne demoen regner som kjente, utledet fra scenarioene selv.
+
+    Brukes av "Prøv selv" i UI til å regne ut `recipient_known`, slik at den som
+    skriver en forespørsel ikke kan PÅSTÅ at en konto er kjent. Listen hentes
+    herfra og ikke skrives for hånd, slik at den aldri kommer ut av takt med
+    demodataene.
+
+    Dette er en oppdiktet demoliste, ikke et kunderegister. Se gateway/LIMITS.md.
+    """
+    return frozenset(
+        extra["recipient"]
+        for _, _, _, extra in _SPECS
+        if extra.get("recipient") and extra.get("recipient_known")
+    )
 
 
 def agent_label(agent_id: str) -> str:
