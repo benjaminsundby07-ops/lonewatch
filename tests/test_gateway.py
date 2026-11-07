@@ -464,3 +464,43 @@ def test_reasons_keep_a_stable_order():
         "personal_data_external",
         "irreversible",
     ]
+
+
+# --------------------------------------------------------------------------
+# 32-35: målemodulen (gateway/evaluation.py)
+# --------------------------------------------------------------------------
+
+
+def test_evaluation_set_has_at_least_40_requests_with_both_kinds():
+    from gateway import evaluation
+
+    cases = evaluation.all_cases()
+    assert len(cases) >= 40
+    assert len(evaluation.dangerous_cases()) >= 5
+    assert len(evaluation.harmless_cases()) >= 20
+    assert len({c.req.id for c in cases}) == len(cases)
+
+
+def test_evaluation_catches_everything_labeled_dangerous():
+    from gateway import evaluation
+
+    report = evaluation.measure()
+    assert report.dangerous_caught == report.dangerous_total
+    assert report.dangerous_missed == []
+
+
+def test_evaluation_has_no_false_alarms_on_the_harmless_cases():
+    from gateway import evaluation
+
+    report = evaluation.measure()
+    assert report.false_alarms == []
+    assert report.verdict_counts["allow"] == report.harmless_total
+
+
+def test_evaluation_report_is_marked_synthetic():
+    from gateway import evaluation
+
+    text = evaluation.format_report(evaluation.measure())
+    assert "SYNTETISK" in text
+    assert "Farlige fanget" in text
+    assert "Falske alarmer" in text
