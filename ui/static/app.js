@@ -118,6 +118,7 @@ function render() {
   renderAnswered(latest.answered);
   renderCalm(latest.calm, latest.calm_total);
   renderNotices(latest.notices);
+  renderBefore(latest.before);
 
   document.body.classList.toggle("alert", latest.waiting.length > 0);
 
@@ -316,6 +317,55 @@ function renderNotices(list) {
     .join("");
 }
 
+/* ---------------- Før: sandkassen ---------------- */
+
+function renderBefore(b) {
+  const box = el("before-list");
+  if (!b) return;
+  const rows = [];
+
+  if (b.error) {
+    rows.push(
+      '<div class="after-row"><span class="box"></span><div>' +
+        '<div class="at">Sandkassen svarte ikke</div>' +
+        '<div class="ad">' + esc(b.error) + "</div></div>" +
+        '<span class="ao">it</span></div>'
+    );
+  }
+
+  b.scanned.forEach((r) => {
+    const blocked = r.verdict === "blocked";
+    rows.push(
+      '<div class="after-row"><span class="box"></span><div>' +
+        '<div class="at">' +
+        esc(r.package_name) +
+        " &middot; " +
+        (blocked ? "stoppet i sandkassen" : "ingenting mistenkelig") +
+        "</div>" +
+        '<div class="ad">' +
+        esc(r.notes) +
+        (r.destinations && r.destinations.length
+          ? " Adresser: " + esc(r.destinations.join(", ")) + "."
+          : "") +
+        "</div></div>" +
+        '<span class="ao">' + (blocked ? "blokkert" : "rent") + "</span></div>"
+    );
+  });
+
+  b.untested.forEach((u) => {
+    rows.push(
+      '<div class="after-row"><span class="box"></span><div>' +
+        '<div class="at">' + esc(u.package_name) + " &middot; ikke testet</div>" +
+        '<div class="ad">' + esc(u.note) + "</div></div>" +
+        '<span class="ao">ukjent</span></div>'
+    );
+  });
+
+  box.innerHTML = rows.length
+    ? rows.join("")
+    : '<p class="empty">Ingen tillegg er forsøkt installert ennå.</p>';
+}
+
 /* ---------------- Etter ---------------- */
 
 async function loadAfter() {
@@ -409,9 +459,11 @@ function showTab(tab) {
   document.querySelectorAll(".tab-btn").forEach((b) =>
     b.classList.toggle("on", b.getAttribute("data-tab") === tab)
   );
+  el("tab-before").classList.toggle("hidden", tab !== "before");
   el("tab-queue").classList.toggle("hidden", tab !== "queue");
   el("tab-after").classList.toggle("hidden", tab !== "after");
-  if (history.replaceState) history.replaceState(null, "", tab === "after" ? "#etter" : "#");
+  const hash = tab === "after" ? "#etter" : tab === "before" ? "#foer" : "#";
+  if (history.replaceState) history.replaceState(null, "", hash);
   if (tab === "after") loadAfter();
 }
 
@@ -434,5 +486,6 @@ el("btn-reset").addEventListener("click", async () => {
 (async () => {
   apply(await api("/api/state"));
   if (location.hash === "#etter") showTab("after");
+  if (location.hash === "#foer") showTab("before");
   startFeed();
 })();

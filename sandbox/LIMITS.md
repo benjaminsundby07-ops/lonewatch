@@ -138,9 +138,15 @@ svetter.
 - **Agnlisten er hardkodet.** Et tillegg som leser `~/.ssh/id_ed25519` i stedet
   for `id_rsa` treffer ikke et agn. Vi skriver det ned som vanlig fillesing, og
   rapporten blir `clean`.
-- **Ingen kobling til loggen.** `scan()` returnerer bare rapporten. Å skrive den
-  til `vault` som en `sandbox`-linje hører til en annen økt, og er ikke gjort
-  her.
+- **Rapporten er ikke signert.** `scan()` returnerer et vanlig objekt. Den som
+  kaller mellomstasjonen kan finne på en `clean`-rapport selv, og gateway kan
+  ikke se forskjell. Se `gateway/LIMITS.md`.
+- **Vi skanner én gang per kjøring.** `scan_cached()` husker resultatet per
+  pakkenavn så lenge prosessen lever, slik at demoen ikke starter en ny
+  delprosess for hvert kort. Det betyr at to forespørsler om det samme tillegget
+  deler ett resultat og én linje i loggen - også hvis tillegget hadde oppført
+  seg annerledes andre gangen. Det gjør det synlige hullet i "Vi ser bare ett
+  kort øyeblikk" over enda litt større.
 
 ## Hva som måtte til for at dette var ekte
 

@@ -37,11 +37,23 @@
 </section>
 
 <nav class="tabs" role="tablist">
-  <button class="tab-btn on" data-tab="queue" role="tab">Køen</button>
+  <button class="tab-btn" data-tab="before" role="tab">Før</button>
+  <button class="tab-btn on" data-tab="queue" role="tab">Under</button>
   <button class="tab-btn" data-tab="after" role="tab">Etter</button>
 </nav>
 
 <main>
+
+  <section id="tab-before" class="tab hidden">
+    <h2 class="h-quiet">Før</h2>
+    <p class="lead">
+      Tillegg blir kjørt i en lukket boks før mellomstasjonen bestemmer seg.
+      Vi skriver ned hva tillegget faktisk gjorde. &laquo;Rent&raquo; betyr
+      <em>vi så ingenting</em>, ikke at tillegget er trygt &mdash; se
+      <code>sandbox/LIMITS.md</code>.
+    </p>
+    <div id="before-list" class="after-list"></div>
+  </section>
 
   <section id="tab-queue" class="tab">
     <div class="grid">

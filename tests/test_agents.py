@@ -219,24 +219,52 @@ def test_the_chain_is_install_then_trapped_document_then_transfer():
     assert any(install < i < transfer for i in reads)
 
 
-def test_the_story_has_two_traps_and_one_sandbox_report():
+def test_the_story_has_two_traps_and_one_sandbox_step():
     s = story.binance_inspired()
     trap_steps = [step for step in s.steps if step.trap is not None]
-    sandbox_steps = [step for step in s.steps if step.sandbox is not None]
+    sandbox_steps = [step for step in s.steps if step.sandbox_package is not None]
     assert len(trap_steps) == 2
     assert len(sandbox_steps) == 1
     assert all(isinstance(step.trap, TrapEvent) for step in trap_steps)
-    assert isinstance(sandbox_steps[0].sandbox, SandboxReport)
 
 
-def test_the_sandbox_report_is_marked_as_blocked_and_simulated():
-    report = next(
-        step.sandbox for step in story.binance_inspired().steps if step.sandbox
+def test_the_story_names_a_package_instead_of_carrying_a_written_report():
+    """agents/ kjoerer ingenting. Steget sier BARE hvilket tillegg som skal proeves.
+
+    Rapporten lages av et ekte scan i integrasjonslaget. En haandskrevet
+    SandboxReport her ville vaert en paastand vi ikke kan staa for.
+    """
+    s = story.binance_inspired()
+    step = next(step for step in s.steps if step.sandbox_package is not None)
+    assert step.kind == story.STEP_SANDBOX
+    assert step.sandbox_package == "free-ai-boost"
+    # Ingen av stegene baerer en ferdig rapport.
+    assert not any(isinstance(getattr(st, "sandbox", None), SandboxReport) for st in s.steps)
+
+
+def test_the_story_installs_a_package_the_sandbox_can_actually_test():
+    """Tillegget historien installerer maa finnes i sandbox/packages/.
+
+    Ellers ville "Foer"-steget i demoen vist "ikke testet" i stedet for et ekte
+    resultat, og fortellingen ville lovet noe den ikke gjoer.
+    """
+    sandbox = pytest.importorskip("sandbox")
+    install = next(
+        r for r in story.story_requests() if r.action_type is ActionType.INSTALL_PACKAGE
     )
-    assert report.verdict == "blocked"
-    assert report.attempted_network is True
-    assert report.destinations
-    assert "imulert" in report.notes  # "Simulert" / "simulert"
+    step = next(st for st in story.binance_inspired().steps if st.sandbox_package)
+    assert install.package_name == step.sandbox_package
+    assert install.package_name in sandbox.available_packages()
+
+
+def test_the_trap_in_the_bulletin_names_the_same_package_the_agent_installs():
+    """Fella og forespoerselen skal peke paa det samme tillegget."""
+    install = next(
+        r for r in story.story_requests() if r.action_type is ActionType.INSTALL_PACKAGE
+    )
+    doc = traps.find_doc(install.source_doc_id)
+    hidden = " ".join(str(v) for v in (doc.metadata or {}).values()) + doc.hidden_text
+    assert install.package_name in hidden
 
 
 def test_story_requests_are_action_requests_with_their_own_ids():

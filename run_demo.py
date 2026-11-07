@@ -8,8 +8,9 @@ from __future__ import annotations
 from datetime import timedelta
 
 from agents.scenarios import all_scenarios
-from contracts import ActionRequest, Decision, HumanResponse, Verdict
+from contracts import ActionRequest, ActionType, Decision, HumanResponse, SandboxReport, Verdict
 from gateway import evaluate
+from sandbox import UnknownPackage, scan_cached
 from vault import Vault, pseudonymize
 
 LINE = "-" * 72
@@ -27,13 +28,38 @@ def _fake_human_response(req: ActionRequest, decision: Decision) -> HumanRespons
     )
 
 
+def _scan(req: ActionRequest, vault: Vault, seen: set[str]) -> SandboxReport | None:
+    """Prøver tillegget i sandkassen før avgjørelsen, og logger rapporten.
+
+    Ingenting kjøres ut fra et navn vi får i en forespørsel: scan_cached slår
+    navnet opp blant filene i sandbox/packages/, og et navn som ikke ligger der
+    gir UnknownPackage uten at det startes en prosess.
+    """
+    if req.action_type is not ActionType.INSTALL_PACKAGE:
+        return None
+    name = (req.package_name or "").strip()
+    if not name:
+        return None
+    try:
+        report = scan_cached(name)
+    except UnknownPackage:
+        return None
+
+    if name not in seen:
+        seen.add(name)
+        vault.append("sandbox", report.model_dump(mode="json"), ts=report.ts)
+    return report
+
+
 def run(vault: Vault | None = None) -> Vault:
     """Spiller alle scenarioene gjennom mellomstasjonen og logger alt."""
     vault = vault if vault is not None else Vault()
+    scanned: set[str] = set()
 
     for req in all_scenarios():
         vault.append("request", req.model_dump(mode="json"), ts=req.ts)
-        decision = evaluate(req)
+        report = _scan(req, vault, scanned)
+        decision = evaluate(req, sandbox_report=report)
         vault.append("decision", decision.model_dump(mode="json"), ts=decision.ts)
 
         print(LINE)
@@ -42,6 +68,11 @@ def run(vault: Vault | None = None) -> Vault:
         print(f"  avgjørelse   : {decision.verdict.value.upper()}  (risiko {decision.risk.value})")
         print(f"  regler       : {', '.join(decision.reasons) or 'ingen'}")
         print(f"  konsekvens   : {decision.consequence_text}")
+        if req.action_type is ActionType.INSTALL_PACKAGE:
+            if report is None:
+                print("  sandkassen   : har ikke dette tillegget, ingenting ble kjørt")
+            else:
+                print(f"  sandkassen   : {report.verdict} - {report.notes}")
 
         if decision.verdict is Verdict.ALLOW:
             print("  -> gjennomført (simulert)")

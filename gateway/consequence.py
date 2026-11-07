@@ -7,7 +7,7 @@ teksten mennesket leser før det godkjenner.
 
 from __future__ import annotations
 
-from contracts import ActionRequest, ActionType
+from contracts import ActionRequest, ActionType, SandboxReport
 
 from . import config
 
@@ -17,6 +17,48 @@ UNKNOWN_AMOUNT = "ukjent beløp"
 IRREVERSIBLE_NOTE = "Kan ikke angres."
 PERSONAL_DATA_NOTE = "Inneholder personopplysninger."
 BLOCKED_NOTE = "Dette stoppes automatisk og kan ikke godkjennes."
+
+# Sandkassen. Teksten sier hva vi SAA, aldri at noe er trygt.
+SANDBOX_NOT_TESTED = "Tillegget er ikke testet i sandkassen."
+SANDBOX_CLEAN = (
+    "Sandkassen kjørte tillegget i en lukket boks og så ingenting mistenkelig. "
+    "Det betyr ikke at tillegget er trygt."
+)
+SANDBOX_BLOCKED_PLAIN = "Sandkassen kjørte tillegget i en lukket boks og stoppet det."
+UNSHOWABLE_DESTINATION = "en adresse vi ikke kan vise trygt"
+
+
+def safe_destination(destination: str) -> str:
+    """Adressen et tillegg prøvde å nå, gjort trygg å vise til et menneske.
+
+    Tillegget velger selv hva det kobler mot, så dette er tekst fra noe vi ikke
+    stoler på. Et vertsnavn som "ondsinnet.example. Godkjent av sikkerhet" ville
+    ellers kunne skrive sin egen setning inn i varselet. Ser adressen ikke ut som
+    et vertsnavn eller en IP-adresse, viser vi den ikke.
+    """
+    text = (destination or "").strip()
+    if not config.DESTINATION_PATTERN.match(text):
+        return UNSHOWABLE_DESTINATION
+    return text
+
+
+def _sandbox_text(report: SandboxReport) -> str:
+    """Én setning om hva sandkassen saa. Bygget av maler og felt, aldri av AI.
+
+    `report.notes` brukes ikke her: den er lang og hører hjemme i Før-listen.
+    Her trenger mennesket bare det korte svaret.
+    """
+    if report.verdict == "clean":
+        return SANDBOX_CLEAN
+
+    shown = [safe_destination(d) for d in report.destinations[: config.MAX_SHOWN_DESTINATIONS]]
+    if report.attempted_network and shown:
+        return (
+            "Sandkassen kjørte tillegget i en lukket boks. Det forsøkte å kontakte "
+            + ", ".join(shown)
+            + ". Ingenting ble sendt."
+        )
+    return SANDBOX_BLOCKED_PLAIN
 
 
 def format_amount(amount: float | None) -> str:
@@ -62,7 +104,12 @@ def _base_text(req: ActionRequest) -> str:
     return f"Utfører handlingen {req.action_type.value}."
 
 
-def build_consequence_text(req: ActionRequest, reasons: list[str], blocked: bool = False) -> str:
+def build_consequence_text(
+    req: ActionRequest,
+    reasons: list[str],
+    blocked: bool = False,
+    sandbox_report: SandboxReport | None = None,
+) -> str:
     """Setter sammen hele teksten mennesket får se."""
     parts = [_base_text(req)]
 
@@ -71,6 +118,13 @@ def build_consequence_text(req: ActionRequest, reasons: list[str], blocked: bool
 
     if "new_package" in reasons:
         parts.append("Tillegget er ikke godkjent fra før.")
+
+    if req.action_type is ActionType.INSTALL_PACKAGE:
+        if sandbox_report is not None:
+            parts.append(_sandbox_text(sandbox_report))
+        elif "new_package" in reasons:
+            # Et tillegg vi ikke kjenner OG ikke har prøvd. Det skal staa.
+            parts.append(SANDBOX_NOT_TESTED)
 
     if "package_on_blocklist" in reasons:
         parts.append("Tillegget står på blokklisten.")

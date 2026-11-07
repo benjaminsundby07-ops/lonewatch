@@ -6,6 +6,8 @@ Ingen av verdiene hentes fra en AI-modell; de er satt for hånd og er like hver 
 
 from __future__ import annotations
 
+import re
+
 from contracts import ActionType
 
 # Beløpsgrense (NOK). Fra og med dette beløpet vil vi at et menneske skal se på det.
@@ -71,6 +73,16 @@ EFFECTFUL_ACTIONS: frozenset[ActionType] = frozenset(
         ActionType.INSTALL_PACKAGE,
     }
 )
+
+# Hvor mange adresser fra en sandkasserapport vi viser i konsekvensteksten.
+MAX_SHOWN_DESTINATIONS: int = 3
+
+# Et tillegg velger SELV hvilken adresse det prøver å nå, og adressen havner i
+# teksten et menneske leser før det godkjenner. Den er altså tekst fra noe vi
+# ikke stoler på, akkurat som `summary`. Derfor slipper vi bare gjennom tegn som
+# hører hjemme i et vertsnavn, en IP-adresse og et portnummer. Alt annet byttes
+# ut med en nøytral tekst, slik at ingen kan skrive en setning inn i varselet.
+DESTINATION_PATTERN = re.compile(r"^[A-Za-z0-9._:\[\]-]{1,100}$")
 
 # Vekt per regel. Summen bestemmer risikonivået.
 # "irreversible" veier lite alene: vanlige, ugjenkallelige betalinger til kjente

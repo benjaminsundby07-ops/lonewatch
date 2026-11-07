@@ -128,15 +128,28 @@ def build_after_actions(entries: Iterable[LogEntry]) -> list[AfterAction]:
             ))
 
         elif e.kind == "sandbox":
+            name = payload.get("package_name") or "ukjent tillegg"
             if payload.get("attempted_network"):
                 dests = payload.get("destinations") or []
                 _add(seen, out, AfterAction(
                     title="Tillegget prøvde aa sende data ut",
                     detail=(
-                        f"'{payload.get('package_name')}' forsøkte nettverk mot "
-                        f"{', '.join(str(d) for d in dests) or 'ukjent sted'} i den lukkede boksen "
-                        "(simulert, ingenting ble sendt). Blokker adressene og se etter samme "
+                        f"'{name}' ble kjørt i den lukkede boksen og forsøkte nettverk mot "
+                        f"{', '.join(str(d) for d in dests) or 'ukjent sted'}. Sandkassen svarte "
+                        "nei, saa ingenting forlot maskinen. Blokker adressene og se etter samme "
                         "forsøk i ekte logger."
+                    ),
+                    owner_role="security",
+                ))
+            elif payload.get("verdict") == "blocked":
+                # Stoppet uten nettverk: leste hemmeligheter, kom ikke ut av boksen
+                # i tide, eller forsøkte noe annet sandkassen ikke tillater.
+                _add(seen, out, AfterAction(
+                    title="Tillegget ble stoppet i sandkassen",
+                    detail=(
+                        f"'{name}' ble kjørt i den lukkede boksen og stoppet uten at det "
+                        "forsøkte nettverk. Les notatet paa sandkasselinjen i loggen og finn "
+                        "ut hvem som ba om tillegget."
                     ),
                     owner_role="security",
                 ))

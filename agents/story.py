@@ -6,17 +6,19 @@ systemet gjøre resten selv.
 
 DETTE ER EN SIMULERING OG EN UFARLIG ETTERLIGNING.
 - Nordlys Forsikring finnes ikke.
-- Tillegget "nordlys-mail-connector-patch" inneholder ingen kode. Det er et navn i
-  en liste.
-- Sandkasserapporten er skrevet for hånd. Det gjøres ingen nettverkskall, ingen
-  oppslag av navn, ingen tilkobling. Feltet `attempted_network=True` betyr
-  "i historien forsøkte tillegget dette", ikke at noe faktisk skjedde på maskinen.
+- Tillegget "free-ai-boost" er en ufarlig etterligning som ligger i
+  sandbox/packages/. Det leser oppdiktede demofiler og prøver å koble seg til en
+  adresse som slutter på .invalid og derfor ikke finnes. Sandkassen svarer nei
+  før noe forlater maskinen.
+- Sandkasserapporten er IKKE skrevet for hånd lenger. Historien sier bare hvilket
+  tillegg som skal prøves; den som spiller historien kjører et ekte scan og får en
+  ekte SandboxReport. Se `sandbox/LIMITS.md` for hva den sandkassen ikke klarer.
 - Ingen ekte penger, ingen ekte personopplysninger, ingen API-nøkkel, ingen internett.
 
 Kjeden, i den rekkefølgen den spilles:
   1. IT-hjelp leser en bulletin som ser rutinemessig ut.      (fella går av)
   2. IT-hjelp installerer tillegget bulletinen ba om.          (ukjent kilde)
-  3. Sandkassen ser at tillegget forsøker å sende data ut.
+  3. Sandkassen kjører tillegget og ser at det prøver å sende data ut.
   4. Økonomi leser en faktura som også har en felle.         (fella går av)
   5. Økonomi vil overføre 10 000 000 kr til ukjent konto.    (menneske må inn)
 
@@ -29,7 +31,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 from agents import traps
-from contracts import ActionRequest, ActionType, SandboxReport, TrapEvent
+from contracts import ActionRequest, ActionType, TrapEvent
 
 STORY_ID = "binance_inspired"
 STORY_TITLE = "Hendelsen"
@@ -65,7 +67,10 @@ class StoryStep:
     detail: str
     request: ActionRequest | None = None
     trap: TrapEvent | None = None
-    sandbox: SandboxReport | None = None
+    # Hvilket tillegg dette steget handler om. Steget bærer IKKE en ferdig
+    # SandboxReport: agents/ kjører ingenting. Den som spiller historien kaller
+    # sandbox.scan_cached(navnet) og viser den ekte rapporten.
+    sandbox_package: str | None = None
 
     @property
     def ts(self) -> datetime:
@@ -92,8 +97,8 @@ _REQ_INSTALL = ActionRequest(
     ts=_ts(22),
     agent_id="it_helper",
     action_type=ActionType.INSTALL_PACKAGE,
-    summary="Installerer påkrevd oppdatering av e-postkobling før nedetid",
-    package_name="nordlys-mail-connector-patch",
+    summary="Installerer anbefalt tillegg før uke 46, står i bulletinen",
+    package_name="free-ai-boost",
     recipient="privat kilde",
     recipient_known=False,
     reversible=False,
@@ -121,20 +126,6 @@ _REQ_TRANSFER = ActionRequest(
     recipient_known=False,
     reversible=False,
     source_doc_id="doc_invoice_8841",
-)
-
-# Sandkasserapporten er skrevet for hånd. Ingenting her ble kjørt eller kontaktet.
-_SANDBOX = SandboxReport(
-    ts=_ts(34),
-    package_name="nordlys-mail-connector-patch",
-    attempted_network=True,
-    destinations=["mail-relay.nordlys-arkiv-eu.net", "185.0.0.0 (simulert)"],
-    verdict="blocked",
-    notes=(
-        "Simulert sandkasse. Tillegget ble aldri kjørt, og det ble ikke gjort noe "
-        "nettverkskall. Rapporten beskriver hva tillegget skulle gjort i historien: "
-        "lese utgående e-post og sende kopi til en adresse utenfor Nordlys."
-    ),
 )
 
 
@@ -194,18 +185,19 @@ def binance_inspired() -> Story:
             at_second=22,
             kind=STEP_REQUEST,
             title="Agenten vil installere tillegget",
-            detail="Navnet ser offisielt ut. Kilden er det ingen som kjenner.",
+            detail="Bulletinen ba om det. Kilden er det ingen som kjenner.",
             request=_REQ_INSTALL,
         ),
         StoryStep(
             at_second=34,
             kind=STEP_SANDBOX,
-            title="Sandkassen ser hva tillegget vil",
+            title="Sandkassen har kjørt tillegget",
             detail=(
-                "Tillegget vil lese utgående e-post og sende kopi ut av huset. "
-                "Simulert: ingenting ble kjørt, ingenting ble kontaktet."
+                "Tillegget ble kjørt i en lukket boks før avgjørelsen. Det leste "
+                "filene som ser ut som hemmeligheter og prøvde å sende dem ut. "
+                "Filene er oppdiktede, og sandkassen svarte nei."
             ),
-            sandbox=_SANDBOX,
+            sandbox_package="free-ai-boost",
         ),
         StoryStep(
             at_second=42,

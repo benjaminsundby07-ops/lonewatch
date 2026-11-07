@@ -244,3 +244,34 @@ def scan(package_name: str, timeout_s: float | None = None) -> SandboxReport:
     """Kjører et av demotilleggene i boksen og sier clean eller blocked."""
     path = package_path(package_name)
     return run_plugin_source(package_name, path.read_text(encoding="utf-8"), timeout_s=timeout_s)
+
+
+# Resultatet per (pakkenavn, tidsgrense) saa lenge prosessen lever.
+_SCAN_CACHE: dict[tuple[str, float | None], SandboxReport] = {}
+
+
+def scan_cached(package_name: str, timeout_s: float | None = None) -> SandboxReport:
+    """Som scan(), men kjører hvert tillegg bare én gang per prosess.
+
+    Demoen ber om det samme tillegget flere ganger (koeen, historien, en ny
+    runde etter Nullstill). Da skal vi ikke starte en ny delprosess hver gang,
+    og alle som ser rapporten skal se NØYAKTIG den samme - ogsaa `ts`.
+
+    Ukjent pakkenavn gir UnknownPackage som før, og havner aldri i cachen:
+    package_path() sjekkes paa nytt hver gang.
+    """
+    key = (package_name, timeout_s)
+    cached = _SCAN_CACHE.get(key)
+    if cached is not None:
+        # Sjekk navnet likevel, slik at et ugyldig navn aldri slipper gjennom
+        # bare fordi noen har spurt om det samme før.
+        package_path(package_name)
+        return cached
+    report = scan(package_name, timeout_s=timeout_s)
+    _SCAN_CACHE[key] = report
+    return report
+
+
+def clear_scan_cache() -> None:
+    """Tømmer cachen. Brukes av tester som vil kjøre et tillegg paa nytt."""
+    _SCAN_CACHE.clear()

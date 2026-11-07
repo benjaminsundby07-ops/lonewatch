@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from contracts import ActionRequest, ActionType
+from contracts import ActionRequest, ActionType, SandboxReport
 
 from . import config
 
@@ -89,6 +89,24 @@ def transfer_over_hard_limit(req: ActionRequest) -> bool:
     return req.amount > config.HARD_TRANSFER_LIMIT_NOK
 
 
+def sandbox_blocked(req: ActionRequest, sandbox_report: SandboxReport | None) -> bool:
+    """Sandkassen kjørte tillegget i en lukket boks og stoppet det.
+
+    Dette er den eneste regelen som ser på noe utenfor ActionRequest, og den ser
+    bare paa hva tillegget FAKTISK gjorde (`verdict`), ikke paa hva noen skriver
+    om det. Rapporten kommer fra sandbox/, som avgjør clean/blocked med faste
+    regler. Ingen AI, og tilleggets egen beskrivelse av seg selv leses aldri.
+
+    Uten rapport slaar regelen ikke til: "ikke testet" er ikke det samme som
+    "stoppet".
+    """
+    if req.action_type is not ActionType.INSTALL_PACKAGE:
+        return False
+    if sandbox_report is None:
+        return False
+    return sandbox_report.verdict == "blocked"
+
+
 # Reglene som gir risikopoeng, i den rekkefølgen de skal stå i `reasons`.
 RiskRule = Callable[[ActionRequest], bool]
 
@@ -112,9 +130,18 @@ def triggered_risk_rules(req: ActionRequest) -> list[str]:
     return [name for name, rule in RISK_RULES if rule(req)]
 
 
-def triggered_block_rules(req: ActionRequest) -> list[str]:
-    """Navnene på blokkreglene som slo til, i fast rekkefølge."""
-    return [name for name, rule in BLOCK_RULES if rule(req)]
+def triggered_block_rules(
+    req: ActionRequest, sandbox_report: SandboxReport | None = None
+) -> list[str]:
+    """Navnene på blokkreglene som slo til, i fast rekkefølge.
+
+    `sandbox_blocked` staar først fordi den bygger på noe tillegget faktisk
+    gjorde, ikke på en liste vi har skrevet på forhånd.
+    """
+    names = [name for name, rule in BLOCK_RULES if rule(req)]
+    if sandbox_blocked(req, sandbox_report):
+        names.insert(0, "sandbox_blocked")
+    return names
 
 
 def risk_score(reasons: list[str]) -> int:

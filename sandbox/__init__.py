@@ -22,10 +22,12 @@ from .runner import (
     SandboxRun,
     UnknownPackage,
     available_packages,
+    clear_scan_cache,
     package_path,
     run_in_box,
     run_plugin_source,
     scan,
+    scan_cached,
 )
 
 DEMO_PACKAGES = config.DEMO_PACKAGES
@@ -33,6 +35,8 @@ HANGING_PACKAGE = config.HANGING_PACKAGE
 
 __all__ = [
     "scan",
+    "scan_cached",
+    "clear_scan_cache",
     "run_plugin_source",
     "run_in_box",
     "SandboxRun",

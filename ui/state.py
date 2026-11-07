@@ -97,6 +97,10 @@ class DemoState:
             self.verify_result: dict[str, Any] | None = None
             # (doc_id, agent_id, access) for feller som allerede står i loggen.
             self._fired_traps: set[tuple[str, str, str]] = set()
+            # Før-listen: tillegg sandkassen har kjørt, og tillegg den ikke har.
+            self._scanned: dict[str, dict[str, Any]] = {}
+            self._untested: dict[str, dict[str, Any]] = {}
+            self.sandbox_error: str | None = None
 
             self._story = story.binance_inspired()
             self.story_index = 0
@@ -139,10 +143,17 @@ class DemoState:
     # -- behandling av én forespørsel ------------------------------------
 
     def _handle(self, req: ActionRequest, source: str) -> dict[str, Any]:
-        """Hele kjernflyten for én forespørsel: logg, vurder, logg, plasser."""
+        """Hele kjernflyten for én forespørsel: logg, prøv, vurder, logg, plasser.
+
+        "Før"-steget ligger her: skal et tillegg installeres, kjører vi det i
+        sandkassen FØR mellomstasjonen bestemmer seg, og rapporten går med inn i
+        evaluate(). Rekkefølgen i loggen blir derfor request -> sandbox ->
+        decision, som er den rekkefølgen tingene faktisk skjedde i.
+        """
         self._append("request", req.model_dump(mode="json"), ts=req.ts)
 
-        decision: Decision = evaluate(req)
+        report = self._scan(req)
+        decision: Decision = evaluate(req, sandbox_report=report)
         self._append("decision", decision.model_dump(mode="json"), ts=decision.ts)
 
         # I historien er fellene egne steg, slik at de kommer på skjermen når
@@ -164,12 +175,74 @@ class DemoState:
             "agent_label": scenarios.agent_label(req.agent_id),
             "action_label": scenarios.action_label(req.action_type),
             "trap": trap.model_dump(mode="json") if trap else None,
+            "sandbox": report.model_dump(mode="json") if report else None,
             "human": None,
             "error": None,
         }
         self.cards[req.id] = card
         self.order.append(req.id)
         return card
+
+    def _scan(self, req: ActionRequest) -> SandboxReport | None:
+        """Kjører tillegget i sandkassen hvis vi har det, og logger rapporten.
+
+        Vi kjører ALDRI noe ut fra et navn vi får i en forespørsel. sandbox.scan
+        slår navnet opp blant filene i sandbox/packages/, og et navn som ikke
+        ligger der gir UnknownPackage uten at det startes en prosess. Da er
+        svaret "ikke testet", og new_package-regelen staar alene.
+        """
+        if req.action_type is not ActionType.INSTALL_PACKAGE:
+            return None
+        name = (req.package_name or "").strip()
+        if not name:
+            return None
+        try:
+            from sandbox import UnknownPackage, scan_cached
+        except Exception as exc:  # pragma: no cover - avhenger av økt D
+            self.sandbox_error = f"Sandkassen kunne ikke startes: {exc}"
+            return None
+
+        try:
+            report = scan_cached(name)
+        except UnknownPackage:
+            # Helt normalt: de fleste tillegg i verden ligger ikke hos oss.
+            self._note_untested(name)
+            return None
+        except Exception as exc:  # pragma: no cover - uventet feil i boksen
+            self.sandbox_error = f"Sandkassen feilet for {name}: {exc}"
+            return None
+
+        self._record_sandbox(report)
+        return report
+
+    def _record_sandbox(self, report: SandboxReport) -> None:
+        """Logger rapporten én gang per tillegg og legger den i Før-listen."""
+        name = report.package_name
+        if name in self._scanned:
+            return
+        self._scanned[name] = report.model_dump(mode="json")
+        self._append("sandbox", report.model_dump(mode="json"), ts=report.ts)
+        self.notices.append(
+            {
+                "kind": "sandbox",
+                "title": f"Sandkassen: {name}",
+                "detail": report.notes,
+                "ts": report.ts.isoformat(),
+            }
+        )
+
+    def _note_untested(self, package_name: str) -> None:
+        """Tillegg sandkassen ikke har en fil for. Ingen scan, ingen kjøring."""
+        if package_name in self._untested:
+            return
+        self._untested[package_name] = {
+            "package_name": package_name,
+            "tested": False,
+            "note": (
+                "Sandkassen har ikke dette tillegget, så det ble ikke kjørt. "
+                "Ingenting ble installert eller startet."
+            ),
+        }
 
     def _maybe_trap(self, req: ActionRequest) -> TrapEvent | None:
         """Gikk det av en felle i dokumentet forespørselen kom fra?"""
@@ -290,6 +363,7 @@ class DemoState:
                 "title": step.title,
                 "detail": step.detail,
                 "request_id": None,
+                "sandbox": None,
             }
 
             if step.request is not None:
@@ -298,29 +372,15 @@ class DemoState:
                 entry["verdict"] = card["decision"]["verdict"]
             if step.trap is not None:
                 self._record_trap(step.trap, traps.ACCESS_READ)
-            if step.sandbox is not None:
-                self._log_story_sandbox(step.sandbox)
+            if step.sandbox_package is not None:
+                # Rapporten ble skrevet til loggen da tillegget ble forsøkt
+                # installert (steget foer). Her viser vi den bare fram.
+                entry["sandbox"] = self._scanned.get(step.sandbox_package)
 
             self.story_log.append(entry)
             if self.story_index >= len(steps):
                 self.story_running = False
             return self.story_snapshot()
-
-    def _log_story_sandbox(self, report: SandboxReport) -> None:
-        self._append("sandbox", report.model_dump(mode="json"), ts=report.ts)
-        mal = "forsøkte å sende data ut" if report.attempted_network else "gjorde ingen forsøk"
-        self.notices.append(
-            {
-                "kind": "sandbox",
-                "title": "Sandkassen",
-                "detail": (
-                    f"{report.package_name} {mal}. "
-                    f"Mål: {', '.join(report.destinations) or 'ingen'}. "
-                    f"Resultat: {report.verdict}. {report.notes}"
-                ),
-                "ts": report.ts.isoformat(),
-            }
-        )
 
     def story_snapshot(self) -> dict[str, Any]:
         steps = self._story.steps
@@ -387,6 +447,22 @@ class DemoState:
                 "note": None,
             }
 
+    def before_list(self) -> dict[str, Any]:
+        """"Før"-listen: hva sandkassen prøvde, og hva den ikke kunne prøve.
+
+        Rekkefølgen er den tilleggene dukket opp i, slik at demoen kan peke paa
+        et rent og et blokkert tillegg i tur og orden.
+        """
+        with self._lock:
+            scanned = list(self._scanned.values())
+            return {
+                "scanned": scanned,
+                "untested": list(self._untested.values()),
+                "blocked": len([r for r in scanned if r["verdict"] == "blocked"]),
+                "clean": len([r for r in scanned if r["verdict"] == "clean"]),
+                "error": self.sandbox_error,
+            }
+
     # -- alt nettsiden trenger i ett kall ---------------------------------
 
     def snapshot(self) -> dict[str, Any]:
@@ -411,6 +487,7 @@ class DemoState:
                     "seen": self._next_index,
                     "total": len(self._requests),
                 },
+                "before": self.before_list(),
                 "story": self.story_snapshot(),
                 "log": {
                     "lines": len(self.vault.entries()) if self.vault else 0,
