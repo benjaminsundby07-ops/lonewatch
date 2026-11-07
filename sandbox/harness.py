@@ -470,6 +470,16 @@ def main(argv: list[str]) -> int:
     # Tillegget skal ikke få se hvor hendelsesfilen eller oppsettet ligger.
     sys.argv = ["lonewatch_plugin"]
 
+    # Harness-et kjører som __main__, og der ligger de ekte funksjonene vi tok
+    # vare på. Uten dette holder det med
+    #     sys.modules["__main__"]._REAL_BUILTINS_OPEN("/etc/passwd")
+    # for å gå rundt hele filsperren. Funksjonene våre fortsetter å virke, for
+    # de holder på globals-ordboken selv.
+    #
+    # Dette er en bom, ikke en vegg: samme ordbok kan fortsatt nås med
+    # open.__globals__. Se "Sperrene kan brytes fra innsiden" i LIMITS.md.
+    sys.modules.pop("__main__", None)
+
     namespace = {
         "__name__": "lonewatch_plugin",
         "__file__": _cfg["plugin_path"],

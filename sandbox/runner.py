@@ -28,6 +28,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from contracts import SandboxReport
@@ -41,6 +42,31 @@ PACKAGES_DIR = Path(__file__).with_name("packages")
 
 class UnknownPackage(ValueError):
     """Pakkenavnet finnes ikke blant demotilleggene."""
+
+
+@dataclass(frozen=True)
+class SandboxRun:
+    """Rapporten pluss de raa hendelsene fra delprosessen.
+
+    SandboxReport er det mellomstasjonen og UI-et skal se. Hendelsene er for
+    oss: de inneholder blant annet hva tillegget RETURNERTE, og det er tekst
+    tillegget selv har skrevet. Den teksten skal aldri havne i `notes`, som et
+    menneske leser. Testene bruker hendelsene for aa sjekke at et tillegg som
+    forsoker aa bryte ut faktisk ikke kom gjennom.
+    """
+
+    report: SandboxReport
+    events: list[dict] = field(default_factory=list)
+
+    def result_value(self) -> str:
+        """Det tillegget returnerte fra run(), som tekst. Tom hvis det krasjet."""
+        for event in self.events:
+            if event.get("kind") == "result":
+                return str(event.get("data", {}).get("value", ""))
+        return ""
+
+    def kinds(self) -> list[str]:
+        return [str(event.get("kind", "")) for event in self.events]
 
 
 def available_packages() -> list[str]:
@@ -119,16 +145,12 @@ def _kill_tree(proc: subprocess.Popen) -> None:
             pass
 
 
-def run_plugin_source(
+def run_in_box(
     package_name: str,
     source: str,
     timeout_s: float | None = None,
-) -> SandboxReport:
-    """Kjører kildekoden til et tillegg i boksen og lager rapporten.
-
-    scan() bruker denne etter å ha lest filen. Den er også inngangen testene
-    bruker når de vil prøve noe som ikke ligger i sandbox/packages/.
-    """
+) -> SandboxRun:
+    """Kjører kildekoden til et tillegg i boksen. Gir rapport OG hendelser."""
     timeout = config.DEFAULT_TIMEOUT_S if timeout_s is None else float(timeout_s)
 
     box = Path(tempfile.mkdtemp(prefix="lonewatch-boks-"))
@@ -190,17 +212,32 @@ def run_plugin_source(
             _kill_tree(proc)
             _, stderr = proc.communicate()
 
-        return build_report(
+        events = _read_events(events_path)
+        report = build_report(
             package_name,
-            _read_events(events_path),
+            events,
             timed_out=timed_out,
             timeout_s=timeout,
             returncode=proc.returncode,
             stderr=stderr or "",
         )
+        return SandboxRun(report=report, events=events)
     finally:
         shutil.rmtree(box, ignore_errors=True)
         shutil.rmtree(control, ignore_errors=True)
+
+
+def run_plugin_source(
+    package_name: str,
+    source: str,
+    timeout_s: float | None = None,
+) -> SandboxReport:
+    """Som run_in_box(), men gir bare rapporten.
+
+    scan() bruker denne etter aa ha lest filen. Den er ogsaa inngangen testene
+    bruker naar de vil proeve noe som ikke ligger i sandbox/packages/.
+    """
+    return run_in_box(package_name, source, timeout_s=timeout_s).report
 
 
 def scan(package_name: str, timeout_s: float | None = None) -> SandboxReport:

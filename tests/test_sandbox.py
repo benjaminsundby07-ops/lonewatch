@@ -24,6 +24,17 @@ MISTENKELIGE = {
 }
 
 
+def _kjor(navn: str, kilde: str, timeout_s: float = 15.0):
+    """Kjører kildekode i boksen og gir både rapporten og det run() returnerte.
+
+    Hvorfor ikke bare rapporten: `notes` inneholder med vilje ikke tekst
+    tillegget selv har skrevet. Da ville "KOM GJENNOM"-sjekkene under aldri
+    kunnet slå til, og testene hadde sett grønne ut uten å teste noe.
+    """
+    kjoring = sandbox.run_in_box(navn, kilde, timeout_s=timeout_s)
+    return kjoring.report, kjoring.result_value()
+
+
 # ----------------------------------------------------------- demotilleggene
 
 @pytest.mark.parametrize("navn", HARMLOSE)
@@ -154,10 +165,13 @@ def run():
     return forsok
 """
     try:
-        rapport = sandbox.run_plugin_source("nettverkstest", kilde, timeout_s=15.0)
+        rapport, resultat = _kjor("nettverkstest", kilde)
         assert rapport.attempted_network is True
         assert f"127.0.0.1:{port}" in rapport.destinations
         assert rapport.verdict == "blocked"
+        # Alle fire forsøkene skal ha blitt stoppet, ikke bare det første.
+        assert "KOM GJENNOM" not in resultat, resultat
+        assert resultat.count("stoppet") == 4, resultat
 
         # Ingen rakk å koble seg til. accept() skal gå i tidsgrensen.
         with pytest.raises((TimeoutError, socket.timeout)):
@@ -176,9 +190,10 @@ def test_tillegget_far_ikke_lese_utenfor_boksen(tmp_path):
         "def run():\n"
         f"    return open({str(hemmelig)!r}, encoding='utf-8').read()\n"
     )
-    rapport = sandbox.run_plugin_source("filtest", kilde, timeout_s=10.0)
+    rapport, resultat = _kjor("filtest", kilde)
     assert rapport.verdict == "blocked"
     assert "utenfor boksen" in rapport.notes
+    assert "denne skal tillegget ikke se" not in resultat, resultat
     assert hemmelig.read_text(encoding="utf-8") == "denne skal tillegget ikke se"
 
 
@@ -208,10 +223,10 @@ def test_tillegget_far_ikke_starte_programmer():
         "            svar.append('stoppet')\n"
         "    return svar\n"
     )
-    rapport = sandbox.run_plugin_source("prosesstest", kilde, timeout_s=10.0)
+    rapport, resultat = _kjor("prosesstest", kilde)
     assert rapport.verdict == "blocked"
     assert "starte" in rapport.notes
-    assert "KOM GJENNOM" not in rapport.notes
+    assert "KOM GJENNOM" not in resultat, resultat
 
 
 def test_tillegget_ser_den_falske_hjemmemappen():
@@ -232,8 +247,8 @@ def test_tillegget_far_ikke_importere_lonewatch():
         "    import contracts\n"
         "    return 'KOM GJENNOM'\n"
     )
-    rapport = sandbox.run_plugin_source("importtest", kilde, timeout_s=10.0)
-    assert "KOM GJENNOM" not in rapport.notes
+    rapport, resultat = _kjor("importtest", kilde)
+    assert "KOM GJENNOM" not in resultat, resultat
     assert "ModuleNotFoundError" in rapport.notes
 
 
@@ -243,8 +258,8 @@ def test_noklene_til_lonewatch_foelger_ikke_med_inn():
         "def run():\n"
         "    return [n for n in os.environ if 'LONEWATCH' in n.upper()]\n"
     )
-    rapport = sandbox.run_plugin_source("miljotest", kilde, timeout_s=10.0)
-    assert "LONEWATCH" not in rapport.notes.upper()
+    rapport, resultat = _kjor("miljotest", kilde)
+    assert resultat == "[]", f"tillegget saa disse variablene: {resultat}"
     assert rapport.verdict == "clean"
 
 
@@ -323,8 +338,8 @@ def test_kjente_omveier_er_stengt(navn, angrep):
         "    except BaseException as exc:\n"
         "        return 'stoppet: %s' % type(exc).__name__\n"
     )
-    rapport = sandbox.run_plugin_source("omvei-" + navn, kilde, timeout_s=15.0)
-    assert "KOM GJENNOM" not in rapport.notes, f"{navn} kom gjennom: {rapport.notes}"
+    rapport, resultat = _kjor("omvei-" + navn, kilde)
+    assert "KOM GJENNOM" not in resultat, f"{navn} kom gjennom: {resultat}"
     assert rapport.verdict == "blocked", rapport.notes
 
 
@@ -339,3 +354,36 @@ def test_standardbiblioteket_blir_ikke_tatt_for_en_omvei():
     )
     rapport = sandbox.run_plugin_source("standardbibliotek", kilde, timeout_s=15.0)
     assert rapport.verdict == "clean", rapport.notes
+
+
+def test_harness_modulen_er_ikke_lenger_i_sys_modules():
+    """Harness-et kjører som __main__ og har de ekte funksjonene liggende.
+    Den enkle veien dit er stengt."""
+    kilde = (
+        "import sys\n"
+        "def run():\n"
+        "    try:\n"
+        "        return 'KOM GJENNOM' if sys.modules['__main__']._REAL_BUILTINS_OPEN else 'tom'\n"
+        "    except BaseException as exc:\n"
+        "        return 'stoppet: %s' % type(exc).__name__\n"
+    )
+    _, resultat = _kjor("mainmodul", kilde)
+    assert "KOM GJENNOM" not in resultat, resultat
+
+
+@pytest.mark.xfail(
+    strict=False,
+    reason=(
+        "Kjent, uløst hull: sperrene er vanlige Python-funksjoner, og globals-"
+        "ordboken deres er lesbar via open.__globals__. Kan ikke lukkes så lenge "
+        "tillegget kjører i samme Python-prosess. Se sandbox/LIMITS.md."
+    ),
+)
+def test_sperrene_kan_ikke_omgaas_via_globals():
+    kilde = (
+        "def run():\n"
+        "    ekte = open.__globals__['_REAL_BUILTINS_OPEN']\n"
+        "    return 'KOM GJENNOM: %d tegn' % len(ekte('/etc/hosts').read())\n"
+    )
+    _, resultat = _kjor("globalsomvei", kilde)
+    assert "KOM GJENNOM" not in resultat, resultat

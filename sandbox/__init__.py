@@ -19,9 +19,11 @@ from __future__ import annotations
 
 from . import config, fake_home
 from .runner import (
+    SandboxRun,
     UnknownPackage,
     available_packages,
     package_path,
+    run_in_box,
     run_plugin_source,
     scan,
 )
@@ -32,6 +34,8 @@ HANGING_PACKAGE = config.HANGING_PACKAGE
 __all__ = [
     "scan",
     "run_plugin_source",
+    "run_in_box",
+    "SandboxRun",
     "available_packages",
     "package_path",
     "UnknownPackage",
