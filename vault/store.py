@@ -13,6 +13,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows har ikke fcntl
+    fcntl = None
+
 from cryptography.fernet import Fernet
 
 from contracts import GENESIS_HASH, LogEntry, LogKind, compute_entry_hash, make_log_entry, verify_chain
@@ -35,6 +40,82 @@ def _utc(ts: datetime | None) -> datetime:
     if ts.tzinfo is None:
         return ts.replace(tzinfo=timezone.utc)
     return ts.astimezone(timezone.utc)
+
+
+class LogLocked(RuntimeError):
+    """Noen andre holder allerede loggen. Vi roerer den ikke."""
+
+
+class LogLock:
+    """Enerett til loggfilen saa lenge dette objektet lever.
+
+    Hvorfor: `Vault` regner `seq` ut fra det den har i minnet. To prosesser mot
+    samme fil skriver derfor over hverandres linjer og knekker kjeden
+    (LIMITS punkt 6). Og siden nullstilling gir loggen nytt navn, kan en prosess
+    nr. 2 rekke aa arkivere loggen en kjoerende prosess fortsatt skriver til -
+    det var F4 i docs/REDTEAM.md.
+
+    Laasen ligger paa en egen `.lock`-fil ved siden av loggen, ikke paa loggen
+    selv: loggfilen bytter navn naar den arkiveres, og en laas foelger filen,
+    ikke navnet.
+
+    Laasen varer bare saa lenge prosessen lever. Dreper du prosessen, slipper
+    operativsystemet den. Den beskytter derfor mot to kjoerende Lonewatch, ikke
+    mot en fil som ligger paa et delt disk-omraade.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._fh = None
+        if fcntl is None:  # pragma: no cover - bare paa Windows
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fh = path.open("a+", encoding="utf-8")
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            fh.close()
+            raise LogLocked(
+                f"Loggen {path.name.removesuffix('.lock')} er allerede i bruk av en "
+                "annen Lonewatch. Stopp den som kjorer forst - vi rorer ikke loggen na."
+            ) from exc
+        fh.seek(0)
+        fh.truncate()
+        fh.write(f"{os.getpid()}\n")
+        fh.flush()
+        self._fh = fh
+
+    def release(self) -> None:
+        """Slipper laasen. Trygt aa kalle flere ganger."""
+        fh, self._fh = self._fh, None
+        if fh is None:
+            return
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        except OSError:  # pragma: no cover - filen kan vaere borte
+            pass
+        fh.close()
+
+    def __enter__(self) -> "LogLock":
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self.release()
+
+
+def lock_path(path: str | Path | None = None) -> Path:
+    """Laasefilen som hoerer til en loggfil."""
+    target = Path(path) if path is not None else log_path()
+    return target.with_name(target.name + ".lock")
+
+
+def acquire_log_lock(path: str | Path | None = None) -> LogLock:
+    """Tar enerett til loggen, eller kaster LogLocked.
+
+    Kall denne FOER archive_log(): en prosess som ikke faar lov til aa kjoere
+    skal ikke rekke aa flytte loggen til en som kjoerer.
+    """
+    return LogLock(lock_path(path))
 
 
 def archive_log(path: str | Path | None = None, ts: datetime | None = None) -> Path | None:

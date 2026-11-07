@@ -29,7 +29,17 @@ from vault.crypto import (
 )
 from vault.identity import ADMIN_ROLE, NotAuthorized, pseudonymize, register_employee, reveal
 from vault.redaction import mask_recipient, redact_payload
-from vault.store import DEFAULT_LOG_PATH, ENV_LOG_PATH, Vault, archive_log, log_path
+from vault.store import (
+    DEFAULT_LOG_PATH,
+    ENV_LOG_PATH,
+    LogLock,
+    LogLocked,
+    Vault,
+    acquire_log_lock,
+    archive_log,
+    lock_path,
+    log_path,
+)
 
 __all__ = [
     "ADMIN_ROLE",
@@ -37,15 +47,19 @@ __all__ = [
     "ENV_LOG_KEY",
     "ENV_LOG_PATH",
     "ENV_PSEUDONYM_KEY",
+    "LogLock",
+    "LogLocked",
     "NotAuthorized",
     "Vault",
     "VaultDecryptError",
     "VaultError",
     "VaultKeyError",
+    "acquire_log_lock",
     "archive_log",
     "build_after_actions",
     "format_nok",
     "load_log_key",
+    "lock_path",
     "log_path",
     "mask_recipient",
     "new_log_key",

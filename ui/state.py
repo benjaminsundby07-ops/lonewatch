@@ -58,14 +58,46 @@ def _import_after():
     return builder, None
 
 
+class LonewatchAlreadyRunning(RuntimeError):
+    """En annen Lonewatch holder allerede loggen."""
+
+
 class DemoState:
-    """Alt nettsiden viser. En instans per kjørende app."""
+    """Alt nettsiden viser. En instans per kjørende app.
+
+    Å lage en DemoState tar enerett til loggfilen og slipper den først når
+    `close()` kalles. Starter du app nr. 2 mot samme logg, feiler den her i
+    stedet for å røre en logg som er i bruk. Se F4 i docs/REDTEAM.md.
+    """
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
-        self.reset()
+        self._log_lock = self._acquire_log_lock()
+        # Ved oppstart arkiverer vi IKKE. Å importere ui.app skal ikke endre
+        # noe på disken; det var nettopp det som gjorde F4 mulig. Loggen byttes
+        # bare ut når noen trykker Nullstill.
+        self._start(archive=False)
 
     # -- oppsett ---------------------------------------------------------
+
+    @staticmethod
+    def _acquire_log_lock():
+        """Enerett til loggen. Kastes videre som en feil appen kan forklare."""
+        try:
+            from vault import LogLocked, acquire_log_lock
+        except Exception:  # pragma: no cover - avhenger av økt C
+            return None
+        try:
+            return acquire_log_lock()
+        except LogLocked as exc:
+            raise LonewatchAlreadyRunning(str(exc)) from exc
+
+    def close(self) -> None:
+        """Slipper loggen, slik at neste Lonewatch kan starte."""
+        with self._lock:
+            if self._log_lock is not None:
+                self._log_lock.release()
+                self._log_lock = None
 
     def reset(self) -> None:
         """Tilbake til start: tom logg, tom kø, historien ikke spilt.
@@ -73,9 +105,15 @@ class DemoState:
         Loggen kan ikke tømmes (den skal bare vokse), så i stedet begynner vi
         en ny loggfil. Den gamle blir liggende under nytt navn, og stien til
         den vises i UI, slik at ingen logg forsvinner i det skjulte.
+
+        Dette er en bevisst handling fra brukeren, og det eneste stedet loggen
+        blir byttet ut.
         """
+        self._start(archive=True)
+
+    def _start(self, archive: bool) -> None:
         with self._lock:
-            self.vault, self.vault_error, self.log_archived = self._new_vault()
+            self.vault, self.vault_error, self.log_archived = self._new_vault(archive)
             self._requests: list[ActionRequest] = scenarios.all_scenarios()
             self._next_index = 0
             self.cards: dict[str, dict[str, Any]] = {}
@@ -95,8 +133,8 @@ class DemoState:
             self.story_log: list[dict[str, Any]] = []
 
     @staticmethod
-    def _new_vault():
-        """Starter en fersk logg.
+    def _new_vault(archive: bool):
+        """Åpner loggen, og bytter den ut først hvis `archive` er satt.
 
         Returnerer (vault, feilmelding, stien den gamle loggen ble flyttet til).
         Feiler det (for eksempel manglende nøkkel), sier vi fra i UI i stedet
@@ -108,7 +146,7 @@ class DemoState:
             # Sjekk nøkkelen FØR vi flytter noe. Kan vi ikke starte en logg,
             # skal den gamle filen bli liggende der den lå.
             load_log_key()
-            archived = archive_log()
+            archived = archive_log() if archive else None
             return Vault(), None, str(archived) if archived else None
         except Exception as exc:  # pragma: no cover - avhenger av økt C
             return None, f"Loggen kunne ikke startes: {exc}", None

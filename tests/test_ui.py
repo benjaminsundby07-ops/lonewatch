@@ -337,6 +337,90 @@ def test_reset_empties_the_before_list(state):
 
 
 # ---------------------------------------------------------------------------
+# F4: bare én app om gangen, og import skal ikke roere loggen
+# ---------------------------------------------------------------------------
+
+
+def test_starting_a_second_app_refuses_instead_of_touching_the_log(state, lonewatch_env):
+    """F4 i docs/REDTEAM.md.
+
+    Appen lager en DemoState ved import. Startet man app nr. 2 mot samme
+    loggsti - selv om den feilet paa bind() fordi porten var opptatt - rakk den
+    aa arkivere loggen app nr. 1 fortsatt skrev til. App nr. 1 fortsatte aa
+    appende til en fersk fil som startet paa feil seq, og kjeden knakk.
+
+    Nr. 2 skal naa nekte aa starte, og ikke roere en fil.
+    """
+    from ui.state import LonewatchAlreadyRunning
+
+    _drain(state)
+    log_path = state.vault.path
+    before = sorted(p.name for p in log_path.parent.iterdir())
+    innhold = log_path.read_bytes()
+
+    with pytest.raises(LonewatchAlreadyRunning):
+        DemoState()
+
+    # Ingen fil er laget, flyttet eller endret.
+    assert sorted(p.name for p in log_path.parent.iterdir()) == before
+    assert log_path.read_bytes() == innhold
+
+    # Og app nr. 1 skriver fortsatt til en hel kjede.
+    _drain(state)
+    assert state.verify()["ok"] is True
+
+
+def test_the_lock_is_released_so_the_next_app_can_start(state):
+    """Stopper appen, skal neste faa starte. Ellers er demoen doed etter en omstart."""
+    from ui.state import LonewatchAlreadyRunning
+
+    with pytest.raises(LonewatchAlreadyRunning):
+        DemoState()
+
+    state.close()
+    neste = DemoState()
+    try:
+        assert neste.step_feed() is not None
+    finally:
+        neste.close()
+
+
+def test_building_the_state_does_not_archive_the_log(lonewatch_env):
+    """Aa lage DemoState (det ui.app gjoer ved import) skal ikke roere disken.
+
+    Arkivering er en handling brukeren ber om med Nullstill, ikke en bieffekt
+    av at en modul blir importert.
+    """
+    state = DemoState()
+    try:
+        _drain(state)
+        linjer = len(state.vault.entries())
+        sti = state.vault.path
+        state.close()
+
+        igjen = DemoState()
+        try:
+            # Samme fil, samme linjer: ingenting ble arkivert ved oppstart.
+            assert igjen.vault.path == sti
+            assert len(igjen.vault.entries()) == linjer
+            assert igjen.snapshot()["log"]["archived"] is None
+            # Ingen arkivkopi er laget. (log.jsonl.lock er laasefilen, ventet.)
+            assert [p.name for p in sti.parent.glob("log.*.jsonl")] == []
+        finally:
+            igjen.close()
+    finally:
+        state.close()
+
+
+def test_reset_still_archives_because_the_user_asked_for_it(state):
+    """Nullstill er en bevisst handling, og DA skal loggen byttes ut."""
+    _drain(state)
+    state.reset()
+    assert state.snapshot()["log"]["lines"] == 0
+    assert state.snapshot()["log"]["archived"]
+
+
+# ---------------------------------------------------------------------------
 # sjekk loggen
 # ---------------------------------------------------------------------------
 
