@@ -78,6 +78,28 @@ OUTBOUND_ACTIONS: frozenset[ActionType] = frozenset(
     }
 )
 
+# Handlinger der `contains_personal_data` betyr at opplysninger UTLEVERES.
+#
+# `transfer_money` staar med vilje IKKE her. Paa en utbetaling sier feltet bare
+# at posten gjelder en person - navn og konto maa jo staa der for at pengene
+# skal finne fram. Ingen opplysninger blir utlevert til noen som ikke alt har
+# dem: mottakeren er den som skal ha pengene. Paa en e-post eller en deling er
+# det motsatt - der ER innholdet opplysningene, og det forlater huset.
+#
+# Maalt foer skillet ble innfoert: to falske alarmer over tre blindsett
+# (`blind2_013`, `blind3_008`), begge smaa refusjoner til kundens registrerte
+# konto, og null farlige saker som slapp gjennom. Se docs/MALING.md.
+#
+# Valget om persondata til en ekstern mottaker staar uendret for de to
+# handlingene som faktisk utleverer noe: de blir alltid roede, ogsaa naar
+# mottakeren er kunden selv.
+PERSONAL_DATA_RELEVANT_ACTIONS: frozenset[ActionType] = frozenset(
+    {
+        ActionType.SEND_EMAIL,
+        ActionType.SHARE_DATA,
+    }
+)
+
 # Handlinger der "kan ikke angres" faktisk er et risikomoment.
 # En e-post til en kjent mottaker kan heller ikke angres, men det er helt vanlig arbeid,
 # så den skal ikke gjøre noe rødt alene.

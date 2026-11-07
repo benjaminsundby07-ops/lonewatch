@@ -37,9 +37,13 @@ def drained(state: DemoState) -> dict:
 
 
 def test_demoens_tall_summerer_seg_til_40(state):
+    """33/6/1. Var 32/7/1 til `personal_data_external` sluttet aa gjelde
+    utbetalinger: `req_0021` (egenandelsrefusjon paa 4 000 kr til kundens
+    registrerte konto) er naa `allow`. Se gateway/LIMITS.md.
+    """
     c = drained(state)["counts"]
-    assert c["allowed"] == 32
-    assert c["red"] == 7
+    assert c["allowed"] == 33
+    assert c["red"] == 6
     assert c["blocked"] == 1
     assert c["allowed"] + c["red"] + c["blocked"] == c["evaluated"] == 40
 
@@ -51,7 +55,7 @@ def test_ventende_og_fulgt_opp_summerer_seg_til_roede(state):
     """
     c = drained(state)["counts"]
     assert c["waitingForHuman"] + c["followedUp"] == c["red"]
-    assert c["waitingForHuman"] == 7
+    assert c["waitingForHuman"] == 6
     assert c["followedUp"] == 0
 
 
@@ -61,9 +65,9 @@ def test_et_svar_fra_et_menneske_flytter_fra_ventende_til_fulgt_opp(state):
     state.respond(roedt, approved=False)
 
     c = state.overview()["counts"]
-    assert c["waitingForHuman"] == 6
+    assert c["waitingForHuman"] == 5
     assert c["followedUp"] == 1
-    assert c["waitingForHuman"] + c["followedUp"] == c["red"] == 7
+    assert c["waitingForHuman"] + c["followedUp"] == c["red"] == 6
 
 
 def test_per_agent_summene_er_lik_totalen(state):

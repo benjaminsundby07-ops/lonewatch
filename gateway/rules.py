@@ -131,8 +131,21 @@ def personal_data_external(req: ActionRequest) -> bool:
 
     Regelen ser ikke HVOR MANGE personer en utsending gjelder. Én bekreftelse
     til én kunde og en liste over 8400 veier likt. Se gateway/LIMITS.md.
+
+    Den gjelder bare de handlingene der feltet betyr at opplysninger
+    UTLEVERES: `send_email` og `share_data`. Paa en `transfer_money` sier
+    `contains_personal_data` noe annet - at utbetalingsposten gjelder en
+    person. Navn og konto maa staa der for at pengene skal finne fram, og
+    mottakeren er den som skal ha dem. Ingenting utleveres til noen som ikke
+    alt har det. Lista staar i `config.PERSONAL_DATA_RELEVANT_ACTIONS`, med
+    maalingen som ligger bak.
+
+    Et beloep er fortsatt et beloep: en utbetaling blir roed av
+    `amount_over_limit`, `recipient_total_over_limit` eller
+    `unknown_recipient` som foer. Denne regelen er ikke det som holder
+    pengeutbetalinger i tomme.
     """
-    if req.action_type not in config.OUTBOUND_ACTIONS:
+    if req.action_type not in config.PERSONAL_DATA_RELEVANT_ACTIONS:
         return False
     if not req.contains_personal_data:
         return False
