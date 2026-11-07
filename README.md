@@ -43,9 +43,9 @@ på en falsk hjemmemappe med ni oppdiktede filer som sier «FALSK DEMOFIL» i f�
 
 Resultatet er en `SandboxReport` med `clean` eller `blocked`, avgjort av en fast regel på hva tillegget
 *gjorde*. Én enkelt hendelse er nok til `blocked`: et forsøk på å koble seg ut eller slå opp et navn, en
-agnfil lest, en fil utenfor boksen, et program startet, en sperret modul importert — eller en kjøring som
-ikke ble ferdig innen 6 sekunder. Rapporten går med inn i `evaluate()`, der regelen `sandbox_blocked` gir
-`block`.
+agnfil lest, en fil utenfor boksen, et program startet, en sperret modul importert, en port åpnet for å ta
+imot innkommende trafikk — eller en kjøring som ikke ble ferdig innen 6 sekunder. Rapporten går med inn
+i `evaluate()`, der regelen `sandbox_blocked` gir `block`.
 
 Sandkassen kjører bare filer som ligger i `sandbox/packages/` fra før. Et pakkenavn fra en forespørsel
 fører aldri til at noe lastes ned eller startes; et navn som ikke finnes der gir «ikke testet».
@@ -66,6 +66,12 @@ Til hver avgjørelse lages en `consequence_text` på norsk av maler og felt — 
 `requires_typed_amount`, og i UI må mennesket skrive beløpet selv før Godkjenn blir aktiv. Kommer en
 godkjenning inn med feil tall likevel, avviser `/api/respond` den med «Beløpet stemmer ikke. Skriv det
 nøyaktig som det står.»
+
+Det skrevne tallet tolkes som et *beløp*, ikke som en siffersekvens: mellomrom og punktum er tusenskille og
+må gruppere riktig, komma er desimalskille, og sammenligningen skjer i hele øre. `100000,00` er derfor
+hundre tusen kroner og blir avvist mot 10 000 000 — det ble tidligere godtatt, fordi regelen kastet alle
+tegn som ikke var siffer. Nettleseren og tjeneren bruker samme regel (`ui/amount.py` og
+`ui/static/amount.js`), og en test kjører de samme tilfellene gjennom begge så de ikke kan bli uenige.
 
 ### Etter — `vault/after.py`
 
@@ -141,13 +147,16 @@ python3 -m ui
 Åpne <http://127.0.0.1:8000>. Verts- og portnavn kan styres med `LONEWATCH_HOST` og `LONEWATCH_PORT`.
 Se [docs/DEMO.md](docs/DEMO.md) for en demo på rundt to minutter.
 
+Bare én Lonewatch kan holde samme loggfil om gangen. Starter du en til, sier den fra og stopper uten å røre
+loggen; sett `LONEWATCH_LOG_PATH` til en annen fil hvis du vil kjøre to.
+
 ### 4. Testene
 
 ```bash
 pytest -q
 ```
 
-239 tester går gjennom, og én er `xfail`: `test_sperrene_kan_ikke_omgaas_via_globals` i
+315 tester går gjennom, og én er `xfail`: `test_sperrene_kan_ikke_omgaas_via_globals` i
 `tests/test_sandbox.py`. Den står som forventet feil med vilje, fordi hullet den beskriver ikke er lukket —
 se neste seksjon. Testene lager egne nøkler og skriver til en midlertidig mappe, så de krever ingen
 miljøvariabler og rører ikke loggen din.
@@ -247,8 +256,17 @@ Pseudonymene er 4 hex-tegn, altså 65 536 muligheter. Nok til at loggen ikke inn
 selskap med mange ansatte får to før eller senere samme kode. `reveal()` krever `role == "admin"`, men
 rollen er bare en streng den som kaller oppgir selv; det er ingen innlogging bak.
 
-Det er ingen fillås. Starter du to prosesser mot samme loggfil, overskriver de hverandres `seq` og kjeden
-knekker. Dataminimering (`redact_payload`) finnes, men må slås på med `Vault(redact=True)`; i demoen logges
+Nettappen tar en fillås (`flock` på en egen `<logg>.lock`) og nekter å starte hvis en annen Lonewatch
+holder loggen — den rører da ingen fil. Men låsen er frivillig: `Vault` selv tar den ikke, så `run_demo.py`
+og alt annet som lager en `Vault` direkte kan fortsatt skrive samtidig, overskrive hverandres `seq` og
+knekke kjeden. `flock` er heller ikke pålitelig over nettverksdisker, og uten `fcntl` (Windows) finnes
+låsen ikke. Det finnes ingen transaksjon.
+
+Hele nettappen er uautentisert, og det gjelder også `POST /api/reset`, som arkiverer loggen og starter en
+ny. Appen binder bare `127.0.0.1` som standard, og nullstilling er synlig — ingenting slettes, og UI viser
+hvor den gamle loggen ble lagt — men en uautentisert «start ny logg» er et problem i seg selv.
+
+Dataminimering (`redact_payload`) finnes, men må slås på med `Vault(redact=True)`; i demoen logges
 full payload. En hash-kjedet logg som bare vokser, kan heller ikke rette seg etter et krav om sletting av
 persondata uten å knekke kjeden — en reell personvernkonflikt denne versjonen ikke løser. «Nullstill» i UI
 gir den gamle loggfilen et nytt navn og starter på linje 0; ingenting slettes, og UI viser hvor den gamle
@@ -301,12 +319,14 @@ lonewatch/
 ├── gateway/              Mellomstasjonen
 │   ├── __init__.py       evaluate(req, sandbox_report=None) -> Decision
 │   ├── rules.py          Én funksjon per regel, navnet havner i Decision.reasons
+│   ├── money.py          Beløp i hele øre: samme tall til vurdering og visning
 │   ├── config.py         Grenser, lister og vekter
 │   ├── consequence.py    Norsk klartekst fra maler, aldri fra AI eller summary
 │   ├── evaluation.py     Måling mot en syntetisk testmengde på 43
 │   └── LIMITS.md         Hull i regelsettet
 ├── vault/                Den låste loggen
-│   ├── store.py          Vault.append / verify, Fernet per linje, archive_log
+│   ├── store.py          Vault.append / verify, Fernet per linje, archive_log,
+│   │                     acquire_log_lock (én Lonewatch om gangen)
 │   ├── crypto.py         Nøkler fra miljøvariabler, ingen standardnøkkel
 │   ├── identity.py       pseudonymize / register_employee / reveal
 │   ├── redaction.py      Dataminimering (valgfri)
@@ -325,7 +345,8 @@ lonewatch/
 │   ├── app.py            FastAPI: /api/state, /api/feed/step, /api/respond,
 │   │                     /api/verify, /api/after, /api/story/*, /api/reset
 │   ├── state.py          Tilstanden bak siden. Ingen regler her
-│   └── static/           index.html, app.js, style.css
+│   ├── amount.py         Hvordan et skrevet beløp tolkes (fasiten)
+│   └── static/           index.html, app.js, amount.js, style.css
 ├── examples/             Eksempler på JSON for hver type i contracts
-└── tests/                239 tester + 1 xfail. test_contracts.py røres ikke
+└── tests/                315 tester + 1 xfail. test_contracts.py røres ikke
 ```

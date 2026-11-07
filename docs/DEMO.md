@@ -106,10 +106,14 @@ Les kortet ovenfra og ned:
 Nå selve porten: **Skriv beløpet for å godkjenne**. Knappen **Godkjenn** er grå.
 
 Skriv et feil tall i feltet først, for eksempel `1000000`. Hinten blir stående på «Skriv beløpet nøyaktig
-for å kunne godkjenne», og knappen blir ikke aktiv. Skriv så `10 000 000`. Hinten skifter til **«Stemmer.»**
-og **Godkjenn** blir rød og trykkbar.
+for å kunne godkjenne», og knappen blir ikke aktiv. Prøv gjerne `100000,00` også — hundre tusen kroner og
+null øre, som har nøyaktig de samme sifrene. Den blir også avvist. Skriv så `10 000 000`. Hinten skifter til
+**«Stemmer.»** og **Godkjenn** blir rød og trykkbar.
 
 Si: *poenget med å skrive beløpet er at man skal se det. Åtte nuller er vanskeligere å overse enn en knapp.*
+Og hvis du vil være ærlig om prosessen: *denne sjekken var feil først. Den sammenlignet sifre, så*
+`100000,00` *slapp gjennom som ti millioner. Det fant vår egen angrepstest, og det står i*
+`docs/REDTEAM.md`.
 
 Trykk **Avvis**. Kortet flytter seg ned til **Besvart** med pseudonymet til den som svarte — `emp_` og fire
 tegn — og hvor mange sekunder det tok. Si at loggen aldri ser navnet.
