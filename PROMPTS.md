@@ -127,4 +127,4 @@ Sandkasse først, så dokumentfeller. Behold: gateway med rødt varsel, kryptert
 
 ## 5. Ikke glem
 - Si i pitchen: simulering, oppdiktet selskap, loggen kan fortsatt slettes (se vault/LIMITS.md), nøkkelen ligger i miljøvariabel kun i demo.
-- Ikke bruk noe fra Evora-mappen eller andre gamle prosjekter. Spør Victor om Evora-regelen hvis du ikke har gjort det.
+- Alt skal bygges nytt under hackathonet. Ikke bruk kode fra tidligere prosjekter.
