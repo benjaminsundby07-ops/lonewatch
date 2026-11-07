@@ -387,3 +387,63 @@ def test_ikke_endelig_beloep_paa_andre_handlinger_krasjer_heller_ikke():
     d = evaluate(req)
     assert d.consequence_text.strip()
     assert d.requires_typed_amount is False
+
+
+# ---------------------------------------------------------------------------
+# F7: det du ser skal vaere det som ble vurdert
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "beloep",
+    [49999.5, 49999.99, 49999.01, 50000.49, 0.5, 1234.56],
+)
+def test_vist_beloep_er_det_samme_som_vurdert_beloep(beloep):
+    """F7: 49 999,50 ble vist som "50 000 kr", men vurdert som under grensen.
+
+    Et menneske som leser "50 000 kr" og ser at den gikk gjennom, maa kunne
+    stole paa at regelen saa det samme tallet. Oerene skal staa i teksten.
+    """
+    d = evaluate(_transfer(beloep))
+    vist = consequence.format_amount(beloep)
+    # Teksten skal ikke runde bort oerene.
+    assert consequence.format_amount(round(beloep)) != vist or beloep == round(beloep)
+    assert vist in d.consequence_text
+
+
+def test_akkurat_paa_grensen_vises_og_vurderes_likt():
+    """To beloep som regelen behandler ULIKT maa ogsaa VISES ulikt.
+
+    49 999,50 er under beloepsgrensen og 50 000 er paa den. Foer viste begge
+    "50 000 kr", saa teksten ga ingen forklaring paa hvorfor den ene ble roed.
+    """
+    assert rules.amount_over_limit(_transfer(49999.5)) is False
+    assert rules.amount_over_limit(_transfer(50000.0)) is True
+    assert consequence.format_amount(49999.5) != consequence.format_amount(50000.0)
+
+
+def test_beloep_med_broekdels_oere_vurderes_paa_det_tallet_som_vises():
+    """49 999,999 rundes til 50 000,00 - og da maa regelen ogsaa se 50 000."""
+    assert consequence.format_amount(49999.999) == "50 000 kr"
+    assert rules.amount_over_limit(_transfer(49999.999)) is True
+
+
+def test_oere_vises_med_komma():
+    assert consequence.format_amount(49999.5) == "49 999,50 kr"
+    assert consequence.format_amount(1234.56) == "1 234,56 kr"
+    assert consequence.format_amount(10_000_000) == "10 000 000 kr"
+    assert consequence.format_amount(0) == "0 kr"
+
+
+@pytest.mark.parametrize(
+    "beloep", [0, 999, 1000, 1234.4, 49999.5, 50000, 10_000_000, 0.01, None]
+)
+def test_etter_listen_viser_samme_beloep_som_varselet(beloep):
+    """Samme tall i det roede varselet og i Etter-listen.
+
+    De to er egne moduler med egen formatering. Viser de ulikt, kan et menneske
+    lese ett beloep paa skjermen og et annet i oppfoelgingen etterpaa.
+    """
+    from vault.after import format_nok
+
+    assert format_nok(beloep) == consequence.format_amount(beloep)

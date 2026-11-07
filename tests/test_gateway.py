@@ -423,8 +423,14 @@ def test_allow_decisions_have_no_reasons_and_low_risk():
         (1_000, "1 000 kr"),
         (50_000, "50 000 kr"),
         (10_000_000, "10 000 000 kr"),
-        (1_234.4, "1 234 kr"),
+        # Oerene staar i teksten. Foer ble de rundet bort, saa 49 999,50 ble
+        # vist som "50 000 kr" selv om regelen saa et beloep under grensen
+        # (F7 i docs/REDTEAM.md). Visning og vurdering bruker naa samme tall.
+        (1_234.4, "1 234,40 kr"),
+        (49_999.5, "49 999,50 kr"),
+        (0.01, "0,01 kr"),
         (None, "ukjent beløp"),
+        (float("inf"), "et beløp vi ikke kan lese"),
     ],
 )
 def test_format_amount(amount, expected):

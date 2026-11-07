@@ -7,11 +7,10 @@ teksten mennesket leser før det godkjenner.
 
 from __future__ import annotations
 
-import math
-
 from contracts import ActionRequest, ActionType, SandboxReport
 
 from . import config
+from .money import format_ore, to_ore
 
 UNKNOWN_ACCOUNT = "ukjent konto"
 UNKNOWN_RECIPIENT = "ukjent mottaker"
@@ -65,17 +64,21 @@ def _sandbox_text(report: SandboxReport) -> str:
 
 
 def format_amount(amount: float | None) -> str:
-    """10000000 -> '10 000 000 kr'. Hele kroner, mellomrom som tusenskille.
+    """10000000 -> '10 000 000 kr', 49999.5 -> '49 999,50 kr'.
 
-    Et beløp vi ikke kan lese (inf, nan) eller som er saa stort at tallet ikke
-    lenger betyr noe for et menneske, skrives ut som tekst i stedet. Uten dette
-    krasjet `int(round(inf))` hele evaluate(). Se F2 i docs/REDTEAM.md.
+    Beløpet vises fra NØYAKTIG det samme øretallet reglene sammenligner med.
+    Før rundet denne til hele kroner, saa 49 999,50 ble vist som "50 000 kr"
+    mens regelen saa 49 999,50 og slapp den gjennom (F7 i docs/REDTEAM.md).
+
+    Et beløp vi ikke kan lese (inf, nan, eller absurd stort) skrives ut som
+    tekst. Uten det krasjet `int(round(inf))` hele evaluate() (F2).
     """
     if amount is None:
         return UNKNOWN_AMOUNT
-    if not math.isfinite(amount) or abs(amount) >= config.MAX_SHOWN_AMOUNT_NOK:
+    ore = to_ore(amount)
+    if ore is None:
         return UNREADABLE_AMOUNT
-    return f"{int(round(amount)):,}".replace(",", " ") + " kr"
+    return format_ore(ore)
 
 
 def _recipient_phrase(req: ActionRequest, unknown_text: str) -> str:

@@ -9,12 +9,12 @@ Navnet på funksjonen er navnet som havner i `Decision.reasons`.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Callable
 
 from contracts import ActionRequest, ActionType, SandboxReport
 
 from . import config
+from .money import to_ore
 
 
 def normalize_package_name(package_name: str | None) -> str:
@@ -25,7 +25,7 @@ def normalize_package_name(package_name: str | None) -> str:
 
 
 def _unreadable_amount(amount: float | None) -> bool:
-    """Et beløp vi ikke kan regne med: inf eller nan.
+    """Et beløp vi ikke kan regne med: inf, nan, eller for stort til aa leses.
 
     `contracts.ActionRequest.amount` har bare `ge=0`, saa `float("inf")` er en
     gyldig verdi, og contracts.py er laast. Et slikt beloep er ikke "lite": vi
@@ -33,7 +33,7 @@ def _unreadable_amount(amount: float | None) -> bool:
     det som over enhver grense i stedet for aa la det gaa. Se F2 i
     docs/REDTEAM.md.
     """
-    return amount is not None and not math.isfinite(amount)
+    return amount is not None and to_ore(amount) is None
 
 
 def amount_over_limit(req: ActionRequest) -> bool:
@@ -41,12 +41,17 @@ def amount_over_limit(req: ActionRequest) -> bool:
 
     Mangler beløp, slår regelen ikke til. Grensen er inkluderende.
     Et beløp vi ikke kan lese regnes alltid som over grensen.
+
+    Sammenligningen skjer i hele øre, nøyaktig det tallet konsekvensteksten
+    viser. Ellers kunne 49 999,50 blitt vurdert under grensen og samtidig vist
+    som "50 000 kr" (F7 i docs/REDTEAM.md).
     """
     if req.amount is None:
         return False
-    if _unreadable_amount(req.amount):
+    ore = to_ore(req.amount)
+    if ore is None:
         return True
-    return req.amount >= config.AMOUNT_LIMIT_NOK
+    return ore >= to_ore(config.AMOUNT_LIMIT_NOK)
 
 
 def unknown_recipient(req: ActionRequest) -> bool:
@@ -106,9 +111,10 @@ def transfer_over_hard_limit(req: ActionRequest) -> bool:
         return False
     if req.amount is None:
         return False
-    if _unreadable_amount(req.amount):
+    ore = to_ore(req.amount)
+    if ore is None:
         return True
-    return req.amount > config.HARD_TRANSFER_LIMIT_NOK
+    return ore > to_ore(config.HARD_TRANSFER_LIMIT_NOK)
 
 
 def sandbox_blocked(req: ActionRequest, sandbox_report: SandboxReport | None) -> bool:

@@ -7,6 +7,7 @@ bare kortere.
 
 from __future__ import annotations
 
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Iterable
 
 from contracts import ActionType, AfterAction, LogEntry, Verdict
@@ -16,11 +17,24 @@ UNKNOWN_RECIPIENT = "ukjent konto"
 
 
 def format_nok(amount: float | int | None) -> str:
-    """10000000 -> '10 000 000 kr'. Mellomrom som tusenskille, norsk stil."""
+    """10000000 -> '10 000 000 kr', 49999.5 -> '49 999,50 kr'.
+
+    Oerene staar i teksten. Rundet vi dem bort, kunne Etter-listen vist et
+    annet beloep enn det gateway faktisk vurderte (F7 i docs/REDTEAM.md).
+    Beregningen gjoeres i hele oere, slik at flyttall aldri flytter tallet.
+    """
     if amount is None:
         return "ukjent beløp"
-    rounded = int(round(float(amount)))
-    return f"{rounded:,}".replace(",", " ") + " kr"
+    try:
+        ore = int((Decimal(str(amount)) * 100).quantize(Decimal(1), rounding=ROUND_HALF_UP))
+    except (ArithmeticError, TypeError, ValueError):
+        return "ukjent beløp"
+    negativ = ore < 0
+    kroner, rest = divmod(abs(ore), 100)
+    tall = f"{kroner:,}".replace(",", " ")
+    if rest:
+        tall = f"{tall},{rest:02d}"
+    return f"{'-' if negativ else ''}{tall} kr"
 
 
 def _recipient(payload: dict[str, Any]) -> str:
