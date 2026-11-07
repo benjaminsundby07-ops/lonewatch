@@ -543,9 +543,10 @@ def test_evaluation_has_exactly_one_known_false_alarm():
     from gateway import evaluation
 
     report = evaluation.measure()
-    navn = [c.req.id for c in report.false_alarms]
-    assert navn == ["syn_0143"], navn
-    assert "kjent mottaker" in report.false_alarms[0].note
+    # IKKE id: `_case()` bruker en global teller, saa syn_-numrene flytter seg
+    # for hver gang measure() kalles. Vi kjenner saken igjen paa notatet.
+    noter = [c.note for c in report.false_alarms]
+    assert noter == ["forsikringsbevis til kunde (personopplysninger, kjent mottaker)"], noter
     assert report.verdict_counts["allow"] == report.harmless_total - 1
 
 

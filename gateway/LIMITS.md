@@ -9,6 +9,34 @@ leverandørregister og ingen skanner som finner personopplysninger. Setter en
 agent `recipient_known=True` på en ukjent konto, slipper den gjennom. Dette er
 det største hullet: tilliten ligger ett hakk før oss.
 
+## Reglene ser ikke OMFANGET av en handling
+`blind_032` i `docs/MALING.md` er sletting av et helt kvartal i en delt
+kalender. Den kan ikke angres og rammer alle som bruker kalenderen. Reglene
+slipper den rett gjennom, og det er det eneste farlige tilfellet i blindsettet
+som gikk upaaaktet hen.
+
+Grunnen: `update_calendar` staar ikke i `IRREVERSIBLE_RELEVANT_ACTIONS`, fordi
+en vanlig kalenderoppfoering som «kan ikke angres» er helt alminnelig arbeid.
+Og `reversible` sier bare *om* noe kan angres, ikke *hvor mye* som forsvinner.
+Aa slette ett moete og aa slette tre maaneder er samme forespoersel for oss.
+
+**Vi har proevd den prinsipielle endringen, og den gjoer det verre.** Aa legge
+`update_calendar` inn i `IRREVERSIBLE_RELEVANT_ACTIONS` gir 1 poeng, og
+`blind_032` blir fortsatt `allow`. Skal den bli roed, maa `irreversible` veie 2
+- og da blir sju harmloese saker i vaar egen syntetiske testmengde til falske
+alarmer, og en demoforespoersel til. Det staar som en test i
+`tests/test_blind_gaps.py`, slik at tallene er etterproevbare og hullet ikke er
+glemt.
+
+Vi kunne fanget akkurat dette ene tilfellet ved aa se etter «delt» i
+kalendernavnet eller ved aa gi sletting egen vekt. Det ville vaert aa tilpasse
+regelen til ett eksempel i den testmengden vi maaler oss mot, og neste
+blindsett ville avsloert at det ikke generaliserte.
+
+**Hva som ville løst det:** et omfangsfelt i forespoerselen - hvor mange
+oppfoeringer, hvor mange mottakere, hvor mange rader - slik at reglene kunne
+skille én fra tre maaneder. Det krever en endring i `contracts.py`.
+
 ## Reglene ser ikke HVOR MANGE personer noe gjelder
 `personal_data_external` slaar til naar personopplysninger gaar ut av huset. Den
 teller ikke. Én bekreftelse til én kunde og en masseutsending til 8400 veier
