@@ -21,7 +21,7 @@ from gateway import consequence, evaluate, rules
 TS = datetime(2026, 11, 7, 9, 0, 0, tzinfo=timezone.utc)
 
 
-def make_install(package_name: str | None = "free-ai-boost", **fields) -> ActionRequest:
+def make_install(package_name: str | None = "nordlys-mail-connector-patch", **fields) -> ActionRequest:
     base = dict(
         id="req_test",
         ts=TS,
@@ -34,7 +34,7 @@ def make_install(package_name: str | None = "free-ai-boost", **fields) -> Action
     return ActionRequest(**base)
 
 
-def make_report(package_name: str = "free-ai-boost", **fields) -> SandboxReport:
+def make_report(package_name: str = "nordlys-mail-connector-patch", **fields) -> SandboxReport:
     base = dict(
         ts=TS,
         package_name=package_name,
@@ -56,7 +56,7 @@ def make_report(package_name: str = "free-ai-boost", **fields) -> SandboxReport:
     "navn",
     [
         "nordlys-pdf-reader",
-        "nordlys-mail-connector-patch",
+        "nordlys-crm-sync",
         "../../etc/passwd",
         "sandbox/runner",
         "os",
@@ -186,7 +186,7 @@ def test_uten_rapport_sier_teksten_at_tillegget_ikke_er_testet():
 
 def test_ikke_testet_er_ikke_det_samme_som_stoppet():
     """Uten rapport skal ingenting blokkeres. "Vet ikke" er ikke "nei"."""
-    d = evaluate(make_install(package_name="nordlys-mail-connector-patch"))
+    d = evaluate(make_install(package_name="nordlys-crm-sync"))
     assert d.verdict is Verdict.RED
     assert "sandbox_blocked" not in d.reasons
 

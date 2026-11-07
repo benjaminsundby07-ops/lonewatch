@@ -237,7 +237,7 @@ def test_the_story_names_a_package_instead_of_carrying_a_written_report():
     s = story.binance_inspired()
     step = next(step for step in s.steps if step.sandbox_package is not None)
     assert step.kind == story.STEP_SANDBOX
-    assert step.sandbox_package == "free-ai-boost"
+    assert step.sandbox_package == "nordlys-mail-connector-patch"
     # Ingen av stegene baerer en ferdig rapport.
     assert not any(isinstance(getattr(st, "sandbox", None), SandboxReport) for st in s.steps)
 

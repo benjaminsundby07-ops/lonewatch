@@ -24,9 +24,16 @@ MAX_TEXT_CHARS = 300
 MAX_DESTINATIONS = 20
 MAX_LISTED_FILES = 10
 
-# Tillegg vi har laget til demoen. De to første er harmløse, de to siste
+# Tillegg vi har laget til demoen. De to første er harmløse, de tre siste
 # later som de er nyttige og prøver å stjele.
-DEMO_PACKAGES = ("pdf-helper", "date-utils", "free-ai-boost", "env-sync-helper")
+# nordlys-mail-connector-patch er tillegget i hovedscenarioet.
+DEMO_PACKAGES = (
+    "pdf-helper",
+    "date-utils",
+    "nordlys-mail-connector-patch",
+    "free-ai-boost",
+    "env-sync-helper",
+)
 
 # Et tillegg som bare henger. Brukes for å vise at tidsgrensen virker.
 HANGING_PACKAGE = "endless-indexer"

@@ -252,17 +252,17 @@ def _install_card(state: DemoState, package_name: str) -> dict:
 
 def test_the_sandbox_runs_before_the_decision_and_lands_in_the_log(state):
     """Rekkefoelgen i loggen skal vaere request -> sandbox -> decision."""
-    card = _install_card(state, "free-ai-boost")
+    card = _install_card(state, "nordlys-mail-connector-patch")
     kinds = [(e.kind, e.payload.get("id") or e.payload.get("request_id") or e.payload.get("package_name"))
              for e in state.vault.entries()]
     i_req = kinds.index(("request", card["request"]["id"]))
-    i_box = kinds.index(("sandbox", "free-ai-boost"))
+    i_box = kinds.index(("sandbox", "nordlys-mail-connector-patch"))
     i_dec = kinds.index(("decision", card["request"]["id"]))
     assert i_req < i_box < i_dec
 
 
 def test_a_blocked_plugin_is_stopped_and_never_queued_for_a_human(state):
-    card = _install_card(state, "free-ai-boost")
+    card = _install_card(state, "nordlys-mail-connector-patch")
     assert card["decision"]["verdict"] == Verdict.BLOCK.value
     assert "sandbox_blocked" in card["decision"]["reasons"]
     assert card["status"] == STATUS_BLOCKED
@@ -282,7 +282,7 @@ def test_the_before_list_shows_one_clean_and_one_blocked(state):
     before = state.snapshot()["before"]
     assert before["clean"] >= 1
     assert before["blocked"] >= 1
-    assert {r["package_name"] for r in before["scanned"]} >= {"pdf-helper", "free-ai-boost"}
+    assert {r["package_name"] for r in before["scanned"]} >= {"pdf-helper", "nordlys-mail-connector-patch"}
     assert before["error"] is None
 
 
@@ -295,7 +295,7 @@ def test_each_plugin_is_scanned_once_even_if_asked_for_twice(state):
     kinds = [e.kind for e in state.vault.entries()]
     names = [e.payload["package_name"] for e in state.vault.entries() if e.kind == "sandbox"]
     assert kinds.count("sandbox") == len(set(names))
-    assert names.count("free-ai-boost") == 1
+    assert names.count("nordlys-mail-connector-patch") == 1
 
 
 def test_a_plugin_the_sandbox_does_not_have_is_not_run(state, monkeypatch):
@@ -313,7 +313,9 @@ def test_a_plugin_the_sandbox_does_not_have_is_not_run(state, monkeypatch):
         agent_id="it_helper",
         action_type=ActionType.INSTALL_PACKAGE,
         summary="",
-        package_name="nordlys-mail-connector-patch",
+        # Et navn sandkassen ikke har en fil for. Det er normaltilfellet:
+        # de fleste tillegg i verden ligger ikke i sandbox/packages/.
+        package_name="nordlys-pdf-reader",
     )
     card = state._handle(req, source="feed")
 
@@ -322,7 +324,7 @@ def test_a_plugin_the_sandbox_does_not_have_is_not_run(state, monkeypatch):
     assert "sandbox_blocked" not in card["decision"]["reasons"]
     assert "ikke testet i sandkassen" in card["decision"]["consequence_text"]
     untested = state.snapshot()["before"]["untested"]
-    assert [u["package_name"] for u in untested] == ["nordlys-mail-connector-patch"]
+    assert [u["package_name"] for u in untested] == ["nordlys-pdf-reader"]
 
 
 def test_reset_empties_the_before_list(state):

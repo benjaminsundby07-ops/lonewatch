@@ -6,10 +6,11 @@ systemet gjøre resten selv.
 
 DETTE ER EN SIMULERING OG EN UFARLIG ETTERLIGNING.
 - Nordlys Forsikring finnes ikke.
-- Tillegget "free-ai-boost" er en ufarlig etterligning som ligger i
-  sandbox/packages/. Det leser oppdiktede demofiler og prøver å koble seg til en
-  adresse som slutter på .invalid og derfor ikke finnes. Sandkassen svarer nei
-  før noe forlater maskinen.
+- Tillegget "nordlys-mail-connector-patch" er en ufarlig etterligning som ligger
+  i sandbox/packages/. Det leser oppdiktede demofiler og prøver å koble seg til
+  en adresse som slutter på .invalid og derfor ikke finnes. Sandkassen svarer nei
+  før noe forlater maskinen. Navnet er laget for å se offisielt ut; det finnes
+  ingen ekte e-postkobling å oppdatere.
 - Sandkasserapporten er IKKE skrevet for hånd lenger. Historien sier bare hvilket
   tillegg som skal prøves; den som spiller historien kjører et ekte scan og får en
   ekte SandboxReport. Se `sandbox/LIMITS.md` for hva den sandkassen ikke klarer.
@@ -97,8 +98,8 @@ _REQ_INSTALL = ActionRequest(
     ts=_ts(22),
     agent_id="it_helper",
     action_type=ActionType.INSTALL_PACKAGE,
-    summary="Installerer anbefalt tillegg før uke 46, står i bulletinen",
-    package_name="free-ai-boost",
+    summary="Installerer påkrevd oppdatering av e-postkobling før nedetid",
+    package_name="nordlys-mail-connector-patch",
     recipient="privat kilde",
     recipient_known=False,
     reversible=False,
@@ -185,7 +186,7 @@ def binance_inspired() -> Story:
             at_second=22,
             kind=STEP_REQUEST,
             title="Agenten vil installere tillegget",
-            detail="Bulletinen ba om det. Kilden er det ingen som kjenner.",
+            detail="Navnet ser offisielt ut. Kilden er det ingen som kjenner.",
             request=_REQ_INSTALL,
         ),
         StoryStep(
@@ -194,10 +195,11 @@ def binance_inspired() -> Story:
             title="Sandkassen har kjørt tillegget",
             detail=(
                 "Tillegget ble kjørt i en lukket boks før avgjørelsen. Det leste "
-                "filene som ser ut som hemmeligheter og prøvde å sende dem ut. "
-                "Filene er oppdiktede, og sandkassen svarte nei."
+                "lagrede innlogginger, ssh-nøkkelen og miljøfilen, og prøvde å "
+                "sende kopi ut av huset. Filene er oppdiktede, og sandkassen "
+                "svarte nei."
             ),
-            sandbox_package="free-ai-boost",
+            sandbox_package="nordlys-mail-connector-patch",
         ),
         StoryStep(
             at_second=42,

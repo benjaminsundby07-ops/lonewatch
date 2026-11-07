@@ -190,12 +190,12 @@ _SPECS: tuple[tuple[str, ActionType, str, dict], ...] = (
      {"recipient": "arkiv-backup@nordlys-arkiv-eu.net", "recipient_known": False,
       "reversible": False, "contains_personal_data": True,
       "source_doc_id": "doc_claim_4412"}),
-    # req_0039: tillegget bulletinen ba om, fra en kilde ingen kjenner.
+    # req_0039: tillegg med et navn som ser offisielt ut, fra en kilde ingen kjenner.
     # Dette er det BLOKKERTE tillegget i demoen: sandkassen kjører det og ser at
     # det leser hemmeligheter og prøver aa sende dem ut.
     ("it_helper", ActionType.INSTALL_PACKAGE,
-     "Installerer anbefalt tillegg fra IT-bulletin 19",
-     {"package_name": "free-ai-boost", "recipient": "privat kilde",
+     "Installerer påkrevd oppdatering av e-postkobling",
+     {"package_name": "nordlys-mail-connector-patch", "recipient": "privat kilde",
       "recipient_known": False, "reversible": False,
       "source_doc_id": "doc_it_bulletin_19"}),
     # req_0040: personopplysninger til ekstern adresse.

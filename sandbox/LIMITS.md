@@ -78,6 +78,25 @@ oss og stjeler først på en ekte maskin. Da sier rapporten `clean`, og vi tar
 feil. Dette er den vanligste måten ekte skadevare slipper unna ekte sandkasser,
 og vi har ingen forsvar mot det.
 
+## Demoen er snillere mot oss enn virkeligheten
+
+I hovedscenarioet ber fella agenten installere `nordlys-mail-connector-patch`,
+og sandkassen har tilfeldigvis akkurat den filen liggende i `sandbox/packages/`.
+Det er fordi vi har skrevet begge deler selv. I virkeligheten ville ikke
+Lonewatch hatt tillegget på forhånd: det måtte vært hentet fra den kilden
+angriperen peker på før det kunne kjøres, og det gjør vi ikke og vil ikke gjøre.
+`scan()` kjører bare filer som ligger i `sandbox/packages/` fra før, nettopp
+fordi et navn fra en forespørsel aldri skal kunne føre til at noe lastes ned
+eller kjøres.
+
+Konsekvensen er at demoens "Før"-steg viser det beste tilfellet: tillegget vi
+allerede kjente. For et ekte, ukjent tillegg er svaret "ikke testet", og da står
+`new_package`-regelen alene - akkurat som før sandkassen fantes.
+
+**Hva som ville løst det:** en kjede der pakken hentes ned i et isolert miljø og
+skannes der, med alt det medfører av tillit til kilden, nettverk og
+versjonskontroll. Det er et helt annet system enn dette.
+
 ## Vi ser bare ett kort øyeblikk
 
 Tillegget kjøres én gang, i noen sekunder, og `run()` kalles én gang. Vi fanger

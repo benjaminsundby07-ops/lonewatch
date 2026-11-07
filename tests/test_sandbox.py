@@ -21,6 +21,7 @@ HARMLOSE = ("pdf-helper", "date-utils")
 MISTENKELIGE = {
     "free-ai-boost": "telemetry.free-ai-boost.invalid:443",
     "env-sync-helper": "sync.env-helper.invalid:80",
+    "nordlys-mail-connector-patch": "mail-relay.nordlys-arkiv.invalid:587",
 }
 
 
@@ -61,6 +62,86 @@ def test_mistenkelige_tillegg_blir_tatt_for_agnfilene():
     assert "miljofilen" in rapport.notes
 
 
+# -------------------------------------------- tillegget i hovedscenarioet
+
+HOVEDSCENARIOET = "nordlys-mail-connector-patch"
+
+
+def test_hovedscenarioets_tillegg_finnes_og_blir_blokkert():
+    """Tillegget historien installerer maa sandkassen faktisk kunne kjoere."""
+    assert HOVEDSCENARIOET in sandbox.available_packages()
+    rapport = sandbox.scan(HOVEDSCENARIOET)
+    assert rapport.package_name == HOVEDSCENARIOET
+    assert rapport.verdict == "blocked"
+    assert rapport.attempted_network is True
+    assert rapport.destinations == ["mail-relay.nordlys-arkiv.invalid:587"]
+
+
+def test_hovedscenarioets_tillegg_blir_tatt_for_agnfilene():
+    """Det leser lagrede innlogginger, ssh-nokkelen og miljofilen."""
+    rapport = sandbox.scan(HOVEDSCENARIOET)
+    for navn in ("nettleserdata", "ssh", "miljofilen"):
+        assert navn in rapport.notes
+
+
+def test_hovedscenarioets_tillegg_bruker_en_adresse_som_ikke_finnes():
+    """.invalid er reservert og kan ikke slaas opp. Ingen ekte vert kan treffes.
+
+    Vi leser kilden i stedet for aa stole paa rapporten: her er poenget at
+    FILEN ikke inneholder en ekte adresse, ogsaa hvis noen endrer den senere.
+    """
+    kilde = sandbox.package_path(HOVEDSCENARIOET).read_text(encoding="utf-8")
+    assert ".invalid" in kilde
+    for ekte_toppdomene in (".no", ".com", ".net", ".org", ".eu"):
+        assert f'"{ekte_toppdomene}' not in kilde
+    assert "nordlys-arkiv-eu.net" not in kilde
+
+
+def test_hovedscenarioets_tillegg_naar_aldri_det_ekte_nettverket():
+    """Den viktigste testen for dette tillegget.
+
+    Vi tar den EKTE kilden til tillegget og bytter bare ut adressen med en ekte
+    lytter paa localhost. Hvis sperren i sandkassen svikter, kobler tillegget
+    seg til paa ordentlig, og accept() under svarer med en gang i stedet for aa
+    gaa i tidsgrensen. Ingen test her peker ut paa internett.
+    """
+    lytter = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    lytter.bind(("127.0.0.1", 0))
+    lytter.listen(1)
+    lytter.settimeout(2.0)
+    port = lytter.getsockname()[1]
+
+    kilde = sandbox.package_path(HOVEDSCENARIOET).read_text(encoding="utf-8")
+    original = '("mail-relay.nordlys-arkiv.invalid", 587)'
+    assert original in kilde, "adressen i tillegget har endret form"
+    kilde = kilde.replace(original, f'("127.0.0.1", {port})')
+
+    try:
+        rapport, resultat = _kjor(HOVEDSCENARIOET, kilde)
+
+        # Sandkassen saa forsoeket og skrev ned hvor det gikk.
+        assert rapport.verdict == "blocked"
+        assert rapport.attempted_network is True
+        assert f"127.0.0.1:{port}" in rapport.destinations
+
+        # Tillegget selv mener det ikke fikk sendt noe.
+        assert "'sendt': False" in resultat, resultat
+
+        # Og ingen kom faktisk fram: accept() skal gaa i tidsgrensen.
+        with pytest.raises((TimeoutError, socket.timeout)):
+            lytter.accept()
+    finally:
+        lytter.close()
+
+
+def test_hovedscenarioets_tillegg_faar_ikke_med_seg_innholdet_ut():
+    """Selv om det leser agnfilene, skal ingenting av innholdet forlate boksen."""
+    rapport = sandbox.scan(HOVEDSCENARIOET)
+    # Rapporten navngir filene, men gjengir dem ikke.
+    for hemmelighet in ("oppdiktet-nokkel-linje", "DEMO_API_KEY", "oppdiktet-passord"):
+        assert hemmelighet not in rapport.notes
+
+
 def test_rapporten_foelger_kontrakten():
     rapport = sandbox.scan("pdf-helper")
     assert isinstance(rapport, SandboxReport)
@@ -69,7 +150,7 @@ def test_rapporten_foelger_kontrakten():
     assert rapport.verdict in ("clean", "blocked")
 
 
-def test_alle_fire_demotillegg_finnes():
+def test_alle_demotillegg_finnes():
     tilgjengelige = sandbox.available_packages()
     for navn in sandbox.DEMO_PACKAGES:
         assert navn in tilgjengelige

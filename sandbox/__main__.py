@@ -1,7 +1,7 @@
 """Kjør sandkassen for hånd:
 
-    python -m sandbox              # alle fire demotillegg
-    python -m sandbox free-ai-boost
+    python -m sandbox              # alle demotilleggene
+    python -m sandbox nordlys-mail-connector-patch
 """
 
 from __future__ import annotations
