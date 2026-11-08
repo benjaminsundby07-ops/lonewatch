@@ -7,8 +7,10 @@ Hvis gateway eller vault bare er skjelettet, bruker vi skjelettet.
 
 from __future__ import annotations
 
+import os
 import re
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -21,6 +23,15 @@ from contracts import (
     SandboxReport,
     TrapEvent,
     Verdict,
+)
+from executor import (
+    Approval,
+    AttemptLedger,
+    ExecutionResult,
+    Executor,
+    SimulatedExecutor,
+    SmtpExecutor,
+    seal,
 )
 from gateway import evaluate
 from ui.amount import amount_matches, parse_amount
@@ -88,6 +99,58 @@ PACKAGE_ACTIONS = frozenset({ActionType.INSTALL_PACKAGE})
 
 # Handlinger der et beløp betyr noe.
 AMOUNT_ACTIONS = frozenset({ActionType.TRANSFER_MONEY})
+
+# -- utføreren -------------------------------------------------------------
+#
+# `executor/` er den eneste delen av Lonewatch som rører omverdenen. Den kobles
+# inn på NØYAKTIG to steder, og de to stedene står i docs/UTFORER.md:
+#
+#   1. `_handle()`, rett etter `evaluate()`   - forsegl alltid, utfør ved allow
+#   2. `respond()`, rett etter approved=True  - utfør med samme forsegling
+#
+# En rød sak som venter, en rød sak som ble avvist og en blokkert sak kommer
+# aldri til utføreren. Porten i `executor/gate.py` ville nektet dem uansett;
+# at vi i tillegg ikke KALLER den der, er for at det skal være lett å se.
+#
+# Standard er `SimulatedExecutor`: den later som og gjør ingenting. Den ekte
+# e-postsendingen må slås på med vilje:
+#
+#   LONEWATCH_EXECUTOR=smtp     send_email går over SMTP (standard: localhost)
+#
+# Alt annet enn `smtp` - også et tomt, feilskrevet eller usatt felt - gir den
+# simulerte. En utfører som rører omverdenen skal ikke kunne slås på ved en
+# skrivefeil.
+ENV_EXECUTOR = "LONEWATCH_EXECUTOR"
+EXECUTOR_SMTP = "smtp"
+
+# Arten loggen bruker for en utføring. Står i `LogKind` i contracts.py.
+LOG_EXECUTION = "execution"
+
+# Felt på et kort som ALDRI skal ut av denne modulen.
+#
+# `approval` er forseglingen (et `Approval`-objekt, ikke JSON). Den er nøkkelen
+# til at en godkjenning gjelder nøyaktig den forespørselen mennesket så, og den
+# har ingenting å gjøre i en nettleser: den som har avtrykket og kan lage et
+# `Approval` selv, har ikke lenger noen sperre. `_public()` tar dem bort, og
+# `tests/test_executor_wiring.py` går gjennom hele API-flaten og sjekker at de
+# ikke er der.
+PRIVATE_CARD_KEYS = frozenset({"approval", "queued_monotonic"})
+
+# Felt i et `ExecutionResult` som LOGGES, men ikke sendes til nettleseren.
+#
+# `fingerprint` er avtrykket av forespørselen. Loggen trenger det: det er det
+# som gjør at en `.eml`-fil på disken (den har avtrykket i et hode) kan holdes
+# opp mot loggen etterpå og svare «ja, dette er den forespørselen som ble
+# godkjent». Nettsiden trenger det ikke, og et avtrykk som ligger i et
+# JSON-svar er et avtrykk alle har.
+PRIVATE_EXECUTION_KEYS = frozenset({"fingerprint"})
+
+
+def _public(card: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Kortet slik det får forlate tjeneren. Alt annet er en kopi av det samme."""
+    if card is None:
+        return None
+    return {k: v for k, v in card.items() if k not in PRIVATE_CARD_KEYS}
 
 
 def _normalize_recipient(value: str) -> str:
@@ -246,6 +309,9 @@ class DemoState:
             self.cards: dict[str, dict[str, Any]] = {}
             self.order: list[str] = []
             self.notices: list[dict[str, Any]] = []
+            # Kortene agenten alt har sagt at den ga opp aa vente paa. Hindrer
+            # at samme kall skriver samme notis om og om igjen.
+            self._gave_up: set[str] = set()
             self.verify_result: dict[str, Any] | None = None
             # (doc_id, agent_id, access) for feller som allerede står i loggen.
             self._fired_traps: set[tuple[str, str, str]] = set()
@@ -268,6 +334,83 @@ class DemoState:
             self.story_running = False
             self.story_log: list[dict[str, Any]] = []
 
+            # Utføreren. Boka over hva som er forsøkt deles mellom utførerne:
+            # to utførere med hver sin bok kunne gjort den samme handlingen to
+            # ganger. Den leses fra loggen under, slik at en omstart ikke
+            # nullstiller den.
+            self._ledger = AttemptLedger()
+            self._default_executor = SimulatedExecutor(ledger=self._ledger)
+            self._executors, self._executor_error = self._new_executors(self._ledger)
+            self._seed_ledger_from_log()
+
+    # -- utføreren -------------------------------------------------------
+
+    @staticmethod
+    def _new_executors(ledger: AttemptLedger) -> tuple[dict[ActionType, Executor], str | None]:
+        """Unntakene fra den simulerte utføreren. Tom liste betyr «alt simuleres».
+
+        `LONEWATCH_EXECUTOR=smtp` bytter ut `send_email` med den ekte. Alt
+        annet går fortsatt til den simulerte - `SmtpExecutor` kan bare sende
+        e-post, og en ruting som sendte en pengeoverføring dit ville bare fått
+        «ikke utført» tilbake uten at noen ba om det.
+        """
+        ruting: dict[ActionType, Executor] = {}
+        valgt = (os.environ.get(ENV_EXECUTOR) or "").strip().lower()
+        if valgt != EXECUTOR_SMTP:
+            return ruting, None
+        try:
+            ruting[ActionType.SEND_EMAIL] = SmtpExecutor(ledger=ledger)
+        except Exception as exc:  # pragma: no cover - SmtpExecutor leser miljøet sent
+            return ruting, f"Utføreren for e-post kunne ikke startes: {exc}"
+        return ruting, None
+
+    def _seed_ledger_from_log(self) -> None:
+        """Leser executor-boka ut av loggen, slik at en omstart ikke utfører noe to ganger.
+
+        Dette er grunnen til at `"execution"` måtte inn i `LogKind`: uten en
+        linje i loggen levde boka bare i minnet, og en omstart lot den samme
+        forespørselen gå ut en gang til (executor/LIMITS.md punkt 1).
+
+        Vi merker ALT som har stått i loggen som forsøkt, også det som endte
+        «ikke utført». Det er med vilje: en linje i loggen betyr at utføreren
+        har hatt saken, og en handling som feilet skal ikke prøves om av seg
+        selv - det står i executor/once.py.
+        """
+        if self.vault is None:
+            return
+        try:
+            entries = self.vault.entries()
+        except Exception:  # pragma: no cover - avhenger av økt C
+            return
+        for e in entries:
+            if e.kind != LOG_EXECUTION:
+                continue
+            request_id = e.payload.get("request_id")
+            if isinstance(request_id, str) and request_id:
+                self._ledger.claim(request_id)
+
+    def _executor_for(self, action_type: ActionType) -> Executor:
+        """Utføreren for én handlingstype. Faller alltid tilbake til den simulerte."""
+        return self._executors.get(action_type, self._default_executor)
+
+    def _execute(
+        self,
+        req: ActionRequest,
+        decision: Decision,
+        approval: Approval,
+    ) -> dict[str, Any]:
+        """Utfører handlingen og skriver resultatet i loggen. Kaster aldri.
+
+        `execute()` svarer alltid med et `ExecutionResult` - også når porten
+        sier nei. Vi logger svaret uansett hva det ble: en logg som bare
+        inneholder det som gikk bra, kan ikke svare på «gikk den e-posten ut?».
+        """
+        executor = self._executor_for(req.action_type)
+        result: ExecutionResult = executor.execute(req, decision, approval)
+        logget = result.model_dump(mode="json")
+        self._append(LOG_EXECUTION, logget, ts=result.ts)
+        return {k: v for k, v in logget.items() if k not in PRIVATE_EXECUTION_KEYS}
+
     @staticmethod
     def _new_vault(archive: bool):
         """Åpner loggen, og bytter den ut først hvis `archive` er satt.
@@ -289,13 +432,32 @@ class DemoState:
         except Exception as exc:  # pragma: no cover - avhenger av økt C
             return None, f"Loggen kunne ikke startes: {exc}", None
 
-    def _pseudonym(self) -> str:
+    def _pseudonym(self, operator: str | None = None) -> str:
+        """Pseudonymet som havner i loggen. `operator` er den som er logget inn.
+
+        `operator` kommer fra menneskenøkkelen (`ui/human_key.py`), så to
+        ulike nøkler gir to ulike pseudonymer. Er den ikke satt, bruker vi
+        demoens ansatt - det skjer når noe kaller `DemoState` direkte.
+        """
+        if operator is not None and not isinstance(operator, str):
+            # En programmeringsfeil skal ikke bli et stille "emp_ukjent" i
+            # loggen. Det sto en positional-arg for mye i et kall en gang, og
+            # den havnet her.
+            raise TypeError(f"operator maa vaere en tekst, ikke {type(operator).__name__}")
         try:
             from vault import pseudonymize
 
-            return pseudonymize(DEMO_EMPLOYEE_ID)
+            return pseudonymize(operator or DEMO_EMPLOYEE_ID)
         except Exception:  # pragma: no cover - avhenger av økt C
             return "emp_ukjent"
+
+    def operator_pseudonym(self, operator: str | None = None) -> str:
+        """Pseudonymet en gitt operatoer vil staa med i loggen.
+
+        Brukt av innloggingsfeltet: den som laaser opp Godkjenning skal se
+        hvilket `emp_xxxx` loggen kommer til aa vise, foer de godkjenner noe.
+        """
+        return self._pseudonym(operator)
 
     def _append(self, kind: str, payload: dict[str, Any], ts: datetime | None = None) -> None:
         """Skriver til loggen. Finnes ikke loggen, hopper vi over og UI sier fra."""
@@ -322,10 +484,18 @@ class DemoState:
         # seg selv to ganger.
         self._history.append(req)
 
+        # Forseglingen lages HER, i samme øyeblikk som avgjørelsen falt - ikke
+        # senere, og aldri på nytt. Et avtrykk som regnes ut rett før
+        # utføringen beviser ingenting: da ville en forespørsel som er endret
+        # mens mennesket tenkte, fått et avtrykk som stemte med endringen.
+        # Se executor/approval.py og docs/UTFORER.md.
+        approval = seal(req, decision)
+
         # I historien er fellene egne steg, slik at de kommer på skjermen når
         # fortellingen sier det. Da skal ikke forespørselen logge dem en gang til.
         trap = None if source == "story" else self._maybe_trap(req)
 
+        now = datetime.now(timezone.utc)
         if decision.verdict is Verdict.ALLOW:
             status = STATUS_ALLOW
         elif decision.verdict is Verdict.RED:
@@ -344,9 +514,28 @@ class DemoState:
             "sandbox": report.model_dump(mode="json") if report else None,
             "human": None,
             "error": None,
+            # Forseglingen. Ligger på kortet fordi den hører til NØYAKTIG denne
+            # forespørselen, og den fjernes av `_public()` før kortet forlater
+            # tjeneren.
+            "approval": approval,
+            # Når kortet ble lagt i køen, målt av TJENEREN. Betenkningstiden
+            # regnes herfra, aldri fra et tall klienten sender. `queued_at` er
+            # til å vise fram; `queued_monotonic` er den som brukes til å
+            # regne, fordi den ikke flytter seg om noen stiller klokken.
+            "queued_at": now.isoformat() if status == STATUS_WAITING else None,
+            "queued_monotonic": time.monotonic() if status == STATUS_WAITING else None,
+            # Hva utføreren gjorde. None betyr at den aldri ble spurt: en rød
+            # sak som venter, en avvist sak og en blokkert sak kommer ikke dit.
+            "execution": None,
         }
         self.cards[req.id] = card
         self.order.append(req.id)
+
+        # Grønt lys: handlingen utføres med én gang. En rød sak gjør ingenting
+        # her - den venter på et menneske i `respond()`.
+        if decision.verdict is Verdict.ALLOW:
+            card["execution"] = self._execute(req, decision, approval)
+
         return card
 
     def _scan(self, req: ActionRequest) -> SandboxReport | None:
@@ -455,7 +644,7 @@ class DemoState:
                 return None
             req = self._requests[self._next_index]
             self._next_index += 1
-            return self._handle(req, source="feed")
+            return _public(self._handle(req, source="feed"))
 
     @property
     def feed_done(self) -> bool:
@@ -558,7 +747,7 @@ class DemoState:
                 self._written_counts[id_prefix] = teller - 1
                 return {"ok": False, "error": f"Forespørselen kunne ikke behandles: {exc}"}
 
-            return {"ok": True, "card": card}
+            return {"ok": True, "card": _public(card)}
 
     def custom_help(self) -> dict[str, Any]:
         """Det skjemaet trenger å vite: handlingstyper og noen kjente mottakere."""
@@ -614,8 +803,15 @@ class DemoState:
             id_prefix="agent",
         )
         if result.get("ok"):
-            # Kortet ligger i self.cards, så dette endrer det som vises.
-            result["card"]["agent_label"] = AGENT_LABEL
+            # Merkelappen settes paa kortet som LIGGER i self.cards, og kopien
+            # til den som kalte lages paa nytt etterpaa. Satt paa kopien ville
+            # den vaert borte i neste `/api/state`.
+            with self._lock:
+                request_id = result["card"]["request"]["id"]
+                lagret = self.cards.get(request_id)
+                if lagret is not None:
+                    lagret["agent_label"] = AGENT_LABEL
+                    result["card"] = _public(lagret)
         return result
 
     def agent_status(self, request_id: str) -> dict[str, Any] | None:
@@ -624,10 +820,16 @@ class DemoState:
         Dette er det agenten får lov å spørre om mens den venter. Den får ikke
         regelnavnene: de ville vært en oppskrift på hva som må endres for å
         slippe gjennom neste gang.
+
+        Og den får bare spørre om SINE EGNE kort. Før denne sjekken kunne
+        agenten slå opp et vilkårlig `req_0012` og lese beløp, mottaker og
+        konsekvenstekst for en forespørsel den aldri hadde sendt - altså lese
+        ut av godkjenningskøen til et menneske. Et kort fra en annen kilde
+        svarer nå det samme som et kort som ikke finnes.
         """
         with self._lock:
             card = self.cards.get(request_id)
-            if card is None:
+            if card is None or card.get("source") != AGENT_SOURCE:
                 return None
             human = card.get("human") or {}
             return {
@@ -650,11 +852,30 @@ class DemoState:
         linje som sa "avvist" ville vært en påstand om at et menneske svarte.
         Kortet blir liggende i køen. Notisen er til den som sitter i
         dashbordet: agenten har gitt opp, men saken venter fortsatt på deg.
+
+        To sperrer, og begge kom av angrepene i `tests/attack/`:
+
+        - **Bare agentens egne kort.** Uten denne sjekken kunne agenten kalt
+          `abandon` på et vilkårlig `req_0012` eller `custom_0001` og fått
+          dashbordet til å skrive «Den ekte agenten ventet 120 s på svar på
+          req_0012» om en sak agenten aldri hadde sendt. En notis om en annens
+          kort er en påstand om noe som ikke skjedde.
+        - **Én notis per kort.** Uten den kunne samme kall gjentas i en løkke
+          og fylle notislisten, slik at alt annet som skulle vært sett -
+          sandkasserapporter, feller - ble skjøvet ut av de tolv plassene
+          `snapshot()` viser.
         """
         with self._lock:
             card = self.cards.get(request_id)
-            if card is None or card["status"] != STATUS_WAITING:
+            if card is None or card.get("source") != AGENT_SOURCE:
                 return False
+            if card["status"] != STATUS_WAITING:
+                return False
+            if request_id in self._gave_up:
+                # Agenten har alt sagt fra om dette kortet. Svaret er fortsatt
+                # sant - kortet venter - men notisen skrives ikke på nytt.
+                return True
+            self._gave_up.add(request_id)
             ventet = max(0, int(waited_seconds))
             self.notices.append(
                 {
@@ -677,9 +898,24 @@ class DemoState:
         request_id: str,
         approved: bool,
         typed_amount: str | None = None,
-        seconds_to_decide: float = 0.0,
+        *,
+        operator: str | None = None,
     ) -> dict[str, Any]:
-        """Mennesket godkjenner eller avviser en rød forespørsel."""
+        """Mennesket godkjenner eller avviser en rød forespørsel.
+
+        To ting kommer IKKE fra den som kaller, og det er med vilje:
+
+        - **Betenkningstiden.** `seconds_to_decide` måles fra kortet ble lagt i
+          køen til svaret kom, av tjeneren. Før kom tallet fra nettleseren, og
+          da kunne et skript skrive 37,5 sekunder på et kort det godkjente på
+          millisekunder (H2 i docs/ANGREP.md). En logg som kan vise en
+          oppdiktet betenkningstid er verre enn en logg uten tallet.
+        - **Hvem som svarte.** `operator` er avledet av menneskenøkkelen som
+          kom inn (se `ui/human_key.py`), ikke av et navn noen skriver selv.
+          Uten `operator` - altså når noe kaller `DemoState` direkte, slik
+          testene gjør - faller vi tilbake til demoens ansatt. Det står i
+          `ui/LIMITS.md` hva det betyr.
+        """
         with self._lock:
             card = self.cards.get(request_id)
             if card is None:
@@ -705,15 +941,63 @@ class DemoState:
             human = HumanResponse(
                 request_id=request_id,
                 ts=datetime.now(timezone.utc),
-                employee_pseudonym=self._pseudonym(),
+                employee_pseudonym=self._pseudonym(operator),
                 approved=approved,
                 typed_amount=parsed,
-                seconds_to_decide=max(0.0, float(seconds_to_decide)),
+                seconds_to_decide=self._seconds_in_queue(card),
             )
             self._append("human", human.model_dump(mode="json"), ts=human.ts)
             card["human"] = human.model_dump(mode="json")
             card["status"] = STATUS_APPROVED if approved else STATUS_REJECTED
-            return {"ok": True, "card": card}
+
+            # Godkjent: handlingen utføres nå, med forseglingen fra da
+            # avgjørelsen falt - `with_human()`, aldri et nytt `seal()`. Et
+            # nytt avtrykk ville vært regnet av forespørselen slik den ser ut
+            # NÅ, og dermed sluppet gjennom en endring som skjedde mens
+            # mennesket tenkte. Et avslag utfører ingenting.
+            if approved:
+                card["execution"] = self._execute_approved(card, human)
+
+            return {"ok": True, "card": _public(card)}
+
+    @staticmethod
+    def _seconds_in_queue(card: dict[str, Any]) -> float:
+        """Hvor lenge kortet har stått i køen, målt av tjeneren.
+
+        `time.monotonic()` og ikke klokken: en klokke som stilles (eller en
+        sommertidsovergang) skal ikke kunne gi en negativ betenkningstid.
+        Mangler starttiden - et kort fra før denne målingen fantes - svarer vi
+        0.0 i stedet for å gjette.
+        """
+        start = card.get("queued_monotonic")
+        if not isinstance(start, (int, float)):
+            return 0.0
+        return max(0.0, time.monotonic() - float(start))
+
+    def _execute_approved(
+        self, card: dict[str, Any], human: HumanResponse
+    ) -> dict[str, Any] | None:
+        """Utfører en rød sak et menneske nettopp godkjente.
+
+        `req` og `decision` bygges opp igjen fra dict-ene på kortet. Det er
+        trygt NETTOPP fordi avtrykket sjekkes: en forespørsel som har vært
+        gjennom JSON og tilbake gir samme avtrykk, en som er endret gjør det
+        ikke.
+        """
+        approval = card.get("approval")
+        if not isinstance(approval, Approval):  # pragma: no cover - siste skanse
+            return None
+        try:
+            req = ActionRequest(**card["request"])
+            decision = Decision(**card["decision"])
+            godkjenning = approval.with_human(human)
+        except Exception as exc:  # pragma: no cover - siste skanse
+            # Kan vi ikke bygge saken opp igjen, utfører vi ingenting. Det er
+            # den eneste trygge retningen: ingen handling, og en setning som
+            # sier hvorfor.
+            card["error"] = f"Utføreren ble ikke kalt: {exc}"
+            return None
+        return self._execute(req, decision, godkjenning)
 
     # -- historien --------------------------------------------------------
 
@@ -1060,7 +1344,7 @@ class DemoState:
         fra eksempeldataene i bundle.js.
         """
         with self._lock:
-            cards = [self.cards[request_id] for request_id in self.order]
+            cards = [_public(self.cards[request_id]) for request_id in self.order]
             data = build_overview(
                 cards=cards,
                 before=self.before_list(),
@@ -1075,7 +1359,8 @@ class DemoState:
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
-            cards = [self.cards[request_id] for request_id in self.order]
+            # `_public` tar bort forseglingen. Alt under gaar til nettleseren.
+            cards = [_public(self.cards[request_id]) for request_id in self.order]
             waiting = [c for c in cards if c["status"] == STATUS_WAITING]
             blocked = [c for c in cards if c["status"] == STATUS_BLOCKED]
             calm = [c for c in cards if c["status"] == STATUS_ALLOW]

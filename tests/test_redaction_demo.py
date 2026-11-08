@@ -272,11 +272,12 @@ def test_beloepsporten_virker_fortsatt(state):
     request_id = kort["request"]["id"]
 
     assert state.respond(request_id, approved=True, typed_amount="100000,00")["ok"] is False
-    out = state.respond(request_id, approved=True, typed_amount="10 000 000", seconds_to_decide=5.0)
+    out = state.respond(request_id, approved=True, typed_amount="10 000 000")
     assert out["ok"] is True
 
-    # Menneskesvaret staar i loggen, med pseudonym og beloep.
-    siste = Vault(path=state.vault.path).entries()[-1]
+    # Menneskesvaret staar i loggen, med pseudonym og beloep. Siste linje er
+    # utfoeringen, saa menneskesvaret er den nest siste.
+    siste = Vault(path=state.vault.path).entries()[-2]
     assert siste.kind == "human"
     assert siste.payload["typed_amount"] == 10_000_000
     assert siste.payload["employee_pseudonym"].startswith("emp_")

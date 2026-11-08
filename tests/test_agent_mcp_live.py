@@ -22,9 +22,13 @@ import os
 import socket
 import sys
 import threading
+import urllib.error
 import urllib.request
 
 import pytest
+
+from conftest import HUMAN_KEY
+from ui.human_key import HUMAN_KEY_HEADER
 
 NOEKKEL = "mcp-test-" + "y" * 24
 UKJENT_KONTO = "NO93 8601 1117 947"
@@ -66,13 +70,22 @@ def live_app():
     os.environ.pop("LONEWATCH_AGENT_KEY", None)
 
 
-def _post(base: str, path: str, body: dict | None = None) -> dict:
+def _post(base: str, path: str, body: dict | None = None, human_key: str | None = HUMAN_KEY):
+    """POST med menneskenoekkelen paa. `human_key=None` sender den ikke.
+
+    Noekkelen er menneskets, ikke agentens. Den staar ALDRI i MCP-oppsettet,
+    og MCP-tjeneren sender den ikke - se `_raa_uten_noekler` nederst.
+    """
     data = json.dumps(body or {}).encode()
-    req = urllib.request.Request(
-        base + path, data=data, headers={"Content-Type": "application/json"}
-    )
-    with urllib.request.urlopen(req, timeout=5) as res:
-        return json.loads(res.read() or b"{}")
+    headers = {"Content-Type": "application/json"}
+    if human_key is not None:
+        headers[HUMAN_KEY_HEADER] = human_key
+    req = urllib.request.Request(base + path, data=data, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=5) as res:
+            return json.loads(res.read() or b"{}")
+    except urllib.error.HTTPError as exc:
+        return {"_status": exc.code, "detail": exc.read()[:300].decode("utf-8", "replace")}
 
 
 def _get(base: str, path: str) -> dict:
@@ -236,12 +249,7 @@ def test_agenten_blokkeres_til_et_menneske_skriver_beloepet(live_app):
                 _post,
                 live_app,
                 "/api/respond",
-                {
-                    "request_id": request_id,
-                    "approved": True,
-                    "typed_amount": "450 000",
-                    "seconds_to_decide": 9.0,
-                },
+                {"request_id": request_id, "approved": True, "typed_amount": "450 000"},
             )
             assert ja["ok"] is True
             return await asyncio.wait_for(oppgave, timeout=20)
@@ -473,16 +481,16 @@ def test_agenten_har_ingen_vei_til_aa_godkjenne_sitt_eget_kort(live_app):
     _post(live_app, "/api/reset")
 
 
-def test_aerlig_hull_alt_som_kjoerer_lokalt_kan_godkjenne(live_app):
-    """Denne testen pinner et HULL, ikke en beskyttelse. Den skal stå.
+def test_agentnoekkelen_kan_ikke_godkjenne_men_menneskenoekkelen_kan(live_app):
+    """Skillet mellom «be om» og «godkjenne», prøvd over HTTP.
 
-    `/api/respond` er menneskets endepunkt i nettleseren, og det spør ikke om
-    agentnøkkelen. Alt som kjører som deg på maskinen - inkludert en agent med
-    Bash - kan altså godkjenne et rødt kort uten å gå gjennom MCP-tjeneren.
+    Dette var et HULL før menneskenøkkelen: `/api/respond` spurte ikke om noe
+    som helst, så alt som nådde porten kunne løfte et rødt kort til «godkjent».
+    Nå kreves `X-Lonewatch-Human-Key`, og agentnøkkelen - den som står i
+    `.mcp.json`, altså i en fil Claude Code selv leser - duger ikke.
 
-    MCP-tjeneren gir agenten ingen vei til å godkjenne (testen over). Det er
-    ikke det samme som at veien ikke finnes. Se agent_gateway/LIMITS.md punkt 1
-    og docs/EKTE_AGENT.md.
+    Hva som IKKE er lukket står i `test_aerlig_hull_menneskenoekkelen_ligger_paa_maskinen`
+    under. Les begge.
     """
     _post(live_app, "/api/reset")
 
@@ -495,11 +503,61 @@ def test_aerlig_hull_alt_som_kjoerer_lokalt_kan_godkjenne(live_app):
     request_id = kort["card"]["request"]["id"]
     assert kort["card"]["status"] == "waiting"
 
-    # Ingen agentnøkkel i dette kallet. Det går likevel gjennom.
+    kropp = {"request_id": request_id, "approved": True, "typed_amount": "450000"}
+
+    # 1. Uten noen nøkkel: avvist.
+    uten = _post(live_app, "/api/respond", kropp, human_key=None)
+    assert uten.get("_status") == 403, uten
+
+    # 2. Med AGENTnøkkelen i menneskehodet: avvist. Den gjelder ikke her.
+    med_agent = _post(live_app, "/api/respond", kropp, human_key=NOEKKEL)
+    assert med_agent.get("_status") == 403, med_agent
+
+    # 3. Kortet står fortsatt og venter. Ingen av forsøkene flyttet det.
+    snap = _get(live_app, "/api/state")
+    assert any(c["request"]["id"] == request_id for c in snap["waiting"])
+
+    # 4. Med menneskenøkkelen: godkjent.
+    ja = _post(live_app, "/api/respond", kropp)
+    assert ja["ok"] is True, ja
+    assert ja["card"]["status"] == "approved"
+    _post(live_app, "/api/reset")
+
+
+def test_aerlig_hull_menneskenoekkelen_ligger_paa_maskinen(live_app):
+    """Denne testen pinner et HULL, ikke en beskyttelse. Den skal stå.
+
+    Menneskenøkkelen er en streng i et miljø og i `.lonewatch-agent-env` på
+    disken. En agent med Bash kan lese begge, og da kan den godkjenne sitt eget
+    røde kort. Nøkkelen gjør hullet smalere - agenten må lete, og
+    agentnøkkelen duger ikke - men den lukker det ikke.
+
+    Det som ville lukket det er at godkjenningen krever noe som ikke finnes på
+    maskinen i det hele tatt: en egen enhet eller en egen konto, slik BankID
+    er. Se `ui/LIMITS.md` og `agent_gateway/LIMITS.md` punkt 1.
+    """
+    _post(live_app, "/api/reset")
+    kort = _post(
+        live_app,
+        "/api/custom",
+        {"action_type": "transfer_money", "amount": "450000", "recipient": UKJENT_KONTO},
+    )
+    request_id = kort["card"]["request"]["id"]
+
+    # Dette er hva en agent med lesetilgang gjør: finner nøkkelen i miljøet og
+    # bruker den. I testen står den i LONEWATCH_HUMAN_KEY, slik den gjør i
+    # terminalen som kjører appen.
+    lest_fra_miljoet = (os.environ.get("LONEWATCH_HUMAN_KEY") or "").split(",")[0]
+    assert lest_fra_miljoet, "menneskenoekkelen skal staa i miljoeet"
+
     svar = _post(
         live_app,
         "/api/respond",
         {"request_id": request_id, "approved": True, "typed_amount": "450000"},
+        human_key=lest_fra_miljoet,
     )
-    assert svar["ok"] is True, "hvis denne feiler, er hullet lukket - oppdater LIMITS.md"
+    assert svar["ok"] is True, (
+        "hvis denne feiler, er hullet lukket - oppdater ui/LIMITS.md og "
+        "agent_gateway/LIMITS.md"
+    )
     _post(live_app, "/api/reset")

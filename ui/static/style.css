@@ -1120,3 +1120,111 @@ body { font-family: var(--font-sans); }
 
 /* «Til menneske 7» brøt over to linjer og gjorde filterknappene ulike høye. */
 .app-filter-btn { white-space: nowrap; }
+
+/* ---------------- menneskenøkkelen («BankID»-steget) ----------------
+ *
+ * Stripen står øverst på Godkjenning og er ikke pynt: den er det eneste
+ * stedet i appen som sier om noe kan godkjennes i det hele tatt. Låst er
+ * standardtilstanden, og den skal se låst ut - ikke som et felt man kan
+ * overse. Se ui/human_key.py. */
+.app-lock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  border-left: 3px solid var(--negative);
+}
+.app-lock.is-open { border-left-color: var(--positive); }
+.app-lock.is-off { border-left-color: var(--ink-faint); }
+.app-lock-text { min-width: 260px; flex: 1 1 320px; }
+.app-lock-text strong { display: block; font-size: 14px; margin-bottom: 2px; }
+.app-lock-text .lw-panel-sub { margin: 0; }
+.app-lock-form {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.app-lock-login { display: flex; align-items: center; gap: var(--space-2); }
+.app-lock-form label { font-size: 12px; color: var(--ink-muted); }
+.app-lock-form input {
+  width: 220px;
+  padding: 6px 10px;
+  background: var(--card, #121214);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+.app-lock-form .app-hint { flex-basis: 100%; }
+
+/* Et kort som venter mens låsen er på. Ingen knapper: en Godkjenn-knapp som
+   ville gitt 403 er en løgn om hva som er mulig. */
+.app-gate.is-locked { opacity: .9; }
+
+/* Hva utføreren gjorde. «Utført» og «ikke utført», aldri noe i mellom. */
+.app-exec {
+  margin-top: var(--space-3);
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ink-faint);
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--ink-muted);
+}
+.app-exec b { color: var(--ink); }
+.app-exec.is-done { border-left-color: var(--positive); }
+.app-exec.is-not-done { border-left-color: var(--negative); }
+
+/* ---------------- den ekte agenten ----------------
+ *
+ * Merket på et kort som kom fra en agent som faktisk kjører, og notisen om at
+ * den sluttet å vente. Lå før i en `<style>` ui/static/agent_live.js la inn i
+ * `<head>` ved oppstart, fordi style.css den gang var en annen økts fil. Nå
+ * eies begge her, og CSS hører i CSS-filen: en side som får stilene sine
+ * injisert av et skript ser uferdig ut i det halve sekundet før skriptet
+ * kjører. */
+.app-live {
+  background: rgba(240, 145, 141, .16);
+  color: var(--negative);
+  border: 1px solid rgba(240, 145, 141, .35);
+  border-radius: var(--radius-pill);
+  padding: 1px var(--space-2);
+  font-size: 11px;
+  font-weight: 600;
+}
+.app-live-notis {
+  position: fixed;
+  left: 24px;
+  bottom: 24px;
+  max-width: 380px;
+  z-index: 60;
+  background: var(--panel, #19191a);
+  border: 1px solid rgba(240, 145, 141, .35);
+  /* Reservefargene er med fordi notisen er det ENESTE elementet i appen som
+     tegnes et annet sted i treet enn der det hoerer hjemme. Slaar `.lw` feil,
+     skal den fortsatt se ut som et varsel og ikke som en kantlos boks. */
+  border-left: 3px solid var(--negative, #f0918d);
+  border-radius: 12px;
+  padding: 14px 16px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--ink-muted, #a3a3a8);
+}
+.app-live-notis b { display: block; color: var(--ink, #f4f4f5); margin-bottom: 4px; }
+.app-live-notis button {
+  margin-top: 10px;
+  background: none;
+  border: 1px solid var(--line, #2e2e31);
+  color: var(--ink-muted, #a3a3a8);
+  border-radius: var(--radius-pill);
+  padding: 3px 12px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}

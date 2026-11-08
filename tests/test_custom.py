@@ -114,9 +114,10 @@ def test_beloepsporten_gjelder_ogsaa_for_egne_forespoersler(state):
     assert state.respond(request_id, approved=True, typed_amount="")["ok"] is False
     assert state.cards[request_id]["status"] == STATUS_WAITING
 
-    out = state.respond(request_id, approved=True, typed_amount="10 000 000", seconds_to_decide=3.0)
+    out = state.respond(request_id, approved=True, typed_amount="10 000 000")
     assert out["ok"] is True
-    assert state.vault.entries()[-1].payload["typed_amount"] == 10_000_000
+    # Siste linje er utfoeringen; menneskesvaret er den foer.
+    assert state.vault.entries()[-2].payload["typed_amount"] == 10_000_000
 
 
 def test_egne_forespoersler_er_merket_som_skrevet_av_deg(state):

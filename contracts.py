@@ -118,7 +118,7 @@ class AfterAction(Strict):
     done: bool = False
 
 
-LogKind = Literal["request", "decision", "human", "trap", "sandbox"]
+LogKind = Literal["request", "decision", "human", "trap", "sandbox", "execution"]
 
 
 class LogEntry(Strict):

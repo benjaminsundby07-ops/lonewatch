@@ -59,7 +59,7 @@ def test_waiting_only_shows_what_the_card_really_has(kjort):
 def test_waiting_disappears_when_the_human_answers(kjort):
     w = kjort.waiting_for_you()
     forste = w["request_id"]
-    kjort.respond(forste, approved=False, typed_amount=None, seconds_to_decide=1.0)
+    kjort.respond(forste, approved=False, typed_amount=None)
     etterpa = kjort.waiting_for_you()
     assert etterpa is None or etterpa["request_id"] != forste
 

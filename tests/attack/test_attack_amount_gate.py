@@ -16,9 +16,17 @@ from __future__ import annotations
 import pytest
 
 from attack_lib import live_app
+from conftest import HUMAN_KEY
 
 from ui.amount import amount_matches, parse_amount
+from ui.human_key import HUMAN_KEY_HEADER
 from ui.state import STATUS_WAITING, DemoState
+
+# Menneskenoekkelen. Den staar her fordi dette angrepet handler om
+# BELOEPSPORTEN, ikke om hvem som naar endepunktet: for aa maale porten maa vi
+# komme forbi laasen foran den. Angrepet mot selve laasen staar i
+# test_attack_self_approval.py.
+MENNESKE = {HUMAN_KEY_HEADER: HUMAN_KEY}
 
 BIG = 10_000_000.0
 
@@ -126,6 +134,7 @@ def test_the_gate_survives_a_hundred_wrong_attempts_on_the_same_card(live_app):
         status, body = live_app.post(
             "/api/respond",
             {"request_id": request_id, "approved": True, "typed_amount": f"{i}"},
+            headers=MENNESKE,
         )
         assert status == 200
         assert body["ok"] is False

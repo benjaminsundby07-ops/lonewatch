@@ -30,6 +30,8 @@ from agent_gateway import config as agent_config
 from agent_gateway import tools
 from agent_gateway.client import LonewatchClient, LonewatchRefused, LonewatchUnavailable
 from agent_gateway.config import ConfigError, load_config
+from conftest import HUMAN_KEY
+from ui.human_key import HUMAN_KEY_HEADER
 from ui.state import (
     AGENT_AGENT_ID,
     AGENT_SOURCE,
@@ -474,7 +476,7 @@ def test_loggen_og_loggsjekken_stemmer_etter_agenten(state):
         action_type="transfer_money", amount="450000", recipient=UKJENT_KONTO
     )
     request_id = out["card"]["request"]["id"]
-    state.respond(request_id, approved=True, typed_amount="450000", seconds_to_decide=7.0)
+    state.respond(request_id, approved=True, typed_amount="450000")
     state.submit_agent(action_type="transfer_money", amount="99000000", recipient=UKJENT_KONTO)
 
     sjekk = state.verify()
@@ -485,6 +487,9 @@ def test_loggen_og_loggsjekken_stemmer_etter_agenten(state):
     assert slag.count("request") == 3
     assert slag.count("decision") == 3
     assert slag.count("human") == 1
+    # To utfoeringer: den groenne (read_document) og den roede som ble
+    # godkjent. Den blokkerte kommer aldri til utfoereren.
+    assert slag.count("execution") == 2
 
 
 def test_den_harde_grensen_gjelder_ogsaa_agenten(state):
@@ -537,12 +542,20 @@ def agent_server(request):
     os.environ.pop("LONEWATCH_AGENT_KEY", None)
 
 
-def _raa(base, path, body=None, noekkel=NOEKKEL, method=None):
-    """Kaller endepunktet direkte, uten klienten. Gir (status, json)."""
+def _raa(base, path, body=None, noekkel=NOEKKEL, method=None, menneske=HUMAN_KEY):
+    """Kaller endepunktet direkte, uten klienten. Gir (status, json).
+
+    `noekkel` er AGENTnoekkelen, `menneske` er MENNESKEnoekkelen. De er to
+    forskjellige ting, og det er hele poenget: agentnoekkelen aapner
+    /api/agent/*, menneskenoekkelen aapner /api/respond, og ingen av dem
+    aapner den andre. Se ui/human_key.py.
+    """
     data = None if body is None else json.dumps(body).encode()
     headers = {}
     if noekkel is not None:
         headers["X-Lonewatch-Agent-Key"] = noekkel
+    if menneske is not None:
+        headers[HUMAN_KEY_HEADER] = menneske
     if data is not None:
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(

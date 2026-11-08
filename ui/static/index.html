@@ -76,6 +76,32 @@
 
     <!-- ---------- Godkjenning ---------- -->
     <section id="tab-queue" class="app-view hidden">
+
+      <!-- Menneskenøkkelen. Dette er «BankID»-steget i demoen: /api/respond
+           krever X-Lonewatch-Human-Key, og nøkkelen ligger IKKE i noen
+           statisk JS-fil. Den skrives inn her, lagres i sessionStorage, og
+           sendes som et HTTP-hode. Se ui/human_key.py og ui/LIMITS.md. -->
+      <section id="human-lock" class="lw-panel app-lock hidden" aria-live="polite">
+        <div class="app-lock-text">
+          <strong id="human-lock-title">Godkjenning er låst</strong>
+          <p id="human-lock-note" class="lw-panel-sub">
+            Et rødt kort kan bare godkjennes av et menneske med
+            menneskenøkkelen. Agentnøkkelen duger ikke.
+          </p>
+        </div>
+        <form id="human-form" class="app-lock-form" autocomplete="off">
+          <span id="human-login" class="app-lock-login">
+            <label for="human-key">Menneskenøkkel</label>
+            <input id="human-key" type="password" autocomplete="off" spellcheck="false"
+                   maxlength="200" placeholder="LONEWATCH_HUMAN_KEY">
+            <button type="submit" class="lw-btn lw-btn-primary app-mini">Lås opp</button>
+          </span>
+          <button type="button" id="human-logout"
+                  class="lw-btn lw-btn-ghost app-mini hidden">Logg ut</button>
+          <span id="human-hint" class="app-hint"></span>
+        </form>
+      </section>
+
       <div class="app-cols app-cols-split">
         <aside class="app-col-list">
           <section class="lw-panel app-panel-list">

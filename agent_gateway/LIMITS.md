@@ -15,12 +15,26 @@ nettverkskall, `git`. Ingen av dem går gjennom Lonewatch. Ber du agenten om å
 Ber du den om det samme, og den i stedet skriver et lite skript og kjører det
 med Bash, ser du ingenting.
 
-Det går enda lenger: `/api/respond` er menneskets endepunkt i nettleseren, og
-det spør ikke om agentnøkkelen. En agent med Bash kan altså godkjenne sitt eget
-røde kort med ett `curl`-kall. MCP-tjeneren gir agenten ingen vei til å
-godkjenne - det er testet - men det er ikke det samme som at veien ikke finnes.
-`tests/test_agent_mcp_live.py::test_aerlig_hull_alt_som_kjoerer_lokalt_kan_godkjenne`
-pinner hullet med vilje, slik at ingen tror det er lukket.
+Det gikk enda lenger: `/api/respond` spurte ikke om noe som helst, så en agent
+med Bash kunne godkjenne sitt eget røde kort med ett `curl`-kall.
+
+**Det er strammet inn, men ikke lukket.** `/api/respond` krever nå en egen
+menneskenøkkel (`X-Lonewatch-Human-Key`, se `ui/human_key.py`). Agentnøkkelen -
+den som står i `.mcp.json`, altså i en fil Claude Code selv leser - duger ikke,
+og menneskenøkkelen skrives aldri inn i MCP-oppsettet. Er de to satt til samme
+verdi, slås godkjenningen helt av.
+
+Men menneskenøkkelen er en tekst i et miljø og i `.lonewatch-agent-env` på
+disken, og en agent med Bash kan lese begge. Hullet er altså smalere - agenten
+må lete, og den må lete etter noe annet enn det den har fått utlevert - ikke
+borte.
+`tests/test_agent_mcp_live.py::test_aerlig_hull_menneskenoekkelen_ligger_paa_maskinen`
+pinner det som står igjen, og
+`test_agentnoekkelen_kan_ikke_godkjenne_men_menneskenoekkelen_kan` måler det
+som er lukket. Les begge.
+
+Det som ville lukket det helt: at godkjenningen krever noe som ikke finnes på
+maskinen i det hele tatt - en egen enhet eller en egen konto, slik BankID er.
 
 Demoen forutsetter altså at **agenten frivillig bruker Lonewatch-verktøyene.**
 Det er en forutsetning, ikke en sikkerhetsmekanisme. En agent som er lurt av et
@@ -35,12 +49,23 @@ ingen.
 
 Si dette høyt i demoen. Det er mer interessant enn å skjule det.
 
-## 2. Ingenting utføres, heller ikke etter en godkjenning
+## 2. Noe utføres nå - men agenten får ikke vite hva
 
-`UTFØRT (simulert)` er en tekst MCP-tjeneren returnerer. Det flyttes ingen
-penger, sendes ingen e-post, leses ingen dokumenter og installeres ingen
-pakker. Et godkjent rødt kort fører til den samme teksten - bare med
-`GODKJENT` foran. Ingen integrasjon finnes bak.
+**Endret.** `ui/state.py` kaller `executor/` når Lonewatch sier grønt, og når et
+menneske godkjenner et rødt kort. Med `LONEWATCH_EXECUTOR=smtp` blir en
+`send_email` faktisk sendt (til localhost med mindre noen har sagt noe annet).
+Alt annet - penger, deling, pakker, dokumenter, kalender - går gjennom samme
+port og gjør så ingenting.
+
+Hullet som står igjen er i det **agenten får vite**: `UTFØRT (simulert)` er
+fortsatt en fast tekst MCP-tjeneren returnerer. Den spør ikke hva utføreren
+svarte. Ble handlingen nektet av utføreren - feil oppsett, innhold endret etter
+godkjenningen, alt forsøkt før - står det likevel `UTFØRT (simulert)` i
+agentens svar.
+
+Loggen vet det riktige, og dashbordet viser det riktige. Agenten gjør ikke det.
+Et ekte produkt måtte sendt utførerens svar tilbake gjennom
+`/api/agent/status/{id}`.
 
 ## 3. Agenten kan ikke velge sine egne felt, men den eier `summary`
 
@@ -60,7 +85,9 @@ gjelder uendret: tilliten ligger ett hakk før oss.
 ## 4. Den delte hemmeligheten beskytter mot uhell, ikke mot en angriper
 
 `LONEWATCH_AGENT_KEY` må være satt i terminalen som kjører appen, ellers er
-endepunktene av (503). Endepunktene svarer bare på kall fra 127.0.0.1.
+endepunktene av (503). Endepunktene svarer bare på kall fra 127.0.0.1. Den
+åpner `/api/agent/*` og ingenting annet - godkjenning krever menneskenøkkelen
+(punkt 1).
 
 Det stopper at en annen prosess ved et uhell legger noe i godkjenningskøen. Det
 stopper ikke noen som alt kjører kode som din bruker på din maskin: nøkkelen
@@ -141,7 +168,36 @@ gjør ikke nødvendigvis det, og det er nettopp punkt 1.
 Reserven skriver dessuten loggen i en midlertidig mappe som slettes etterpå.
 Den er til for å vises, ikke til å etterforske noe i.
 
-## 12. Hva som er testet, og hva som ikke er
+## 12. Hva angrepene fant i de to skriverutene agenten eier
+
+`/api/agent/submit` og `/api/agent/abandon/{id}` ble angrepet i
+`tests/attack/test_attack_agent_tools.py`. To hull ble funnet og lukket:
+
+- **`abandon` svarte på alle kort, ikke bare agentens egne.** Agenten kunne
+  kalle `abandon` på et vilkårlig `req_0012` og få dashbordet til å skrive «Den
+  ekte agenten ventet 120 s på svar på req_0012» om en sak agenten aldri hadde
+  sendt. Nå kreves `source == "agent"`, og et fremmed kort svarer det samme som
+  et kort som ikke finnes.
+- **`abandon` kunne skrive samme notis så mange ganger den ville.** Dashbordet
+  viser de tolv siste notisene, så en løkke kunne skjøvet sandkasserapporter og
+  feller ut av listen. Nå er det én notis per kort.
+
+Samme sjekk er lagt på `/api/agent/status/{id}`: et kort i menneskets
+godkjenningskø inneholder beløp, mottaker og konsekvenstekst, og agenten fikk
+lese alt det på saker den ikke hadde sendt.
+
+Det `submit` ble prøvd mot, uten å gi etter: alle fire utfall (grønt, rødt,
+blokkert, ikke gyldig), seksten felt som ville avgjort noe (alle gir 422, ikke
+stille ignorering), egen `agent_id`/`id`, regelnavnene på et blokkert kall, og
+forseglingen.
+
+**Det som fortsatt står åpent:** det finnes ingen grense på hvor mange
+forespørsler en agent kan sende. 40 kall fyller godkjenningskøen, og den som
+sitter i dashbordet må gå gjennom alle for å finne den ene som betyr noe. Det
+er en tjenestenekt mot MENNESKET, ikke mot appen. Pinnet som
+`xfail(strict=True)`.
+
+## 13. Hva som er testet, og hva som ikke er
 
 Automatisk (`tests/test_agent_gateway.py`, `tests/test_agent_mcp_live.py`,
 `tests/test_agent_scripted_demo.py`): allow, rødt, block, tidsavbrudd, mistet
