@@ -49,6 +49,75 @@ ingen.
 
 Si dette høyt i demoen. Det er mer interessant enn å skjule det.
 
+### 1b. Det låste agentoppsettet: hva det gjør, og hva det ikke gjør
+
+**Endret, men ikke lukket.** `python -m agent_gateway.oppsett` lager nå
+`.claude/settings.json` i agent-mappen, og `python -m agent_gateway.start_agent`
+starter `claude` med de samme listene som flagg. Begge gjør én ting: agenten
+får som standard bare Lonewatch-verktøyene.
+
+Målt mot Claude Code **2.1.241**. Flaggene står i `claude --help` i den
+versjonen - vi bruker ikke flagg vi ikke har sett:
+
+| Flagg | Hva det gjør |
+|---|---|
+| `--tools ""` | tar bort HELE det innebygde verktøysettet |
+| `--allowed-tools mcp__lonewatch__*` | bare de fire Lonewatch-verktøyene |
+| `--disallowed-tools Bash,Edit,Write,…` | nekter de innebygde ved navn i tillegg |
+| `--strict-mcp-config --mcp-config .mcp.json` | bare MCP-tjeneren vi genererte |
+| `--settings .claude/settings.json` | den genererte innstillingsfilen |
+| `--setting-sources project` | dine egne og lokale innstillinger leses ikke |
+| `--permission-mode manual` | ingenting godkjennes automatisk |
+
+De tre første er med vilje overlappende. Fjerner noen én av dem, står de to
+andre igjen.
+
+**Hva som er målt:** at `--tools ""` faktisk virker. Kjørt mot en ekte
+Claude Code-prosess med spørsmålet «list the exact names of every tool you can
+call»; svaret var `NONE`. Og at den genererte innstillingsfilen godtas:
+`claude doctor` i mappen rapporterer ingen «Invalid settings».
+
+**Hva som IKKE er målt, og som du ikke skal påstå:**
+
+- At agenten ikke kan nå Bash på en annen vei. Vi har målt at verktøyet ikke
+  er i settet den får, ikke at det ikke finnes noen vei.
+- At en ekte oppgave faktisk nektes. Det må prøves for hånd, og prosedyren
+  står i `docs/EKTE_AGENT.md`.
+
+**Og dette er det viktigste avsnittet i hele filen:**
+
+> Dette er **klientkonfigurasjon**, ikke en sikkerhetsgrense. En agent som alt
+> kan kjøre kode på maskinen kan slette `.claude/settings.json`, droppe
+> flaggene eller bare starte `claude` selv uten startskriptet. Oppsettet
+> hjelper mot at agenten *velger* en annen vei fordi den er der. Det hjelper
+> ikke mot noen som *vil* rundt.
+
+Det eneste som ville lukket hullet er at all trafikk **tvinges** gjennom
+Lonewatch på nettverksnivå - en innpakning av kjøremiljøet, der det ikke finnes
+noen annen utgang. Det er ikke bygget, og det er ikke en MCP-tjener.
+
+**Hva en bedrift måtte gjort for å bruke dette:** en lokal fil er feil sted.
+Innstillingene måtte vært styrt sentralt (managed policy), slik at den som
+kjører agenten ikke kan endre dem - og de måtte vært kombinert med et
+kjøremiljø uten andre utganger. Claude Code sier selv at sentralt styrte
+innstillinger gjelder uansett hva som står i prosjektmappen; vi kan altså bli
+*strammere* enn en bedrift, aldri løsere.
+
+**Tre ærlige bivirkninger av filen vi skriver:**
+
+1. `.claude/settings.json` gjelder for ALLE Claude Code-økter som startes i
+   mappen - også utvikler-økten din. Sletter du filen, virker startskriptet
+   fortsatt, fordi flaggene sier det samme.
+2. Allow-listen i filen ignoreres i en mappe Claude Code ikke har fått tillit
+   til («this workspace has not been trusted»). Nekt-listen og flaggene virker
+   fortsatt. Det er en av grunnene til at listene står på to steder.
+3. `MultiEdit` står i nekt-listen, men finnes ikke i 2.1.241. Da skriver
+   `claude` «Permission deny rule "MultiEdit" matches no known tool». Advarselen
+   er riktig; vi lar navnet stå for en senere versjon.
+
+Pinnet i `tests/test_agent_laas.py`. Testene der måler at VI sender det riktige
+- ikke at Claude Code gjør det riktige med det. Det siste er en annen prosess.
+
 ## 2. Noe utføres nå - men agenten får ikke vite hva
 
 **Endret.** `ui/state.py` kaller `executor/` når Lonewatch sier grønt, og når et
@@ -197,6 +266,36 @@ sitter i dashbordet må gå gjennom alle for å finne den ene som betyr noe. Det
 er en tjenestenekt mot MENNESKET, ikke mot appen. Pinnet som
 `xfail(strict=True)`.
 
+## 12b. Formsjekk av det agenten sender - og det den ikke fanger
+
+`agent_gateway/validering.py` avviser input som ikke har en form Lonewatch kan
+behandle, FØR det når gateway: tekstfelt over en lengdegrense, kontrolltegn og
+usynlige tegn i `recipient` og `package_name`, ukjente felt, og beløp som er
+negative, ikke endelige eller absurd store.
+
+Hvorfor det finnes: `recipient` vises til et menneske i et rødt kort. Et
+linjeskift i den teksten er det billigste trikset som finnes for å få et kort
+til å se ut som noe annet enn det er, og en tekst på 50 000 tegn er det
+billigste trikset for at mennesket ikke leser kortet i det hele tatt.
+
+Hva det IKKE er:
+
+- **Det er ikke en risikovurdering.** Ingenting her avgjør allow, rødt eller
+  block. Et beløp som slipper formsjekken er fortsatt uvurdert, og gateway
+  eier avgjørelsen alene.
+- **Feilmeldingen nevner ingen regel og ingen grense.** Den sier hvilket felt
+  som ikke holder. Alt annet ville vært en oppskrift.
+- **`summary` sjekkes bare på lengde.** Et linjeskift der slipper gjennom, med
+  vilje: det er agentens egen forklaring, og den kan ha flere setninger. Men
+  det betyr at `summary` er det ene feltet der agenten kan legge inn tekst som
+  ser ut som noe annet i dashbordet. Hvordan den vises er `ui/`-sin sak.
+- **Lengdegrensene er form, ikke risiko.** De står i klartekst i koden. En
+  agent som leser filen lærer ingenting om hva som blir stoppet.
+
+Pinnet i `tests/test_agent_laas_input.py`: 43 tester, der 30 måler at noe skal
+avvises UTEN at det sendes, og resten at vanlig input slipper gjennom
+(inkludert æøå i en e-postadresse, 0 kroner, øre og nøyaktig maks lengde).
+
 ## 13. `lonewatch_read_document` sier ikke HVILKET dokument det var
 
 Verktøyet tar et dokumentnavn, men navnet legges i `recipient` - det finnes
@@ -226,6 +325,15 @@ eller kall som godkjenner noe, at loggen og loggsjekken stemmer, at reserven
 gir samme svar hver gang og ikke åpner en socket - og hele veien gjennom en
 ekte MCP-klient mot `python -m agent_gateway` mot den kjørende appen.
 
+Det låste oppsettet (`tests/test_agent_laas.py`): at tillat- og nekt-listene
+står i den genererte filen, at filen er gitignorert, ikke sjekket inn og får
+0600, at ingen nøkkel står i den, at startskriptet bygger den kommandolinjen vi
+tror, at `--vis` ikke starter noe, og at meldingen sier hva som IKKE er låst.
+
+Formsjekken (`tests/test_agent_laas_input.py`): se punkt 12b.
+
 **Ikke testet automatisk:** Claude Code selv. En ekte agent velger når og
 hvordan den kaller verktøyene, og kan velge å ikke kalle dem i det hele tatt
-(se punkt 1). Det må prøves for hånd - se `docs/EKTE_AGENT.md`.
+(se punkt 1). At det låste oppsettet faktisk nekter en Bash-kommando er også
+en annen prosess enn testene våre. Begge må prøves for hånd - prosedyren står i
+`docs/EKTE_AGENT.md` under «Manuell test: virker låsen?».

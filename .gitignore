@@ -21,3 +21,9 @@ lonewatch_pseudonyms.enc
 # er en .eml med mottaker, emne og saksnummer i. De hoerer ikke i git: de er
 # resultatet av en demokjoring, og de kan inneholde det den som demoet skrev.
 maildrop/
+
+# Det laaste agentoppsettet. Lages av `python -m agent_gateway.oppsett`, og
+# brukes av `python -m agent_gateway.start_agent`. Ingen noekkel staar i det,
+# men det er maskinspesifikt (absolutte stier) og gjelder for ALLE Claude
+# Code-oekter som startes i denne mappen. Se agent_gateway/laas.py.
+.claude/settings.json

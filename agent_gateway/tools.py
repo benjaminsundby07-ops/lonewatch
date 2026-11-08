@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 
+from agent_gateway import validering
 from agent_gateway.client import LonewatchClient, LonewatchRefused, LonewatchUnavailable
 
 # Handlingstypene i contracts.py som har et verktøy her. Vi legger ikke til
@@ -134,6 +135,7 @@ def run_action(
     poll_seconds: float = 2.0,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
+    **ukjente_felt: Any,
 ) -> str:
     """Hele veien for ett verktøykall, og teksten agenten får tilbake.
 
@@ -144,13 +146,31 @@ def run_action(
     if spec is None:  # pragma: no cover - server.py registrerer bare kjente navn
         return f"Ukjent verktøy: {tool_name}."
 
+    # Formsjekk FØR noe sendes. Her avgjøres ingenting om risiko - det gjør
+    # gateway/ alene. Her kastes bare input som ikke har en form Lonewatch kan
+    # behandle. Se agent_gateway/validering.py.
+    try:
+        felt = validering.sjekk_input(
+            summary=summary,
+            amount=amount,
+            recipient=recipient,
+            package_name=package_name,
+            contains_personal_data=contains_personal_data,
+            extra=ukjente_felt,
+        )
+    except validering.UgyldigInput as exc:
+        return (
+            f"Lonewatch tok ikke imot forespørselen: {exc} "
+            "Ingenting ble utført, og kallet ble ikke vurdert."
+        )
+
     payload = {
         "action_type": spec.action_type,
-        "summary": (summary or "").strip(),
-        "amount": format_amount(amount),
-        "recipient": (recipient or "").strip(),
-        "package_name": (package_name or "").strip(),
-        "contains_personal_data": bool(contains_personal_data),
+        "summary": felt["summary"],
+        "amount": format_amount(felt["amount"]),
+        "recipient": felt["recipient"],
+        "package_name": felt["package_name"],
+        "contains_personal_data": felt["contains_personal_data"],
     }
 
     try:
