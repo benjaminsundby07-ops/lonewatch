@@ -11,6 +11,7 @@ from contracts import ActionRequest, ActionType, SandboxReport
 
 from . import config
 from .money import format_ore, to_ore
+from .rules import no_usable_transfer_amount
 
 UNKNOWN_ACCOUNT = "ukjent konto"
 UNKNOWN_RECIPIENT = "ukjent mottaker"
@@ -34,6 +35,18 @@ DESTRUCTIVE_READ_NOTE = (
 INCOMPLETE_NOTE = (
     "Lonewatch klarte ikke å vurdere denne forespørselen, så den går til et "
     "menneske i stedet for å gå gjennom."
+)
+
+# En utbetaling uten et beloep vi kan vurdere. Mennesket skal faa vite hva som
+# mangler, ikke bare at "noe" manglet - og at ingen beloepsgrense er sjekket,
+# for det er ingenting aa sjekke mot.
+MISSING_TRANSFER_AMOUNT_NOTE = (
+    "Beløpet mangler, så ingen beløpsgrense er sjekket. En utbetaling uten "
+    "beløp går aldri gjennom av seg selv."
+)
+ZERO_TRANSFER_AMOUNT_NOTE = (
+    "Beløpet er oppgitt som 0 kr. Det er ingen utbetaling, så Lonewatch vet "
+    "ikke hva forespørselen gjelder."
 )
 
 # Sandkassen. Teksten sier hva vi SAA, aldri at noe er trygt.
@@ -199,7 +212,16 @@ def build_consequence_text(
         )
 
     if "incomplete_request" in reasons:
-        parts.append(INCOMPLETE_NOTE)
+        # Manglet det BELOEP paa en utbetaling, sier vi det rett ut. Den
+        # generelle setningen ("vi klarte ikke aa vurdere") er sann, men et
+        # menneske som skal svare paa kortet trenger aa vite hva som mangler.
+        if no_usable_transfer_amount(req):
+            parts.append(
+                ZERO_TRANSFER_AMOUNT_NOTE if req.amount is not None
+                else MISSING_TRANSFER_AMOUNT_NOTE
+            )
+        else:
+            parts.append(INCOMPLETE_NOTE)
 
     if "package_on_blocklist" in reasons:
         parts.append("Tillegget står på blokklisten.")

@@ -69,6 +69,9 @@ Designet kom fra `design-handoff/`. Filene dashbordet trenger for å kjøre ligg
 Åtte risikoregler gir poeng (`gateway/config.py`): `amount_over_limit` (2),
 `recipient_total_over_limit` (2), `unknown_recipient` (2), `personal_data_external` (3),
 `new_package` (2), `destructive_change` (2), `incomplete_request` (2), `irreversible` (1).
+`personal_data_external` gjelder `send_email` og `share_data`, ikke pengeoverføringer: på en
+utbetaling sier `contains_personal_data` bare at posten gjelder en person, og navn og konto må stå
+der for at pengene skal finne fram. Beløpsreglene holder utbetalingene i tømme.
 `destructive_change` fanger at noe slettes eller overskrives på en handling som ellers er
 harmløs — en «lesing» som ikke kan angres er ikke bare lesing.
 `incomplete_request` er fail-closed: alt reglene ikke klarer å vurdere går til et menneske
@@ -78,7 +81,8 @@ kan godkjenne det: `package_on_blocklist` og `transfer_over_hard_limit`. I tille
 Før-steget.
 
 Grensene er 50 000 kr (inklusiv — rødt fra og med dette beløpet) og 50 000 000 kr (eksklusiv — blokk over
-dette). Tallene er satt for å få en god demo, ikke ut fra en risikoanalyse.
+dette). Tallene er satt for å få en god demo, ikke ut fra en risikoanalyse, og de hører hjemme i
+`gateway/config.py` nettopp fordi en bedrift må kunne sette sine egne.
 
 Til hver avgjørelse lages en `consequence_text` på norsk av maler og felt — aldri av en AI-modell, aldri av
 `summary`: «Overfører 10 000 000 kr til ukjent konto. Kan ikke angres.» For røde pengeoverføringer settes
@@ -111,7 +115,8 @@ To felt settes av Lonewatch, ikke av den som skriver:
 
 `contains_personal_data` er derimot en avkrysning, fordi flagget er *monotont*:
 `personal_data_external` kan bare legge til risiko, aldri trekke fra. Man kan
-gjøre sin egen forespørsel rødere, ikke grønnere.
+gjøre sin egen forespørsel rødere, ikke grønnere. På en pengeoverføring gjør
+avkrysningen ingenting i det hele tatt — regelen gjelder bare e-post og deling.
 
 Et pakkenavn fra skjemaet kan aldri føre til at noe kjøres: `sandbox.scan` slår
 navnet opp blant filene i `sandbox/packages/`, og et navn som ikke ligger der
@@ -181,10 +186,14 @@ python run_demo.py
 ```
 
 Spiller de 40 demoforespørslene gjennom mellomstasjonen og skriver avgjørelse, regler og konsekvenstekst for
-hver. Med nøklene satt gir den 32 `allow`, 7 `red` og 1 `block`, og til slutt «Sjekk av logg: OK, ingen
-linjer er endret.» pluss de tolv første tegnene av siste hash. På en fersk logg blir det 89 linjer
-(40 forespørsler, 40 avgjørelser, 7 menneskesvar,
+hver. Med nøklene satt gir den 33 `allow`, 6 `red` og 1 `block`, og til slutt «Sjekk av logg: OK, ingen
+linjer er endret.» pluss de tolv første tegnene av siste hash. På en fersk logg blir det 88 linjer
+(40 forespørsler, 40 avgjørelser, 6 menneskesvar,
 2 sandkasserapporter); loggen bare vokser, så kjører du på nytt mot samme fil, blir den lengre.
+
+Tallene var 32/7/1 og 89 linjer til `personal_data_external` sluttet å gjelde pengeoverføringer.
+`req_0021` — egenandelsrefusjon på 4 000 kr til kundens registrerte konto — er nå `allow`, og da
+forsvinner også menneskesvaret den utløste. Hvorfor står i `gateway/LIMITS.md`.
 
 Det røde menneskesvaret er midlertidig hardkodet til *avvis* i terminaldemoen. Skal du svare selv, bruk
 nettsiden.

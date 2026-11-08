@@ -67,6 +67,13 @@ INTERNAL_DOMAINS: frozenset[str] = frozenset(
 
 # Mottakere som ikke er adresser i det hele tatt, men interne ressurser.
 # "kalender:drift-felles" er en delt kalender inne i huset.
+#
+# Prefikset teller BARE paa handlinger som ikke staar i OUTBOUND_ACTIONS.
+# Grunnen: et prefiks er ni tegn i et fritekstfelt agenten fyller ut selv, og
+# stiller ingen betingelse ut over seg selv - i motsetning til et domene, som
+# maa staa paa INTERNAL_DOMAINS. Gjaldt prefikset ogsaa utgaaende handlinger,
+# var `share_data` med persondata og `recipient="kalender:drift-felles"` en
+# gratis omvei rundt `personal_data_external`. Se gateway/LIMITS.md.
 INTERNAL_PREFIXES: tuple[str, ...] = ("kalender:",)
 
 # Handlinger som sender noe ut av huset. Bare disse kan ha en "mottaker" som betyr noe.
@@ -74,6 +81,28 @@ OUTBOUND_ACTIONS: frozenset[ActionType] = frozenset(
     {
         ActionType.SEND_EMAIL,
         ActionType.TRANSFER_MONEY,
+        ActionType.SHARE_DATA,
+    }
+)
+
+# Handlinger der `contains_personal_data` betyr at opplysninger UTLEVERES.
+#
+# `transfer_money` staar med vilje IKKE her. Paa en utbetaling sier feltet bare
+# at posten gjelder en person - navn og konto maa jo staa der for at pengene
+# skal finne fram. Ingen opplysninger blir utlevert til noen som ikke alt har
+# dem: mottakeren er den som skal ha pengene. Paa en e-post eller en deling er
+# det motsatt - der ER innholdet opplysningene, og det forlater huset.
+#
+# Maalt foer skillet ble innfoert: to falske alarmer over tre blindsett
+# (`blind2_013`, `blind3_008`), begge smaa refusjoner til kundens registrerte
+# konto, og null farlige saker som slapp gjennom. Se docs/MALING.md.
+#
+# Valget om persondata til en ekstern mottaker staar uendret for de to
+# handlingene som faktisk utleverer noe: de blir alltid roede, ogsaa naar
+# mottakeren er kunden selv.
+PERSONAL_DATA_RELEVANT_ACTIONS: frozenset[ActionType] = frozenset(
+    {
+        ActionType.SEND_EMAIL,
         ActionType.SHARE_DATA,
     }
 )

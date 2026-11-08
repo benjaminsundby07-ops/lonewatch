@@ -36,7 +36,7 @@ Pek på kolonnen til høyre: **Går gjennom**. Der ligger kalenderoppdateringer,
 kjente mottakere, med agentnavn — Kundeservice, Innkjøp, Økonomi, HR, IT-hjelp — og agentens egen
 forklaring. Telleren ved siden av overskriften vokser mens du snakker.
 
-Si: *av de 40 forespørslene i demodataene går 32 gjennom uten å forstyrre et menneske. Det er poenget. En
+Si: *av de 40 forespørslene i demodataene går 33 gjennom uten å forstyrre et menneske. Det er poenget. En
 mellomstasjon som lyser rødt hele tiden blir slått av.*
 
 Pek så på overskriften til venstre: **Trenger et menneske**. Den er null eller nesten null nå.
@@ -216,7 +216,8 @@ Alle tre står utfyllende i `gateway/LIMITS.md`, `vault/LIMITS.md` og `sandbox/L
 python run_demo.py
 ```
 
-Skriver alle 40 forespørslene med avgjørelse, regler og konsekvenstekst (32 `allow`, 7 `red`, 1 `block`),
+Skriver alle 40 forespørslene med avgjørelse, regler og konsekvenstekst (33 `allow`, 6 `red`, 1 `block`
+— var 32/7/1 før `personal_data_external` sluttet å gjelde pengeoverføringer, se `gateway/LIMITS.md`),
 og avslutter med antall logglinjer
 og «Sjekk av logg: OK, ingen linjer er endret.» Menneskesvaret er hardkodet til *avvis* i denne varianten,
 så det går ikke å vise beløpsporten her.

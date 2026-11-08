@@ -63,8 +63,6 @@ def test_persondata_til_intern_mottaker_slipper_fortsatt_gjennom():
         ("nyansatt@nordlysforsikring.no", True),
         ("LEDERE@NordlysForsikring.NO", True),
         ("artifactory.nordlys.no", True),
-        ("kalender:drift-felles", True),
-        ("kalender:alle-ansatte", True),
         # Fellene i blindsettet: like nok til aa lure et oeye, ikke en regel.
         ("kunde@nordlysforsikringe.no", False),
         ("takst.nordlys@protonmail.com", False),
@@ -73,6 +71,9 @@ def test_persondata_til_intern_mottaker_slipper_fortsatt_gjennom():
         ("post@bilskadesenteret-as.no", False),
         ("", False),
         (None, False),
+        # Prefikset teller ikke paa en handling som sender noe ut av huset.
+        ("kalender:drift-felles", False),
+        ("kalender:alle-ansatte", False),
     ],
 )
 def test_intern_mottaker_er_eksakt_domene_ikke_delstreng(mottaker, intern):
@@ -81,6 +82,21 @@ def test_intern_mottaker_er_eksakt_domene_ikke_delstreng(mottaker, intern):
         summary="", recipient=mottaker,
     )
     assert rules.internal_recipient(req) is intern
+
+
+@pytest.mark.parametrize("mottaker", ["kalender:drift-felles", "kalender:alle-ansatte"])
+def test_en_delt_kalender_er_intern_der_ingenting_sendes_ut(mottaker):
+    """Prefikset betyr fortsatt "intern ressurs" - men bare paa en kalender.
+
+    Paa en `send_email` eller en `share_data` var det en gratis omvei rundt
+    `personal_data_external`: ni tegn i et fritekstfelt agenten fyller ut selv.
+    Se "Et prinsipp som ikke kan brytes" i gateway/LIMITS.md.
+    """
+    req = ActionRequest(
+        id="x", ts=TS, agent_id="a", action_type=ActionType.UPDATE_CALENDAR,
+        summary="", recipient=mottaker,
+    )
+    assert rules.internal_recipient(req) is True
 
 
 def test_persondata_til_ukjent_mottaker_er_fortsatt_roedt():

@@ -317,7 +317,13 @@ def test_amount_just_under_limit_does_not_trigger():
 
 
 def test_unknown_recipient_without_amount_is_still_red():
-    """Ukjent mottaker uten beløp: ingen beløpsregel, men fortsatt rødt."""
+    """Ukjent mottaker uten beløp: ingen beløpsregel, men fortsatt rødt.
+
+    Testen sa foer `reasons == ["unknown_recipient"]`. Naa staar
+    `incomplete_request` der ogsaa: en utbetaling uten beloep er noe vi ikke
+    kan vurdere, og den gikk rett gjennom naar mottakeren var "kjent". Se
+    `rules.no_usable_transfer_amount`.
+    """
     d = evaluate(
         make_request(
             action_type=ActionType.TRANSFER_MONEY,
@@ -325,7 +331,7 @@ def test_unknown_recipient_without_amount_is_still_red():
             recipient_known=False,
         )
     )
-    assert d.reasons == ["unknown_recipient"]
+    assert d.reasons == ["unknown_recipient", "incomplete_request"]
     assert d.verdict is Verdict.RED
     assert "ukjent beløp" in d.consequence_text
 
@@ -352,6 +358,12 @@ def test_install_package_without_a_name_is_treated_as_new():
 
 
 def test_amount_zero_does_not_trigger_the_amount_rule():
+    """Beloepsregelen slaar fortsatt ikke til paa 0 kr - men noe annet gjoer.
+
+    Testen sa foer `allow`. 0 kr er ingen utbetaling, og da vet vi ikke hva
+    forespoerselen gjelder: `incomplete_request` tar den. Beloepsgrensen er
+    fortsatt ikke rort, og det er hele poenget med navnet paa testen.
+    """
     d = evaluate(
         make_request(
             action_type=ActionType.TRANSFER_MONEY,
@@ -360,8 +372,10 @@ def test_amount_zero_does_not_trigger_the_amount_rule():
             recipient_known=True,
         )
     )
-    assert d.reasons == []
-    assert d.verdict is Verdict.ALLOW
+    assert "amount_over_limit" not in d.reasons
+    assert d.reasons == ["incomplete_request"]
+    assert d.verdict is Verdict.RED
+    assert "0 kr" in d.consequence_text
 
 
 def test_an_outbound_action_without_a_recipient_goes_to_a_human():

@@ -99,13 +99,25 @@ def internal_recipient(req: ActionRequest) -> bool:
     ligger hos protonmail. En delstreng-sjekk ville sluppet begge rett inn.
 
     Mangler mottakeren, er svaret nei: vi gjetter aldri at noe er internt.
+
+    Prefikslisten (`kalender:`) teller BARE paa handlinger som ikke sender noe
+    ut av huset. Den sto foer for alle handlinger, og da var den en gratis
+    omvei: `share_data` med persondata og `recipient="kalender:drift-felles"`
+    ble `allow`, fordi det er nok aa skrive de ni tegnene i et fritekstfelt
+    agenten fyller ut selv. Et domene maa staa paa `INTERNAL_DOMAINS` for aa
+    telle; et prefiks stilte ingen slik betingelse. Null treff i de tre
+    blindsettene, i demoen og i den syntetiske mengden - alle `kalender:`-
+    mottakere der er `update_calendar`, og den utleverer ingenting.
+    Se "Et prinsipp som ikke kan brytes" i gateway/LIMITS.md.
     """
     recipient = (req.recipient or "").strip()
     if not recipient:
         return False
 
     lowered = recipient.lower()
-    if any(lowered.startswith(prefix) for prefix in config.INTERNAL_PREFIXES):
+    if req.action_type not in config.OUTBOUND_ACTIONS and any(
+        lowered.startswith(prefix) for prefix in config.INTERNAL_PREFIXES
+    ):
         return True
 
     host = _recipient_host(recipient)
@@ -131,8 +143,21 @@ def personal_data_external(req: ActionRequest) -> bool:
 
     Regelen ser ikke HVOR MANGE personer en utsending gjelder. Én bekreftelse
     til én kunde og en liste over 8400 veier likt. Se gateway/LIMITS.md.
+
+    Den gjelder bare de handlingene der feltet betyr at opplysninger
+    UTLEVERES: `send_email` og `share_data`. Paa en `transfer_money` sier
+    `contains_personal_data` noe annet - at utbetalingsposten gjelder en
+    person. Navn og konto maa staa der for at pengene skal finne fram, og
+    mottakeren er den som skal ha dem. Ingenting utleveres til noen som ikke
+    alt har det. Lista staar i `config.PERSONAL_DATA_RELEVANT_ACTIONS`, med
+    maalingen som ligger bak.
+
+    Et beloep er fortsatt et beloep: en utbetaling blir roed av
+    `amount_over_limit`, `recipient_total_over_limit` eller
+    `unknown_recipient` som foer. Denne regelen er ikke det som holder
+    pengeutbetalinger i tomme.
     """
-    if req.action_type not in config.OUTBOUND_ACTIONS:
+    if req.action_type not in config.PERSONAL_DATA_RELEVANT_ACTIONS:
         return False
     if not req.contains_personal_data:
         return False
@@ -277,6 +302,40 @@ def destructive_change(req: ActionRequest) -> bool:
     return not req.reversible
 
 
+def no_usable_transfer_amount(req: ActionRequest) -> bool:
+    """Utbetalingen har ikke noe beløp vi kan vurdere.
+
+    Gjelder bare `transfer_money`. Tre tilfeller:
+
+    - `amount` mangler (`None`). Da svarer alle tre beløpsreglene False, fordi
+      de trenger et tall aa sammenligne med.
+    - `amount` er null. Null kroner er ingen utbetaling, og vi vet ikke hva
+      forespoerselen egentlig gjelder.
+    - `amount` er negativt. `contracts.py` avviser det i dag (`ge=0`), saa
+      dette er en reserve: endrer den filen seg, skal regelen allerede staa.
+
+    Et beløp vi ikke kan LESE (`inf`, eller absurd stort) er noe annet og
+    staar med vilje utenfor: det regnes som over enhver grense av
+    `amount_over_limit` og `transfer_over_hard_limit`, og blir blokkert. Se F2
+    i docs/REDTEAM.md. Aa ta det med her ville lagt en ekstra grunn paa noe som
+    alt er stoppet, uten aa fange noe nytt.
+
+    Regelen ser BARE om feltet finnes og er et tall vi kan utbetale. Den spoer
+    aldri `recipient_known`, `reversible` eller `summary`: en agent skal ikke
+    kunne fylle ut et felt og dermed slippe unna. Se "Et prinsipp som ikke kan
+    brytes" i gateway/LIMITS.md.
+    """
+    if req.action_type is not ActionType.TRANSFER_MONEY:
+        return False
+    if req.amount is None:
+        return True
+    ore = to_ore(req.amount)
+    if ore is None:
+        # Uleselig, ikke manglende. Fanget av beloepsreglene over.
+        return False
+    return ore <= 0
+
+
 def incomplete_request(req: ActionRequest) -> bool:
     """Forespørselen mangler noe vi trenger for å kunne vurdere den.
 
@@ -291,10 +350,20 @@ def incomplete_request(req: ActionRequest) -> bool:
       slo ingen regel til i det hele tatt.
     - tom `agent_id` eller `id`. Vi vet ikke hvem som spør, eller hva vi skal
       kalle svaret.
+    - en utbetaling uten beløp vi kan vurdere. Se
+      `no_usable_transfer_amount`. Dette er den fjerde, og den ble lagt til
+      etterpå: regelen krevde MOTTAKER på en utgående handling, men ikke BELØP
+      på en utbetaling, og da gikk `transfer_money` med `amount=None` og en
+      kjent konto rett gjennom med `reasons == []`.
 
-    Målt før den ble innført: null treff i demoen, i begge blindsettene og i de
-    syntetiske testene. Den slår bare til på noe ingen har laget ennå, og det
-    er meningen med en slik regel.
+    Alle fire ser bare om noe MANGLER eller er ugyldig. Ingen av dem spør om et
+    felt agenten har fylt ut med en påstand, så regelen kan bare stramme inn.
+
+    Målt før de tre første ble innført: null treff i demoen, i begge
+    blindsettene og i de syntetiske testene. Den fjerde er målt for seg og gir
+    også null treff i de tre blindsettene, i demoen og i de syntetiske
+    testene — den slår bare til på noe ingen har laget ennå, og det er
+    meningen med en slik regel. Se docs/MALING.md.
     """
     if req.action_type not in config.COVERED_ACTIONS:
         return True
@@ -303,6 +372,8 @@ def incomplete_request(req: ActionRequest) -> bool:
     if not (req.id or "").strip():
         return True
     if req.action_type in config.OUTBOUND_ACTIONS and not (req.recipient or "").strip():
+        return True
+    if no_usable_transfer_amount(req):
         return True
     return False
 
