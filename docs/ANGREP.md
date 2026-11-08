@@ -498,7 +498,8 @@ tre angrepsfilene for angrep 3, 6 og 7. Alt under står igjen, med eier:
 3. **H14/H15/H17/H19 er alt ærlig dokumentert** i `gateway/LIMITS.md`. Ikke fiks
    dem før pitchen; les dem opp. De er prosjektets sterkeste kort i ærlighet og
    dets svakeste i teknikk, og begge deler bør sies i samme setning.
-4. **H11–H13: si det høyt.** Fellene er en demo-kulisse, ikke en detektor. Det
+4. ~~**H11–H13: si det høyt.**~~ **Lukket i runde 4** med en innholdsskanner (`agents/doc_scan.py`). Teksten under er fra før det og gjelder ikke lenger, men skanneren er ikke bevis for at alt oppdages: den gjenkjenner 15 kjente skjulemekanismer. Gammel tekst:
+   **H11–H13: si det høyt.** Fellene er en demo-kulisse, ikke en detektor. Det
    er helt greit i en hackathon — men da må pitchen si «vi viser hva en felle
    er», ikke «vi oppdager feller».
 5. **H8 og H9 er de neste i `gateway/`,** men begge er nye regler og må måles mot

@@ -273,3 +273,20 @@ Da runde to ble skrevet mot `samlet2`, viste hele suiten 6 failed i `tests/attac
 De var ikke fra runde to. Etter sammenslaaingen (`samlet3`) er alle rettet i
 `herd-gw` og `herd-ui`, og hele suiten er groenn: `1364 passed, 47 xfailed`.
 `tests/attack2/` kjoerer for seg med `51 passed, 13 xfailed`.
+
+## Runde 5: oversiktssiden (F2)
+
+Ny visning (`/api/overview`) ga én lekkasje, og live-siden for agenten hadde en feil. Begge ble funnet
+og lukket før levering.
+
+| | funn | status |
+|---|---|---|
+| F2-1 | `GET /api/overview` uten nøkkel viste mottaker i klartekst, regelnavn og konsekvenstekst | **LUKKET.** `minimized_overview()` gir bare tellere, status og maskert mottaker uten menneskenøkkel. Testet i `tests/test_overview_locked.py` (11 tester) |
+| F2-2 | Live-siden for agenten hentet `/api/state` uten menneskenøkkelen og fikk det minimerte svaret. En side som var låst opp falt tilbake til «Låst side» hvert andre sekund | **LUKKET.** Bruker nå samme hjelpefunksjon som resten av appen, som sender nøkkelen. Det var en feil, ikke en lekkasje |
+
+Sjekket for hånd mot et kjørende UI: uten nøkkel og med agentnøkkel gir alle seks skriveruter 403, og uten
+nøkkel finnes verken kontonummer, regelnavn, dokument-id eller konsekvenstekst i svaret.
+
+Åpne, kjente feil: `GET /api/trail/{id}` er fortsatt ikke delt i to nivåer (se over). Én test feiler i
+Python 3.13 (H28, `RecursionError` på dypt nøstet JSON). Menneskenøkkelen ligger fortsatt på maskinen.
+
