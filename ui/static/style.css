@@ -24,8 +24,14 @@ body { font-family: var(--font-sans); }
 
 /* ---------- skallet ---------- */
 
+/* Hoeyden er et tak, ikke bare et gulv. `min-height` alene lot siden vokse
+   forbi skjermkanten saa snart en fane fikk nok innhold - og da ruller SIDEN,
+   som er nettopp det vi ikke vil ha paa en projektor. Naa er skallet noeyaktig
+   skjermhoeyden, og det som er for stort ruller innvendig i sin egen blokk.
+   Se «Hoeyde» nederst i filen og punkt 9 i ui/LIMITS.md. */
 .app-backdrop {
   min-height: 100vh;
+  height: 100vh;
   padding: var(--space-4);
 }
 
@@ -36,15 +42,24 @@ body { font-family: var(--font-sans); }
 .app-shell {
   max-width: 1760px;
   margin: 0 auto;
-  min-height: calc(100vh - var(--space-4) * 2);
+  height: 100%;
+  min-height: 0;
   grid-template-columns: 196px 1fr;
 }
 
+/* Kolonne i stedet for rutenett, fordi den aktive fanen skal faa resten av
+   hoeyden og ingenting annet skal strekke seg. Toppraden, bannerne, hendelsen
+   og bunnteksten beholder hoeyden sin; `.app-view` tar det som er igjen. */
 .app-main {
   padding: var(--space-4) var(--space-5) var(--space-4);
   gap: var(--space-3);
-  align-content: start;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
+
+.app-main > * { flex: none; }
+.app-main > .app-view { flex: 1 1 auto; min-height: 0; overflow: auto; }
 
 /* ---------- sidemeny ---------- */
 
@@ -206,7 +221,10 @@ body { font-family: var(--font-sans); }
   grid-template-columns: minmax(0, 1fr) 360px;
   align-items: start;
 }
-.app-cols-custom { grid-template-columns: minmax(0, 560px) minmax(0, 1fr); }
+/* 640 og ikke 560: paa 560 brot de tre hjelpetekstene i skjemaet til en
+   linje ekstra hver, og nettopp de linjene gjorde fanen 24 px for hoey.
+   Bredden er den eneste endringen - skrift, luft og farger er de samme. */
+.app-cols-custom { grid-template-columns: minmax(0, 640px) minmax(0, 1fr); }
 .app-col-main { min-width: 0; }
 .app-col-side { display: grid; gap: var(--space-4); align-content: start; }
 
@@ -351,7 +369,7 @@ body { font-family: var(--font-sans); }
 
 /* ---------- rolige lister ---------- */
 
-.app-quiet-list { display: grid; gap: var(--space-2); max-height: 340px; overflow-y: auto; }
+.app-quiet-list { display: grid; gap: var(--space-2); overflow-y: auto; }
 .app-quiet-row {
   display: grid;
   gap: 2px;
@@ -571,7 +589,7 @@ body { font-family: var(--font-sans); }
 .app-col-list { display: grid; gap: var(--space-4); align-content: start; }
 .app-panel-list { padding-bottom: var(--space-3); }
 
-.app-list { display: grid; gap: var(--space-2); max-height: calc(100vh - 340px); overflow-y: auto; }
+.app-list { display: grid; gap: var(--space-2); overflow-y: auto; }
 .app-item {
   display: grid; gap: 3px; text-align: left; width: 100%;
   padding: var(--space-3); border: 1px solid var(--line); border-left: 3px solid var(--line);
@@ -685,11 +703,11 @@ body { font-family: var(--font-sans); }
 .app-filter-n { font-family: ui-monospace, monospace; font-size: 11px; color: var(--ink-faint); }
 .app-filter-btn.is-on .app-filter-n { color: var(--ink-muted); }
 
-/* Loggtabellen rullet alt innvendig. Hoeyden er senket fra 520 til 200 px for
- * aa gi plass til «Bryt loggen» under «Sjekk loggen», slik at hele Etter-fanen
- * fortsatt staar innenfor 1440x900 uten at SIDEN ruller. 300 px er omtrent
- * aatte rader - nok til aa se at loggen er en logg, og tabellen ruller videre. */
-.app-table-wrap { overflow-x: auto; max-height: 200px; overflow-y: auto; }
+/* Loggtabellen ruller innvendig. Hvor hoey den faar lov til aa bli avgjoeres
+ * av skjermen og ikke av et tall her: paa en hoey skjerm deler den og
+ * «Oppfoelging» det Etter-fanen har til overs (se «Hoeyde» nederst), og paa en
+ * liten skjerm gjelder det faste taket i reserveløsningen. */
+.app-table-wrap { overflow-x: auto; overflow-y: auto; }
 .app-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .app-table thead th {
   position: sticky; top: 0; z-index: 1; text-align: left; white-space: nowrap;
@@ -782,7 +800,6 @@ body { font-family: var(--font-sans); }
 }
 @media (max-width: 1240px) {
   .app-cols-split, .app-block-two, .app-dash-top, .app-dash-bottom { grid-template-columns: minmax(0, 1fr); }
-  .app-list { max-height: 300px; }
 }
 
 /* Kortet fyller kolonnen (det er den visuelle vekten på forsiden), men
@@ -1313,10 +1330,10 @@ body { font-family: var(--font-sans); }
   margin: var(--space-3) 0 0; font-size: 12.5px; color: var(--ink-muted); line-height: 20px;
 }
 
-/* Oppfoelging ruller innvendig, av samme grunn som loggtabellen og
- * resultatet over: hele Etter-fanen skal staa innenfor 1440x900 uten at
- * SIDEN ruller, naa som «Bryt loggen» ogsaa bor her. */
-.app-after { max-height: 96px; overflow-y: auto; }
+/* Oppfoelging ruller innvendig, av samme grunn som loggtabellen og resultatet
+ * over: hele Etter-fanen skal staa innenfor skjermen uten at SIDEN ruller, naa
+ * som «Bryt loggen» ogsaa bor her. Hoeyden deles med loggtabellen. */
+.app-after { overflow-y: auto; }
 
 /* Litt strammere luft i «Bryt loggen» enn i de andre panelene. Grunnen er
  * den samme som for hoeydene over: Etter-fanen har naa fire seksjoner i
@@ -1324,3 +1341,75 @@ body { font-family: var(--font-sans); }
 .app-tamper { padding-top: var(--space-4); padding-bottom: var(--space-4); }
 .app-tamper .lw-panel-head { margin-bottom: var(--space-3); }
 .app-tamper .lw-panel-sub { font-size: 12px; line-height: 17px; }
+
+/* ===========================================================================
+   Hoeyde
+   ---------------------------------------------------------------------------
+   Regelen er én: SIDEN skal aldri rulle. Skallet er noeyaktig skjermhoeyden,
+   den aktive fanen faar resten av den, og det som ikke faar plass ruller
+   innvendig i blokken det hoerer hjemme i - ikke ved aa dra hele siden med
+   seg.
+
+   Foer dette stod hoeydene som faste tall: `calc(100vh - 340px)` paa koeen,
+   340 px paa «Gaar gjennom», 200 px paa loggtabellen, 96 px paa
+   «Oppfoelging». Faste tall traff én skjerm og én tilstand. Med hele
+   stroemmen kjoert (6 roede, 33 rolige) ble Godkjenning 1388 px og Etter
+   974 px paa 1440x900 - begge langt utenfor. Naa deler blokkene hoeyden de
+   faktisk har, og 1920x1080 gir mer plass enn 1440x900 i stedet for det
+   samme.
+
+   Under 1241 px bredde eller 700 px hoeyde gjelder faste tak i stedet, og da
+   ruller fanen innvendig: der er kolonnene stablet, og det finnes ingen
+   projektor aa staa paa.
+   ======================================================================== */
+
+@media (min-width: 1241px) and (min-height: 700px) {
+
+  /* Fanen er en kolonne: det som staar over rutenettet (menneskenoekkelen,
+     feilmeldinger) beholder hoeyden sin, og rutenettet faar resten. */
+  .app-view { display: flex; flex-direction: column; min-height: 0; }
+  .app-view > * { flex: none; min-height: 0; }
+  .app-view > .app-cols { flex: 1 1 auto; }
+
+  /* -- Oversikt: oeverste rad staar, nederste gir fra seg plass --------- */
+  /* Mens «Spill av hendelsen» gaar, tar baandet 93 px fra toppen. Tallene og
+     det roede kortet i oeverste rad er det hendelsen handler om og roeres
+     ikke; agenttabellen og loggstripen under ruller innvendig i stedet. */
+  #tab-overview > #dashboard-root { flex: 1 1 auto; min-height: 0; }
+  .app-dash { height: 100%; min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
+  .app-dash-bottom { min-height: 0; align-items: stretch; }
+  .app-dash-bottom > * { min-height: 0; overflow-y: auto; }
+
+  /* -- Godkjenning og Foer: koeen til venstre, én sak til hoeyre -------- */
+  .app-cols-split > * { min-height: 0; }
+  .app-detail { max-height: 100%; overflow-y: auto; }
+
+  /* Koeen er det viktigste, og faar to tredeler. «Gaar gjennom» er bevis paa
+     at det meste gaar stille gjennom - den trenger aa vise noen rader, ikke
+     alle 33. */
+  #tab-queue .app-col-list { max-height: 100%; grid-template-rows: minmax(0, 2fr) minmax(0, 1fr); }
+  #tab-before .app-col-list { max-height: 100%; grid-template-rows: minmax(0, 1fr); }
+  .app-col-list > .lw-panel { min-height: 0; display: flex; flex-direction: column; }
+  .app-list, .app-quiet-list { flex: 1 1 auto; min-height: 0; }
+
+  /* -- Etter: fire seksjoner, og de to listene deler det som blir til overs */
+  #tab-after > .app-log-panel { flex: 2 1 0; max-height: max-content; }
+  #tab-after > .app-follow-panel { flex: 1 1 0; max-height: max-content; }
+  .app-log-panel, .app-follow-panel { min-height: 0; display: flex; flex-direction: column; }
+  #log-table { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  .app-table-wrap { flex: 1 1 auto; min-height: 0; }
+  .app-after { flex: 1 1 auto; min-height: 0; }
+
+  /* -- Proev selv: skjemaet staar som foer, «Dine foresproersler» ruller -- */
+  .app-cols-custom > .lw-panel { max-height: 100%; min-height: 0; display: flex; flex-direction: column; }
+  .app-cols-custom > .lw-panel:first-child { overflow-y: auto; }
+  #custom-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+}
+
+/* Smal eller lav skjerm: faste tak, og da er det fanen som ruller innvendig. */
+@media (max-width: 1240px), (max-height: 699px) {
+  .app-list { max-height: 300px; }
+  .app-quiet-list { max-height: 340px; }
+  .app-table-wrap { max-height: 200px; }
+  .app-after { max-height: 96px; }
+}
