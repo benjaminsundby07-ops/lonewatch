@@ -223,6 +223,7 @@ def build_overview(
     before: dict[str, Any] | None = None,
     verify: dict[str, Any] | None = None,
     log_error: str | None = None,
+    log_lines: int | None = None,
     buckets: int = CHART_BUCKETS,
 ) -> dict[str, Any]:
     """Hele datasettet dashbordet tegner fra.
@@ -270,7 +271,12 @@ def build_overview(
         # Raden «Logg» er en annen opplysning enn ringen over: her spør vi om
         # loggen i det hele tatt kjører (nøkkel på plass, fil skrivbar), ikke om
         # kjeden stemmer. Begge er ekte, og de kan svare forskjellig.
-        "log": {"status": "broken" if log_error else "ok"},
+        #
+        # `lines` er antall linjer loggen faktisk har nå. Det er et tall, ikke
+        # en status, og det er det eneste på Oversikt som sier hvor mye som
+        # ligger i loggen. Står det «OK» alene, vet du ikke om det er OK for
+        # null linjer eller for hundre.
+        "log": {"status": "broken" if log_error else "ok", "lines": log_lines},
         "chartShapes": _chart_shapes(cards, buckets),
         "text": TEXT,
     }
@@ -298,7 +304,7 @@ def empty_overview(reason: str | None = None) -> dict[str, Any]:
         "agents": [],
         "logChain": {"status": None, "checkedAt": None},
         "sandbox": {"tested": None, "blocked": None},
-        "log": {"status": None},
+        "log": {"status": None, "lines": None},
         "chartShapes": [],
         "text": TEXT,
     }

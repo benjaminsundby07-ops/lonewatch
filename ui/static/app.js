@@ -1028,7 +1028,7 @@ function dashNum(n) {
  * feltet er det eneste paa forsiden som kan kreve noe av deg akkurat naa, saa
  * det er det som skal staa der. Alt i det kommer fra `waiting_for_you()`:
  * ingen oppdiktet kunde, intet poengtall. */
-function venterKort(w, h) {
+function venterKort(w, h, laast) {
   if (w === "ukjent") {
     return h("section", { className: "lw-panel app-waiting is-unknown" },
       h("div", { className: "app-waiting-head" },
@@ -1064,10 +1064,19 @@ function venterKort(w, h) {
         : null),
     h("p", { className: "app-waiting-who" }, linje),
     detalj ? h("p", { className: "app-waiting-amount" }, detalj) : null,
-    h("p", { className: "app-waiting-title" }, w.consequence_text),
+    /* Konsekvensteksten navngir mottakeren i klartekst, og regelnavnene er
+       oppskriften paa hva som maa endres for aa slippe gjennom. Begge deler
+       tar `minimized_overview()` bort uten menneskenoekkelen - her staar den
+       faste setningen i stedet, saa kortet ikke ser ut som om det mangler
+       data. Se ui/state.py. */
+    laast
+      ? h("p", { className: "app-waiting-title" },
+          "Rød. Et menneske må svare. Lås opp i Godkjenning for å se " +
+          "hele mottakeren, hva som skjer og hvilke regler som slo til.")
+      : h("p", { className: "app-waiting-title" }, w.consequence_text),
     /* Hvorfor den er rød, med våre egne regelnavn. Står her fordi kortet
        ellers ber deg om å ta stilling til noe uten å si hva som utløste det. */
-    w.reasons && w.reasons.length
+    !laast && w.reasons && w.reasons.length
       ? h("ul", { className: "app-waiting-rules" }, w.reasons.map((r, i) =>
           h("li", { key: i },
             h("span", { className: "app-status-dot is-red" }),
@@ -1079,7 +1088,7 @@ function venterKort(w, h) {
          forbeholdt knappen som faktisk avgjør saken. */
       className: "lw-btn lw-btn-primary app-waiting-cta",
       onClick: function () { valgt = w.request_id; showTab("queue"); },
-    }, "Se og godkjenn"));
+    }, laast ? "Lås opp og se saken" : "Se og godkjenn"));
 }
 
 /* Dashbordet settes sammen av designsystemets egne deler i stedet for aa kalle
@@ -1092,48 +1101,62 @@ function dashInnhold(h) {
   const d = dashboardData || {};
   const t = (d.text && d.text.no) || {};
   const n = d.counts || {};
-  const shapes = d.chartShapes || [];
   const lc = d.logChain || {};
   const sb = d.sandbox || {};
   const lg = d.log || {};
-  const farger = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)"];
   const titler = t.stats || ["Handlinger vurdert", "Røde varsler", "Blokkert"];
 
   const status = (st) => (st === "ok" ? "OK" : st === "broken" ? "Feil" : "–");
-  const brok = (x, y) =>
-    typeof x === "number" && typeof y === "number" && y > 0 ? x / y : 0;
-  const avTekst = (x, y) => dashNum(x) + " av " + dashNum(y);
 
+  /* De tre tellerne. Hvert kort er en knapp som faktisk gaar et sted:
+   * et tall uten vei videre er en paastand, ikke en inngang. */
   const kort = [
-    { v: n.evaluated, rows: [{ label: t.allowed || "Sluppet gjennom", value: dashNum(n.allowed) }] },
-    { v: n.red, rows: [] },
-    { v: n.blocked, rows: [] },
+    {
+      tittel: titler[0],
+      verdi: n.evaluated,
+      rader: [{ label: t.allowed || "Sluppet gjennom", value: dashNum(n.allowed) }],
+      hint: "Se alle i loggen",
+      gaa: function () { showTab("after"); },
+    },
+    {
+      tittel: titler[1],
+      verdi: n.red,
+      rader: [
+        { label: "Venter på menneske", value: dashNum(n.waitingForHuman) },
+        { label: t.followed || "Fulgt opp", value: dashNum(n.followedUp) },
+      ],
+      hint: "Gå til Godkjenning",
+      gaa: function () { showTab("queue"); },
+    },
+    {
+      tittel: titler[2],
+      verdi: n.blocked,
+      rader: [],
+      hint: "Se de stoppede i loggen",
+      /* Samme filter som knappen «Stoppet» i Etter-fanen setter. */
+      gaa: function () { logFilter = "stoppet"; showTab("after"); },
+    },
   ];
+
+  const harTall = typeof n.evaluated === "number" && n.evaluated > 0;
 
   return [
     h("div", { className: "lw-row-top app-dash-top", key: "top" },
-      venterKort(d.waiting, h),
+      venterKort(d.waiting, h, d.locked),
       h("div", { className: "lw-col" },
         h(L.Panel, { title: t.activity || "Agentaktivitet" },
-          h("div", { className: "lw-stats" }, kort.map(function (k, i) {
-            const sh = shapes[i] || {};
-            return h(L.StatCard, {
-              key: i, title: titler[i], value: dashNum(k.v), rows: k.rows,
-              data: sh.data || [0, 0], marks: sh.marks, color: farger[i],
-            });
-          }))),
-        h("section", { className: "lw-panel lw-progress-row" },
-          h(L.ProgressStat, {
-            icon: "alert", label: t.waiting || "Røde varsler som venter på menneske",
-            value: avTekst(n.waitingForHuman, n.red),
-            progress: brok(n.waitingForHuman, n.red),
-          }),
-          h("span", { className: "lw-divider-v", "aria-hidden": "true" }),
-          h(L.ProgressStat, {
-            icon: "check", label: t.followed || "Fulgt opp",
-            value: avTekst(n.followedUp, n.red),
-            progress: brok(n.followedUp, n.red),
-          })))),
+          harTall
+            ? h("div", { className: "lw-stats" }, kort.map(function (k, i) {
+                return statKort(k, i, h);
+              }))
+            /* Tre nuller sier ikke hva som mangler. Dette gjoer. */
+            : h("div", { className: "app-empty-state" },
+                h("p", { className: "app-empty-title" }, "Ingen handlinger vurdert ennå"),
+                h("p", { className: "app-empty-text" },
+                  "Her kommer tre tall så snart agentene begynner: hvor mange " +
+                  "handlinger som er vurdert, hvor mange som ble røde og måtte " +
+                  "til et menneske, og hvor mange Lonewatch stoppet selv.")))),
+      ),
 
     h("div", { className: "lw-row-bottom app-dash-bottom", key: "bottom" },
       h(L.Panel, {
@@ -1145,32 +1168,80 @@ function dashInnhold(h) {
           h(L.Icon, { name: "arrowRight", size: 11, strokeWidth: 2.6 }))),
       }, agentTabell(d.agents || [], t.cols, h)),
       h("div", { className: "lw-col" },
-        h(L.Panel, null, h("div", { className: "lw-score" },
-          h("div", null,
-            h("h2", { className: "lw-panel-title" }, t.logChain || "Loggkjede"),
-            h("p", { className: "lw-panel-sub" }, t.logChainSub || "Sjekk av logg"),
-            h("p", { className: "lw-score-target" },
-              lc.checkedAt
-                ? ["Sist sjekket: ", h("b", { key: "b" }, klokke(lc.checkedAt))]
-                : "Ikke sjekket ennå")),
-          /* 96 i stedet for designsystemets 124. Ringen er den samme
-             komponenten med den samme geometrien - den er bare tegnet
-             mindre, slik at hele Oversikt faar plass paa 1440x900. */
-          h(L.StatusRing, {
-            size: 96,
-            status: lc.status, display: status(lc.status),
-            label: t.logChain || "Loggkjede",
-          }))),
-        h(L.Panel, null, h(L.StatusRows, {
-          rows: [
-            {
-              label: t.sandboxRow || "Sandkasse",
-              status: dashNum(sb.tested) + " testet, " + dashNum(sb.blocked) + " blokkert",
-            },
-            { label: t.logRow || "Logg", status: status(lg.status) },
-          ],
-        })))),
+        /* Loggkjeden. Hele panelet er en knapp: den kjoerer den samme sjekken
+           «Sjekk loggen» i topplinjen kjoerer, og gaar til Etter-fanen der
+           svaret staar i sin helhet. */
+        h(L.Panel, { className: "app-dash-click" },
+          h("button", {
+            type: "button",
+            className: "lw-score app-panel-btn",
+            onClick: function () { showTab("after"); verify(); },
+            title: "Sjekk loggen på nytt og gå til Etter",
+          },
+            h("div", null,
+              h("h2", { className: "lw-panel-title" }, t.logChain || "Loggkjede"),
+              h("p", { className: "lw-panel-sub" }, t.logChainSub || "Sjekk av logg"),
+              h("p", { className: "lw-score-target" },
+                lc.checkedAt
+                  ? ["Sist sjekket: ", h("b", { key: "b" }, klokke(lc.checkedAt))]
+                  : "Ikke sjekket ennå. Trykk her for å sjekke.")),
+            /* 96 i stedet for designsystemets 124. Ringen er den samme
+               komponenten med den samme geometrien - den er bare tegnet
+               mindre, slik at hele Oversikt faar plass paa 1440x900. */
+            h(L.StatusRing, {
+              size: 96,
+              status: lc.status, display: status(lc.status),
+              label: t.logChain || "Loggkjede",
+            }))),
+        h(L.Panel, { className: "app-dash-click" },
+          h("div", { className: "lw-status-rows" },
+            statusRad(t.sandboxRow || "Sandkasse",
+              typeof sb.tested === "number" && sb.tested > 0
+                ? dashNum(sb.tested) + " testet, " + dashNum(sb.blocked) + " blokkert"
+                : "Ingen tillegg prøvd ennå",
+              function () { showTab("before"); }, h),
+            statusRad("Logglinjer",
+              /* Tallet foerst, status etter. «OK» alene sier ikke om det er OK
+                 for null linjer eller for hundre. */
+              dashNum(lg.lines) + " · " + status(lg.status),
+              function () { showTab("after"); }, h)))),
+    ),
   ];
+}
+
+/* Ett tellerkort. Samme deler som designsystemets `StatCard` - `lw-stat`,
+ * `lw-stat-title`, `lw-stat-value`, `lw-stat-row` - men uten kurven, og som en
+ * knapp i stedet for en `article`.
+ *
+ * Kurven er borte med vilje. Den hadde en ekte serie bak seg (ett punkt per
+ * tidsboette), men ingen akse, ingen skala og ingen enhet: fjorten boetter over
+ * en oppdiktet tidslinje ser ut som en maaling uten aa vaere lesbar som en.
+ * En dommer skal se tallet paa et sekund, og kurven var det eneste som stod
+ * mellom oeyet og tallet. */
+function statKort(k, i, h) {
+  return h("button", {
+    key: i, type: "button", className: "lw-stat app-stat-btn",
+    onClick: k.gaa, title: k.hint,
+  },
+    h("h3", { className: "lw-stat-title" }, k.tittel),
+    h("p", { className: "lw-stat-value" }, dashNum(k.verdi)),
+    k.rader.map(function (r, j) {
+      return h("div", { key: j, className: "lw-stat-row" },
+        h("span", null, r.label), h("i"), h("b", null, r.value));
+    }),
+    h("span", { className: "app-stat-hint" }, k.hint,
+      h(globalThis.Lonewatch.Icon, { name: "arrowRight", size: 11, strokeWidth: 2.6 })));
+}
+
+/* En rad i statusruten, som knapp. Samme `lw-status-row` som
+ * designsystemets `StatusRows`, bare klikkbar. */
+function statusRad(navn, verdi, gaa, h) {
+  return h("button", {
+    key: navn, type: "button", className: "lw-status-row app-panel-btn",
+    onClick: gaa,
+  },
+    h("h2", { className: "lw-panel-title" }, navn),
+    h("span", null, verdi));
 }
 
 /* Agenttabellen tegnes her i stedet for med `AgentTable`.
@@ -1275,7 +1346,7 @@ function tomtDatasett() {
     agents: [],
     logChain: { status: null, checkedAt: null },
     sandbox: { tested: null, blocked: null },
-    log: { status: null },
+    log: { status: null, lines: null },
     chartShapes: [],
     /* Ikke `null`: `null` ville betydd «ingenting venter», og det vet vi ikke.
      * «ukjent» gir feltet sin egen tekst i stedet for en beroligende loegn. */

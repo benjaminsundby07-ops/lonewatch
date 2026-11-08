@@ -560,6 +560,45 @@ body { font-family: var(--font-sans); }
    tall, 32 px tomrom over "Sist sjekket", og en fremdriftsstripe med
    20 px polstring. Ingen tall, ingen rader og ingen tekst er fjernet. */
 .app-dash .lw-stat-chart { height: 44px; margin-top: var(--space-2); }
+
+/* Tellerkortene og statusradene er knapper naa. En knapp har sin egen
+ * bakgrunn, ramme, skrift og midtstilling fra nettleseren - her nullstilles
+ * alt det, slik at de ser NOEYAKTIG ut som `lw-stat` og `lw-status-row` gjorde
+ * da de var `article` og `div`. Ingen ny farge, ingen ny skrift, ingen ny form:
+ * det eneste som er nytt er at de kan trykkes paa. */
+.app-stat-btn,
+.app-panel-btn {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  border: 0;
+  width: 100%;
+  cursor: pointer;
+  background: none;
+}
+.app-stat-btn {
+  background: linear-gradient(180deg, var(--card-top), var(--card) 70%);
+  display: grid;
+  align-content: start;
+}
+.app-stat-btn:hover { background: var(--card-top); }
+.app-panel-btn:hover .lw-panel-title { color: var(--accent); }
+.app-stat-btn:focus-visible,
+.app-panel-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Veien videre fra kortet. Samme stoerrelse og farge som `lw-stat-row`, saa
+ * den legger seg inntil tallene uten aa bli et nytt element paa siden. */
+.app-stat-hint {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: var(--space-3);
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--ink-faint);
+}
+.app-stat-btn:hover .app-stat-hint { color: var(--accent); }
+.app-dash-click .lw-status-row { padding-left: 0; padding-right: 0; }
 .app-dash .lw-progress-row { padding: var(--space-3) var(--space-4); gap: var(--space-3); }
 .app-dash .lw-pstat-icon { width: 28px; height: 28px; }
 .app-dash .lw-divider-v { height: 28px; }

@@ -32,6 +32,7 @@ from ui.state import (
     MAX_RECIPIENT_CHARS,
     MAX_SUMMARY_CHARS,
     DemoState,
+    minimized_overview,
     minimized_snapshot,
 )
 from vault.tamper_demo import ATTACK_TITLES, ATTACKS, TamperDemoError, run_attack
@@ -399,13 +400,23 @@ def api_trail(request_id: str) -> dict:
 
 
 @app.get("/api/overview")
-def api_overview() -> dict:
+def api_overview(request: Request) -> dict:
     """Tallene til dashbordet, regnet fra tilstanden og loggen.
 
     Samme form som LONEWATCH_DATA i design-handoff/, saa svaret kan sendes
     rett inn i Lonewatch.setData(...).
+
+    Svarer BEGGE veier, som `/api/state`: tellere og status er hele poenget med
+    en forside, og en Oversikt som er tom foer noen logger inn viser ikke at det
+    er en mellomstasjon her. Uten menneskenoekkelen gaar svaret gjennom
+    `minimized_overview()`: kortet «Venter paa deg» mister konsekvensteksten,
+    regelnavnene og hele kontonummeret. Ruten SKRIVER ingenting, saa den trenger
+    ingen `_demo_guard`.
     """
-    return state.overview()
+    data = state.overview()
+    if _unlocked(request):
+        return {**data, "locked": False}
+    return minimized_overview(data)
 
 
 @app.get("/api/verify")

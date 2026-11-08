@@ -261,6 +261,66 @@ def _closed_card(card: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Feltene «Venter paa deg» paa Oversikt faar paa en LAAST side.
+#
+# `/api/overview` var AApen: den svarte med hele `waiting_for_you()`, og
+# «Venter paa deg»-kortet skrev da ut hele kontonummeret, konsekvensteksten og
+# regelnavnene paa en side ingen hadde laast opp. Samme lekkasje A1 lukket for
+# `/api/state`, bare gjennom en annen doer. Allowliste, av samme grunn som over:
+#   - `consequence_text` navngir mottakeren i klartekst
+#   - `reasons` er regelnavnene, altsaa oppskriften paa hva som maa endres
+#   - `recipient` maskeres med den samme funksjonen loggen bruker
+CLOSED_WAITING_KEYS = (
+    "request_id",
+    "agent",
+    "action",
+    "amount",
+    "risk",
+    "requires_typed_amount",
+    "waiting_total",
+)
+
+# Feltene en laast side faar av `/api/overview`. Alt her er tellere, status og
+# fast UI-tekst. Allowliste: et nytt felt i `build_overview` naar ikke en
+# uinnlogget leser foer noen har tatt stilling til om det kan.
+CLOSED_OVERVIEW_KEYS = (
+    "isExample",
+    "defaultLang",
+    "error",
+    "counts",
+    "agents",
+    "logChain",
+    "sandbox",
+    "log",
+    "chartShapes",
+    "text",
+)
+
+
+def minimized_overview(full: dict[str, Any]) -> dict[str, Any]:
+    """Dashbordtallene slik en side UTEN menneskenoekkelen faar dem.
+
+    Tellerne, agenttabellen, loggkjeden og sandkassen staar: de er tall og
+    status. Kortet «Venter paa deg» minimeres - du faar vite AT noe venter, hvor
+    mye det gjelder og hvor hoey risikoen er, men ikke hvem pengene skulle til
+    eller hvilke regler som slo til.
+    """
+    waiting = full.get("waiting")
+    if isinstance(waiting, dict):
+        laast: Any = {
+            **{k: waiting[k] for k in CLOSED_WAITING_KEYS if k in waiting},
+            "recipient": _mask(waiting.get("recipient")),
+        }
+    else:
+        # None (ingenting venter) eller "ukjent". Ingen av dem sier noe om en sak.
+        laast = waiting
+    return {
+        **{k: full[k] for k in CLOSED_OVERVIEW_KEYS if k in full},
+        "locked": True,
+        "waiting": laast,
+    }
+
+
 def minimized_snapshot(full: dict[str, Any]) -> dict[str, Any]:
     """Snapshotet slik en side UTEN menneskenoekkelen faar det.
 
@@ -1512,6 +1572,7 @@ class DemoState:
                 before=self.before_list(),
                 verify=self.verify_result,
                 log_error=self.vault_error,
+                log_lines=len(self.vault.entries()) if self.vault else 0,
             )
             # Kortet "Venter paa deg" paa Oversikt. Ekte tilstand, ikke et tall.
             data["waiting"] = self.waiting_for_you()

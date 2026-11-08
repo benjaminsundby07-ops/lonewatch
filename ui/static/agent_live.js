@@ -54,9 +54,17 @@
     if (document.hidden || noenSkriver()) return;
     let state;
     try {
-      const res = await fetch("/api/state");
-      if (!res.ok) throw new Error(String(res.status));
-      state = await res.json();
+      /* `api()` fra app.js, ikke en naken `fetch`.
+       *
+       * Den nakne `fetch`-en sendte ikke menneskenoekkelen, og /api/state
+       * svarer BEGGE veier: den kom tilbake med det MINIMERTE snapshotet. Saa
+       * ga `apply(state)` det videre som om det var hele saken, og en side
+       * noen nettopp hadde laast opp falt tilbake til «Laast side» med maskert
+       * mottaker - hvert andre sekund, uten at noen hadde logget ut.
+       * Helper-en legger paa hodet naar noekkelen finnes. */
+      state = typeof api === "function"
+        ? await api("/api/state")
+        : await (await fetch("/api/state")).json();
       feilPaaRad = 0;
     } catch (e) {
       /* Appen svarer ikke. Vi gir oss etter en stund i stedet for aa fylle
