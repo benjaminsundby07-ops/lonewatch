@@ -220,7 +220,9 @@ prosjektet peker ut mot internett. Hele regnskapet for utføreren står i
 pytest -q
 ```
 
-{{TESTS}}
+I siste kjøring gikk 1659 tester gjennom. 25 er merket `xfail` med vilje, og 1 gikk uventet gjennom.
+Én test feilet, og bare i et testmiljø med Python 3.13: en veldig dypt nøstet JSON gir `RecursionError`
+(ført som H28 i [docs/ANGREP2.md](docs/ANGREP2.md)). Prosjektet er skrevet for Python 3.11.
 
 Testene lager egne nøkler og skriver til en midlertidig mappe, så de krever ingen miljøvariabler
 og rører ikke loggen din. Noen tester er merket `xfail` med vilje, fordi hullet de beskriver
@@ -229,7 +231,9 @@ ikke er lukket. Da står hullet synlig i testkjøringen i stedet for å være gl
 Falske alarmer er målt, ikke anslått. En alarm som lyser for ofte blir slått av, så tallet
 betyr noe.
 
-{{FALSE_ALARMS}}
+På det uavhengige settet ga 10 av 15 harmløse forespørsler rødt eller blokkert. Det er for mange.
+En kontrollstasjon som roper på to av tre vanlige saker blir slått av, og vi har ikke målt hvor mange
+varsler et menneske tåler før det slutter å lese dem.
 
 Målingen er gjort mot blindsett, altså forespørsler skrevet av noen som ikke hadde sett reglene,
 med sin egen fasit på hva som burde stoppes. Settene ligger i `tests/data/` og kjøres med
@@ -239,7 +243,10 @@ med sin egen fasit på hva som burde stoppes. Settene ligger i `tests/data/` og 
 reglene justert ut fra hva settet fanget, og da måler settet bare at vi har fjernet feil vi
 kjenner. Tallene fra dem kan ikke svare på hva reglene gjør på saker de aldri har sett.
 
-**Sett 4 er målt én gang, med reglene slik de står nå.** {{SET4}}
+**Sett 4 er målt én gang, med reglene slik de står nå.** Av 15 farlige ble 10 stoppet og 5 sluppet gjennom. Av 15 harmløse gikk 5 riktig gjennom og 10 ga
+falsk alarm. Av 10 saker der fasiten er usikker ble 5 stoppet. Det er det eneste tallet her som ikke er
+brukt til å justere reglene, og det er ett sett på 40 saker, så det er en pekepinn og ikke et bevis.
+Settet ligger i `tests/data/blind_requests_4.json`.
 
 Hele målingen, med før- og ettertall, hva vi valgte å ikke rette og hvorfor, står i
 [docs/MALING.md](docs/MALING.md). `python -m gateway.evaluation` måler i tillegg mot en syntetisk
@@ -267,14 +274,13 @@ omgås ved å tilbakedatere en betaling. `evaluate()` svarer `block` i stedet fo
 den ikke klarer å lese.
 
 Dette er noe av det som står åpent. De tre feltene agenten fyller ut selv (`recipient_known`,
-`contains_personal_data`, `reversible`) kan brukes til å snakke seg forbi regler. Et tillegg kan
-bryte ut av sandkassen via `open.__globals__` og rapporten sier likevel `clean`. Flere
-skriveruter i appen er uautentiserte, blant andre `/api/reset`, `/api/custom` og
-`/api/feed/step`. `/api/state` viser full mottaker, agentens frie tekst og de interne regelnavnene
-i klartekst, altså nettopp det loggen minimerer bort. Beløp spredt over mange mottakere summeres
-ikke.
+`contains_personal_data`, `reversible`) kan brukes til å snakke seg forbi regler. Sandkassen er ikke isolasjon, så en omvei
+vi ikke har tenkt på kan fortsatt komme ut. Beløp spredt over mange mottakere summeres ikke.
 
-{{HULL_STATUS}}
+Siden forrige runde er dette lukket: skriveruter i appen krever menneskenøkkelen, `/api/state` og
+`/api/overview` viser bare minimerte felt uten nøkkel, sandkassen avviser `open.__globals__` før
+kjøring og sier ikke `clean` uten bevis, og en skanner leser innholdet i dokumenter etter skjulte
+instruksjoner. Det siste er ikke bevis for at det er trygt, bare at de kjente omveiene er stengt.
 
 ## 8. Ærlige begrensninger
 
@@ -284,8 +290,8 @@ fulle versjonen. Det er `gateway/LIMITS.md`, `vault/LIMITS.md`, `sandbox/LIMITS.
 
 - **Sandkassen er simulert, ikke isolasjon.** Sperrene er funksjoner vi har byttet ut i den samme
   Python-prosessen som tillegget kjører i. Det er ikke en container, ikke en virtuell maskin og
-  ikke `seccomp`. `open.__globals__["_REAL_BUILTINS_OPEN"]` gir den ekte funksjonen tilbake. Vi
-  prøvde det mot vår egen sandkasse, og det virker. Fem andre omveier virket første gang vi
+  ikke `seccomp`. Den enkleste omveien, `open.__globals__`, avvises nå før kjøring, og sperrene ligger i
+  lukninger. Men det er filtrering i samme prosess, og en omvei vi ikke har tenkt på kan virke. Fem andre omveier virket første gang vi
   prøvde dem, og alle er stengt nå. At vi fant fem på første forsøk er det sterkeste argumentet
   for at det finnes flere vi ikke har funnet. Et tillegg ser dessuten med en gang at miljøet er
   falskt, og kan oppføre seg pent hos oss og stjele først på en ekte maskin.
@@ -312,7 +318,7 @@ fulle versjonen. Det er `gateway/LIMITS.md`, `vault/LIMITS.md`, `sandbox/LIMITS.
   maskinen i det hele tatt, en egen enhet eller konto slik BankID er.
 - **Ingen ekte brukere har testet produktet.** Ingen i målgruppen har brukt det, og vi måler ikke
   hvor mange røde varsler et menneske faktisk tåler før det slutter å lese dem.
-- **Ingen roller og ingen innlogging per person.** Hele nettappen er uautentisert. `reveal()` på
+- **Ingen roller og ingen innlogging per person.** Skriverutene i nettappen krever én felles menneskenøkkel, men det finnes ingen innlogging per person. `reveal()` på
   pseudonymtabellen krever `role == "admin"`, men rollen er bare en streng den som kaller oppgir
   selv. Deler to mennesker én menneskenøkkel, kan loggen ikke skille dem.
 - **Loggen er ekte kryptert, men ikke et revisjonssikkert arkiv.** Den som har både loggen,

@@ -38,7 +38,23 @@ kjenner. Sett 3 var det siste, og det er nå også brukt opp: `f912515` endret
 «hva gjør reglene på saker de aldri har sett?».** Kurven «stadig færre falske
 alarmer» er målt på saker vi har fasiten til.
 
-### Sett 4 er reservert og skal ikke måles nå
+### Sett 4 er målt én gang
+
+`tests/data/blind_requests_4.json`, målt 8. november med reglene slik de står, uten å rette noe etterpå.
+Sett 1 til 3 er brukt til å justere reglene og er ikke uavhengige. Sett 4 er det eneste uavhengige tallet.
+
+| | antall |
+|---|---|
+| Farlige, stoppet | 10 av 15 |
+| Farlige, sluppet gjennom | 5 av 15 |
+| Harmløse, riktig gjennom | 5 av 15 |
+| Harmløse, falsk alarm | 10 av 15 |
+| Usikre, stoppet | 5 av 10 |
+
+Dette er ett sett på 40 saker. Det er en pekepinn. Den høye falske alarmen er det svakeste punktet,
+og vi har ikke rettet den, fordi et rettet sett ikke lenger er uavhengig.
+
+Under står den opprinnelige teksten om reglene for sett 4, slik den ble skrevet før målingen:
 
 Det neste uavhengige tallet må komme fra **`tests/data/blind_requests_4.json`**,
 som ikke finnes ennå. Reglene for det settet:
