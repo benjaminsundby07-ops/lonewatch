@@ -9,3 +9,9 @@ lonewatch_log.jsonl.lock
 lonewatch_log.jsonl.head
 lonewatch_log.*.jsonl.head
 lonewatch_pseudonyms.enc
+
+# MCP-oppsettet for den ekte agenten: den delte hemmeligheten staar i det.
+.mcp.json
+
+# Noklene til broen mot en ekte agent. Lages av `python -m agent_gateway.oppsett`.
+.lonewatch-agent-env

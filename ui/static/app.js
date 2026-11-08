@@ -42,7 +42,7 @@ const RULE_TEXT = {
 function lwName(id) {
   const m = String(id || "").match(/^([a-z]+)_(\d+)$/);
   if (!m) return String(id || "");
-  const serie = { req: 1, story: 2, custom: 9 }[m[1]];
+  const serie = { req: 1, story: 2, agent: 8, custom: 9 }[m[1]];
   if (!serie) return String(id);
   return "LW-" + serie + String(m[2]).padStart(3, "0").slice(-3);
 }
@@ -311,6 +311,7 @@ function who(card) {
   if (r.recipient) bits.push("til " + esc(r.recipient));
   if (card.source === "story") bits.push("hendelsen");
   if (card.source === "custom") bits.push('<span class="app-mine">skrevet av deg</span>');
+  if (card.source === "agent") bits.push('<span class="app-live">ekte agent</span>');
   return '<div class="app-who">' + bits.join(' <span class="app-sep">&middot;</span> ') + "</div>";
 }
 

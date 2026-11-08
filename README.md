@@ -233,10 +233,35 @@ viktigere hva det *ikke* beviser, står i [docs/MALING.md](docs/MALING.md).
 pytest -q
 ```
 
-556 tester går gjennom, og én er `xfail`: `test_sperrene_kan_ikke_omgaas_via_globals` i
+651 tester går gjennom, og én er `xfail`: `test_sperrene_kan_ikke_omgaas_via_globals` i
 `tests/test_sandbox.py`. Den står som forventet feil med vilje, fordi hullet den beskriver ikke er lukket —
 se neste seksjon. Testene lager egne nøkler og skriver til en midlertidig mappe, så de krever ingen
 miljøvariabler og rører ikke loggen din.
+
+### 6. Ekte agent gjennom MCP (eget eksperiment)
+
+```bash
+python -m agent_gateway.oppsett     # lager nøkler og .mcp.json, én gang
+source .lonewatch-agent-env
+python -m ui                        # la den stå
+claude                              # i et annet vindu, fra samme mappe
+```
+
+Kobler en ekte Claude Code-agent til Lonewatch over MCP. Agenten får fire oppdiktede verktøy, og hvert
+verktøykall går gjennom den ekte `gateway.evaluate()`, den ekte låste loggen og det ekte røde varselet.
+Ingen API-nøkkel trengs. Oppskriften steg for steg står i
+[docs/EKTE_AGENT.md](docs/EKTE_AGENT.md).
+
+**Det store hullet, sagt med én gang:** Claude Codes egne verktøy (Bash, filer) går *utenom* Lonewatch.
+Dette er beskyttelse for kall som går via våre MCP-verktøy, og bare dem. Hele listen står i
+`agent_gateway/LIMITS.md`.
+
+Virker ikke agenten som den skal, finnes reserven — samme flyt, samme kode, manusstyrt, uten agent,
+uten oppsett og uten nett:
+
+```bash
+python -m agent_gateway.scripted_demo
+```
 
 ### Nyttige ekstra kommandoer
 
@@ -399,6 +424,7 @@ lonewatch/
 ├── contracts.py          Felles typer. LÅST: ActionRequest, Decision, HumanResponse,
 │                         TrapEvent, SandboxReport, AfterAction, LogEntry + hash-kjeden
 ├── run_demo.py           Hele flyten én gang gjennom, i terminalen
+├── agent_gateway/        MCP-broen mot en ekte Claude Code-agent + manusstyrt reserve
 ├── requirements.txt      pydantic, pytest, cryptography, fastapi, uvicorn
 ├── pytest.ini
 ├── CLAUDE.md             Spilleregler, mappeeierskap og grensesnitt
