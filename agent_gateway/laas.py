@@ -73,6 +73,12 @@ DENY_TOOLS: tuple[str, ...] = (
     # resten av det innebygde settet
     "TodoWrite",
     "ExitPlanMode",
+    # Innebygde MCP-tjenere som `--strict-mcp-config` IKKE tar bort. Funnet ved
+    # prøvekjøring: `/mcp` viste `claude-in-chrome` med 22 verktøy (navigere,
+    # kjøre JavaScript, fylle skjemaer) rett utenom Lonewatch. Nektes ved
+    # tjenernavn, og Chrome-integrasjonen slås i tillegg av med --no-chrome.
+    "mcp__claude-in-chrome",
+    "mcp__computer-use",
 )
 
 # Navn vi ber om å nekte, men som IKKE finnes i Claude Code 2.1.241. Da skriver
@@ -151,6 +157,9 @@ def build_claude_argv(
         "--strict-mcp-config",
         "--mcp-config",
         str(mcp_path),
+        # Claude in Chrome er en innebygd MCP-tjener som --strict-mcp-config
+        # ikke rører. Av med den, i tillegg til nekt-regelen i DENY_TOOLS.
+        "--no-chrome",
         "--permission-mode",
         PERMISSION_MODE,
         # Tom streng: «disable all tools» i det innebygde settet.

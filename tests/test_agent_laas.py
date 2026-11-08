@@ -180,6 +180,19 @@ def test_kommandolinjen_laaser_verktoeyene(tmp_path):
     assert verdi("--setting-sources") == "project"
 
 
+def test_innebygde_mcp_tjenere_nektes_ved_navn():
+    """Funnet ved prøvekjøring: claude-in-chrome (22 verktøy) var tilkoblet."""
+    deny = laas.build_settings()["permissions"]["deny"]
+    assert "mcp__claude-in-chrome" in deny
+    assert "mcp__computer-use" in deny
+
+
+def test_kommandolinjen_slaar_av_chrome_integrasjonen(tmp_path):
+    argv = start_agent.build_command(root=tmp_path, claude="claude")
+    assert "--no-chrome" in argv
+    assert "--chrome" not in argv
+
+
 def test_listene_sendes_som_ett_argument_hver(tmp_path):
     """Målt, ikke antatt: `--allowed-tools a b c` spiser det som kommer etter.
 
