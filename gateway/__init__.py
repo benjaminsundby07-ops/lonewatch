@@ -15,20 +15,42 @@ gir samme avgjørelse hver gang.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime, timezone
 
 from contracts import ActionRequest, ActionType, Decision, Risk, SandboxReport, Verdict
 
 from . import config, rules
-from .consequence import build_consequence_text, format_amount
+from .consequence import UNJUDGEABLE_NOTE, build_consequence_text, format_amount
 
 __all__ = [
     "evaluate",
     "score_to_risk",
     "format_amount",
     "build_consequence_text",
+    "SandboxReportMismatch",
     "config",
     "rules",
 ]
+
+
+class SandboxReportMismatch(ValueError):
+    """Sandkasserapporten hoerer ikke til denne forespoerselen.
+
+    Dette er den ENE feilen `evaluate()` fortsatt kaster. Grunnen: en rapport om
+    et annet tillegg er ikke noe vi kan gjoere et fornuftig svar av - hadde vi
+    svart `block` og gaatt videre, ville den som kalte trodd at rapporten ble
+    lest. Her skal kallet stoppe, slik at feilen rettes der den er gjort.
+
+    Arver fra `ValueError`, slik at kallere som alt fanger `ValueError` ikke
+    merker forskjellen.
+    """
+
+
+# Tidspunktet vi setter paa et svar om noe vi ikke klarte aa lese i det hele
+# tatt. Det maa vaere ET tidspunkt (`contracts.Decision` krever det), og det
+# maa vaere det samme hver gang - klokken ville gjort svaret utidsbestemt.
+# 0001-01-01 er ikke til aa forveksle med et ekte tidsstempel.
+UNJUDGEABLE_TS = datetime(1, 1, 1, tzinfo=timezone.utc)
 
 
 def score_to_risk(score: int) -> Risk:
@@ -52,17 +74,56 @@ def _checked_report(
     if sandbox_report is None:
         return None
     if req.action_type is not ActionType.INSTALL_PACKAGE:
-        raise ValueError(
+        raise SandboxReportMismatch(
             f"sandbox_report gir bare mening for install_package, ikke {req.action_type.value}"
         )
     if rules.normalize_package_name(sandbox_report.package_name) != rules.normalize_package_name(
         req.package_name
     ):
-        raise ValueError(
+        raise SandboxReportMismatch(
             f"sandbox_report gjelder {sandbox_report.package_name!r}, "
             f"men forespørselen gjelder {req.package_name!r}"
         )
     return sandbox_report
+
+
+def _unjudgeable(req: object) -> Decision:
+    """Svaret paa noe vi ikke klarte aa lese: `block`, og ingen kan godkjenne det.
+
+    Foer kastet `evaluate()` et unntak her. Ingen fikk `allow` - saa langt var
+    det fail-closed - men den som KALTE maatte huske aa fange det. `ui/state.py`
+    gjoer det; en ny integrasjon kan glemme det, og hva som skjer da (koe som
+    stopper, forespoersel som forsvinner, verktoey som kalles likevel) ble
+    bestemt utenfor gateway. Naa er fail-closed en EGENSKAP ved svaret. Se H23 i
+    docs/ANGREP.md.
+
+    `contracts.Decision` krever `request_id` og `ts`. Vi redder det vi kan av
+    feltene og bruker noeytrale verdier for resten: tom id naar vi ikke vet hva
+    forespoerselen heter, og `UNJUDGEABLE_TS` naar vi ikke har et tidspunkt.
+    Ingenting av det vi leste havner i teksten.
+    """
+    request_id = ""
+    ts = UNJUDGEABLE_TS
+    try:
+        kandidat_id = getattr(req, "id", None)
+        if isinstance(kandidat_id, str):
+            request_id = kandidat_id
+        kandidat_ts = getattr(req, "ts", None)
+        if isinstance(kandidat_ts, datetime):
+            ts = kandidat_ts
+    except Exception:
+        # Selv det aa se paa feltene kan feile. Da staar de noeytrale verdiene.
+        pass
+
+    return Decision(
+        request_id=request_id,
+        ts=ts,
+        verdict=Verdict.BLOCK,
+        risk=Risk.HIGH,
+        reasons=[rules.UNJUDGEABLE_REQUEST],
+        consequence_text=UNJUDGEABLE_NOTE,
+        requires_typed_amount=False,
+    )
 
 
 def evaluate(
@@ -85,12 +146,34 @@ def evaluate(
     Uten disse to oppfører evaluate() seg nøyaktig som før.
 
     Fortsatt deterministisk: samme (req, rapport, historikk) gir samme Decision
-    hver gang. Tidsvinduet regnes fra `req.ts`, aldri fra klokken.
+    hver gang. Tidsvinduet regnes fra tidsstemplene i kallet, aldri fra klokken.
+
+    FAIL-CLOSED: klarer vi ikke å lese forespørselen i det hele tatt, kommer det
+    en `block`-Decision ut, ikke et unntak. Den ENE feilen som fortsatt kastes
+    er `SandboxReportMismatch`: en rapport om et annet tillegg er en feil hos
+    den som kaller, og den skal rettes der.
     """
-    report = _checked_report(req, sandbox_report)
+    try:
+        report = _checked_report(req, sandbox_report)
+        return _judge(req, report, history)
+    except SandboxReportMismatch:
+        raise
+    except Exception:
+        return _unjudgeable(req)
+
+
+def _judge(
+    req: ActionRequest,
+    report: SandboxReport | None,
+    history: Sequence[ActionRequest] | None,
+) -> Decision:
+    """Selve vurderingen. Kalles bare fra `evaluate()`, som fanger alt som går galt."""
     block_reasons = rules.triggered_block_rules(req, report)
     risk_reasons = rules.triggered_risk_rules(req, history)
     total_ore = rules.recipient_total_ore(req, history)
+    time_bounded = rules.transfer_time_axis_is_usable(
+        req, rules.matching_transfer_priors(req, history)
+    )
 
     if block_reasons:
         # Blokk slår alltid risikopoengene. Risikoen settes til high fordi
@@ -105,6 +188,7 @@ def evaluate(
             consequence_text=build_consequence_text(
                 req, reasons, blocked=True, sandbox_report=report,
                 recipient_total_ore=total_ore,
+                recipient_total_time_bounded=time_bounded,
             ),
             requires_typed_amount=False,
         )
@@ -122,7 +206,8 @@ def evaluate(
         risk=risk,
         reasons=risk_reasons,
         consequence_text=build_consequence_text(
-            req, risk_reasons, sandbox_report=report, recipient_total_ore=total_ore
+            req, risk_reasons, sandbox_report=report, recipient_total_ore=total_ore,
+            recipient_total_time_bounded=time_bounded,
         ),
         requires_typed_amount=requires_typed_amount,
     )

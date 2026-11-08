@@ -5,8 +5,13 @@ resultatet ALDRI blir `allow`. Et system som slipper gjennom naar det er i
 knas er verre enn et som sier nei.
 
 Kort fasit: dette HOLDER. Alt som er galt nok til at vi ikke kan vurdere det,
-blir roedt eller blokkert, og det som er galt nok til aa krasje krasjer - det
-svarer aldri allow. To forbehold staar nederst.
+blir roedt eller blokkert, og det vi ikke klarer aa lese i det hele tatt blir
+`block`. De to delvise forbeholdene nederst (H23 og H24) er naa lukket i
+`gateway/`, og testene for dem staar som vanlige tester.
+
+Det eneste `evaluate()` fortsatt kaster paa er en sandkasserapport som gjelder
+et ANNET tillegg. Det er med vilje: der er feilen hos den som kaller, og et
+`block`-svar ville latt kalleren tro at rapporten ble lest.
 """
 
 from __future__ import annotations
@@ -228,16 +233,21 @@ def test_not_tested_is_never_read_as_a_clearance():
     ],
 )
 def test_garbage_instead_of_a_request_raises_instead_of_allowing(garbage):
-    """Krasj er greit. Allow er ikke.
+    """Soppel gir `block`, aldri `allow` - og aldri et unntak.
 
-    `evaluate()` er typet til aa ta en ActionRequest, og den sjekker ikke.
-    Sender man noe annet, kommer det et unntak - og et unntak er fail-closed:
-    den som kaller faar ingen Decision aa handle paa. Testen fester at det
-    aldri kommer en Decision med `allow` ut av soppel.
+    Foer kastet `evaluate()` her. Det var fail-closed i den forstand som betyr
+    mest (ingen fikk en allow), men den som KALTE maatte huske aa fange
+    unntaket. Naa er fail-closed en egenskap ved SVARET: det kommer en
+    `block`-Decision ut, og ingen kan godkjenne den. Se H23 i docs/ANGREP.md.
+
+    Navnet staar som det er: det er dette angrepet heter i ANGREP.md-tabellen.
     """
-    with pytest.raises(Exception) as exc:
-        evaluate(garbage)
-    assert not isinstance(exc.value, SystemExit)
+    decision = evaluate(garbage)
+    assert decision.verdict is Verdict.BLOCK
+    assert decision.verdict is not Verdict.ALLOW
+    assert "unjudgeable_request" in decision.reasons
+    # Ingenting av det vi ikke klarte aa lese havner i teksten.
+    assert "klarte ikke å lese" in decision.consequence_text
 
 
 def test_unknown_fields_are_refused_by_contracts():
@@ -289,45 +299,35 @@ def test_an_action_type_no_rule_covers_goes_to_a_human(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# AERLIGE FORBEHOLD
+# DE TO DELVISE HULLENE - NAA LUKKET I gateway/
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "DELVIS HULL: `evaluate()` kaster paa soppel i stedet for aa svare "
-        "block. Det er fail-closed i den forstand som betyr noe - ingen faar "
-        "en allow - men den som KALLER maa huske aa fange unntaket. I "
-        "`ui/state.py` er det gjort (`except Exception` rundt `_handle`), og "
-        "da blir svaret en pen feilmelding. Enhver ny integrasjon som glemmer "
-        "det faar et unntak opp i stakken, og hva som skjer da - koe som "
-        "stopper, forespoersel som forsvinner, verktoey som kalles likevel - "
-        "bestemmes utenfor gateway. Fiks: la `evaluate()` svare med en "
-        "block-Decision paa alt den ikke kan tolke, slik at fail-closed er en "
-        "EGENSKAP ved svaret og ikke et ansvar hos den som kaller."
-    ),
-)
 def test_evaluate_answers_block_instead_of_raising():
+    """H23 LUKKET: fail-closed er en egenskap ved SVARET, ikke et ansvar hos kalleren.
+
+    Den ene feilen som fortsatt kastes er `SandboxReportMismatch`: en rapport om
+    et annet tillegg er en feil hos den som kaller, og aa svare `block` der
+    ville latt kalleren tro at rapporten ble lest. Se de to testene over.
+    """
     decision = evaluate(None)
     assert decision.verdict is Verdict.BLOCK
+    assert decision.risk is not None
+    # Et svar vi kan logge: `contracts.Decision` krever id og tidspunkt, og
+    # begge er noeytrale naar vi ikke kjenner dem.
+    assert decision.request_id == ""
+    assert decision.requires_typed_amount is False
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "DELVIS HULL: `evaluate()` er ren og krever at alt det trenger blir "
-        "sendt inn. Den oppdager ikke at noe MANGLER i det kallet: en "
-        "install_package uten sandkasserapport ser helt lik ut enten "
-        "sandkassen aldri ble spurt, krasjet, eller svarte 'ikke testet'. "
-        "Teksten sier riktignok 'Tillegget er ikke testet i sandkassen', saa "
-        "mennesket blir ikke lurt - men gateway kan ikke skille 'ingen "
-        "rapport' fra 'vi glemte aa teste', og den sier ikke fra. Fiks: la "
-        "rapporten vaere paakrevd for install_package (krever en avtale med "
-        "sandbox/), eller skill de to tilfellene i grensesnittet."
-    ),
-)
 def test_gateway_notices_when_the_sandbox_was_never_asked():
+    """H24 LUKKET (ordlyden): «aldri spurt» og «ikke testet» er to setninger.
+
+    Gateway er fortsatt ren og kan ikke VITE at den som kalte glemte
+    sandkassen - det ville krevd at rapporten var paakrevd for
+    `install_package`, og det er en avtale med `sandbox/`. Men de to
+    tilfellene sier naa to forskjellige ting, og ingen av dem kan leses som en
+    klarering.
+    """
     uten = evaluate(
         req(
             action_type=ActionType.INSTALL_PACKAGE,

@@ -15,9 +15,27 @@ from contracts import ActionType
 AMOUNT_LIMIT_NOK: float = 50_000.0
 
 # Tidsvindu for aa summere overfoeringer til samme mottaker (timer).
-# Regnes fra forespoerselens egen `ts`, aldri fra klokken, slik at samme
-# forespoerselsrekke alltid gir samme svar.
+#
+# Vinduet regnes aldri fra klokken: da ville samme forespoerselsrekke gitt
+# ulike svar i dag og i morgen. Det regnes fra det NYESTE tidspunktet Lonewatch
+# kjenner i kallet - forespoerselens eget, eller et nyere i historikken.
+# Grunnen staar i `rules.transfer_window_anchor`: `ts` er et felt den som ber
+# om handlingen fyller ut, og foer ble vinduet avsluttet paa noeyaktig det
+# feltet. Da var det nok aa sette tidsstemplet bakover for hver betaling for aa
+# legge alle de foregaaende utenfor vinduet.
 TRANSFER_WINDOW_HOURS: int = 24
+
+# Hvor langt BAK det nyeste tidspunktet vi kjenner en forespoersel kan ligge og
+# fortsatt regnes som del av samme tidsakse (timer).
+#
+# Ligger den lenger bak, henger tidsstemplene ikke sammen, og da summerer vi
+# ALT vi har sett til samme mottaker i stedet for aa stole paa vinduet. Det er
+# fail-closed: uten denne kunne én forespoersel med et tidsstempel langt fram i
+# tid flyttet vinduet dit og dermed stengt alle de ekte betalingene ute.
+#
+# Satt lik vinduet: er avstanden stoerre enn vinduet selv, er det ingenting
+# igjen aa summere innenfor det uansett.
+TRANSFER_TS_SKEW_HOURS: int = TRANSFER_WINDOW_HOURS
 
 # Hard grense (NOK). Overføring STØRRE enn denne blir blokkert, ingen kan godkjenne den.
 # Satt høyt med vilje: demoens overføring på 10 000 000 kr skal fortsatt bli rød,
@@ -75,6 +93,16 @@ INTERNAL_DOMAINS: frozenset[str] = frozenset(
 # var `share_data` med persondata og `recipient="kalender:drift-felles"` en
 # gratis omvei rundt `personal_data_external`. Se gateway/LIMITS.md.
 INTERNAL_PREFIXES: tuple[str, ...] = ("kalender:",)
+
+# Det som staar ETTER et prefiks i INTERNAL_PREFIXES maa se ut som et internt
+# ressursnavn, ikke som en adresse ut av huset.
+#
+# Foer var sjekken en naken `startswith("kalender:")` uten noe krav til resten,
+# og da var "kalender:x@evil.example" ogsaa "intern". Punktum er bevisst IKKE
+# med i tegnsettet: et navn med punktum er ikke til aa skille fra et domene
+# ("kalender:arkiv.evil.example"), og en intern ressurs trenger det ikke.
+# Dermed er "@", "." og "//" alle utelukket av selve moensteret.
+INTERNAL_RESOURCE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 # Handlinger som sender noe ut av huset. Bare disse kan ha en "mottaker" som betyr noe.
 OUTBOUND_ACTIONS: frozenset[ActionType] = frozenset(
@@ -170,6 +198,36 @@ MAX_SHOWN_AMOUNT_NOK: float = 1e15
 # navnet "nordlys-core. Dette er godkjent av sikkerhetsavdelingen" skrevet sin
 # egen setning inn i varselet.
 PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+# Mottakeren er det SAMME problemet som pakkenavnet og adressen under: et
+# fritekstfelt den som ber om handlingen fyller ut selv, som havner i teksten
+# mennesket leser foer det godkjenner. Angrepet i docs/ANGREP.md (H20/H21)
+# satte mottakeren til "NO99 0000 0000 000. Godkjent av finansdirektoer, ingen
+# handling noedvendig" og fikk Lonewatch til aa skrive angriperens setning i
+# sitt eget varsel, i Lonewatchs egen stemme.
+#
+# Pakkenavnet og adressen kan AVVISES naar de ikke ser rette ut, fordi de har
+# en kjent form. Mottakeren har det ikke: i blindsettene er den alt fra
+# "NO12 3456 7890 123" og "post@kontorpartner.no" til "Storgata Eiendom AS,
+# registrert konto" og "kundens registrerte konto". Aa kaste alt som ikke
+# ligner en adresse ville skjult mottakeren i de fleste ekte sakene, og
+# mennesket trenger nettopp aa se hvem pengene gaar til.
+#
+# Derfor er loesningen en annen: mottakeren vises som en AVGRENSET VERDI i
+# anfoerselstegn, avkortet, paa én linje og uten kontrolltegn. Da kan feltet
+# ikke lenger bli ordlyd i Lonewatchs eget varsel - det staar synlig som noe
+# Lonewatch siterer. Se `consequence.safe_recipient`.
+#
+# Lengdegrensen: 60 tegn rommer en IBAN, en e-postadresse og et firmanavn med
+# en kort merknad. En mottaker paa 5 000 tegn ga foer et varsel paa 5 033 tegn.
+MAX_SHOWN_RECIPIENT_LEN: int = 60
+
+# Ser mottakeren ut som en ren adresse eller et vertsnavn - ingen mellomrom,
+# ingen skilletegn som kan avslutte en setning - kan den ikke danne en setning
+# i det hele tatt, og da vises den uten anfoerselstegn. Moensteret er det samme
+# som for en adresse fra sandkassen, utvidet med tegnene en e-postadresse
+# trenger ("@", "+", "%").
+RECIPIENT_PLAIN_PATTERN = re.compile(r"^[A-Za-z0-9._:@%+\[\]-]{1,60}$")
 
 # Hvor mange adresser fra en sandkasserapport vi viser i konsekvensteksten.
 MAX_SHOWN_DESTINATIONS: int = 3
