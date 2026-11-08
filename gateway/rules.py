@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from contracts import ActionRequest, ActionType, SandboxReport
 
@@ -109,16 +109,25 @@ def internal_recipient(req: ActionRequest) -> bool:
     blindsettene, i demoen og i den syntetiske mengden - alle `kalender:`-
     mottakere der er `update_calendar`, og den utleverer ingenting.
     Se "Et prinsipp som ikke kan brytes" i gateway/LIMITS.md.
+
+    I TILLEGG maa det som staar ETTER prefikset se ut som et internt
+    ressursnavn (`config.INTERNAL_RESOURCE_PATTERN`). Sjekken var foer en naken
+    `startswith("kalender:")` uten noe krav til resten, og da var
+    "kalender:x@evil.example" ogsaa "intern" (H22 i docs/ANGREP.md). Moensteret
+    utelukker "@", punktum-domener og "//", slik at prefikset ikke kan brukes
+    til aa gjemme en adresse ut av huset bak fem tegn.
     """
     recipient = (req.recipient or "").strip()
     if not recipient:
         return False
 
     lowered = recipient.lower()
-    if req.action_type not in config.OUTBOUND_ACTIONS and any(
-        lowered.startswith(prefix) for prefix in config.INTERNAL_PREFIXES
-    ):
-        return True
+    if req.action_type not in config.OUTBOUND_ACTIONS:
+        for prefix in config.INTERNAL_PREFIXES:
+            if not lowered.startswith(prefix):
+                continue
+            if config.INTERNAL_RESOURCE_PATTERN.match(recipient[len(prefix) :].strip()):
+                return True
 
     host = _recipient_host(recipient)
     if not host:
@@ -219,38 +228,118 @@ def sandbox_blocked(req: ActionRequest, sandbox_report: SandboxReport | None) ->
 
 
 def normalize_recipient(recipient: str | None) -> str:
-    """Gjør mottakere sammenlignbare. "NO12 3456 789" og "no12345 6789" er samme konto."""
-    return re.sub(r"\s+", "", (recipient or "").strip().lower())
+    """Gjoer mottakere sammenlignbare: bare bokstaver og siffer, store bokstaver.
+
+    Alt som ikke er en bokstav eller et siffer fjernes. "NO93 8601 1117 947",
+    "NO93.8601.1117.947", "NO93-8601-1117-947" og "NO9386011117947" er samme
+    konto for en bank, og skal vaere samme noekkel her.
+
+    Foer fjernet den BARE mellomrom. Punktum og bindestrek sto igjen,
+    saa fire betalinger paa 49 000 kr - én per staving - ble 196 000 kr til
+    samme konto uten at summen noen gang ble regnet (H6 i docs/ANGREP.md).
+
+    Normaliseringen kan bare slaa SAMMEN mottakere, aldri skille dem. Treffer
+    den for bredt, blir summen stoerre og flere forespoersler havner hos et
+    menneske. Det er den trygge retningen aa ta feil i.
+    """
+    return re.sub(r"[^A-Za-z0-9]+", "", recipient or "").upper()
+
+
+def matching_transfer_priors(
+    req: ActionRequest, history: Sequence[ActionRequest] | None
+) -> list[ActionRequest]:
+    """Tidligere utbetalinger til samme mottaker, i den rekkefoelgen vi fikk dem.
+
+    Tiden spiller ingen rolle her: dette er bare "hvilke av dem gjelder samme
+    konto". Vinduet legges paa etterpaa.
+    """
+    key = normalize_recipient(req.recipient)
+    if not key:
+        return []
+    return [
+        prior
+        for prior in history or ()
+        if prior.action_type is ActionType.TRANSFER_MONEY
+        and normalize_recipient(prior.recipient) == key
+    ]
+
+
+def transfer_window_anchor(
+    req: ActionRequest, priors: Sequence[ActionRequest]
+) -> datetime:
+    """Slutten paa tidsvinduet: det NYESTE tidspunktet vi kjenner i dette kallet.
+
+    Vinduet sluttet foer paa noeyaktig `req.ts`. Tidsstemplet er et felt den som
+    ber om handlingen fyller ut selv, saa det var nok aa sette det bakover for
+    hver betaling: da laa alle de foregaaende ETTER vinduets slutt og falt
+    utenfor. Fem betalinger paa 49 000 kr ble fem ganger allow (H7 i
+    docs/ANGREP.md).
+
+    Naa er slutten det seneste av forespoerselens eget tidspunkt og det seneste
+    i historikken. Da kan et tidsstempel bakover ikke lenger dytte noe ut av
+    vinduet - det eneste det kan gjoere, er aa flytte forespoerselen selv
+    bakover, og da ligger den fortsatt innenfor.
+
+    Klokken brukes ikke. Samme (forespoersel, historikk) gir samme svar i dag
+    og om et aar.
+    """
+    newest = req.ts
+    for prior in priors:
+        if prior.ts > newest:
+            newest = prior.ts
+    return newest
+
+
+def transfer_time_axis_is_usable(
+    req: ActionRequest, priors: Sequence[ActionRequest]
+) -> bool:
+    """Henger tidsstemplene sammen godt nok til aa bruke vinduet?
+
+    Med vinduets slutt satt til det nyeste tidspunktet vi kjenner, er det ett
+    triks igjen: én utbetaling med et tidsstempel langt FRAM i tid flytter
+    slutten dit, og da faller alle de ekte betalingene utenfor de 24 timene.
+
+    Derfor: ligger forespoerselen mer enn `config.TRANSFER_TS_SKEW_HOURS` bak
+    det nyeste vi kjenner, henger tidsstemplene ikke sammen, og da er vinduet
+    ikke til aa stole paa. Svaret er nei, og den som kaller summerer ALT i
+    stedet. Det er fail-closed: vi mister et skille vi ikke kunne stole paa, og
+    forespoerselen havner hos et menneske.
+    """
+    anchor = transfer_window_anchor(req, priors)
+    return anchor - req.ts <= timedelta(hours=config.TRANSFER_TS_SKEW_HOURS)
 
 
 def recipient_total_ore(
     req: ActionRequest, history: Sequence[ActionRequest] | None
 ) -> int | None:
-    """Sum i hele øre av overføringer til samme mottaker innenfor tidsvinduet.
+    """Sum i hele oere av utbetalinger til samme mottaker innenfor tidsvinduet.
 
-    Vinduet slutter på `req.ts` og er `config.TRANSFER_WINDOW_HOURS` langt.
-    Det regnes fra forespørselens eget tidsstempel, ikke fra klokken, slik at
-    samme rekke forespørsler alltid gir samme svar.
+    Vinduet er `config.TRANSFER_WINDOW_HOURS` langt og slutter paa det nyeste
+    tidspunktet vi kjenner i kallet - se `transfer_window_anchor` for hvorfor
+    det ikke lenger er forespoerselens eget tidspunkt alene. Klokken brukes
+    aldri, saa samme rekke gir samme svar hver gang.
 
-    Returnerer None hvis det ikke gir mening å summere: ikke en overføring,
-    ingen mottaker, eller et beløp vi ikke kan lese.
+    Henger ikke tidsstemplene sammen (`transfer_time_axis_is_usable`), legges
+    vinduet bort og ALT til samme mottaker summeres.
+
+    Returnerer None hvis det ikke gir mening aa summere: ikke en utbetaling,
+    ingen mottaker, eller et beloep vi ikke kan lese.
     """
     if req.action_type is not ActionType.TRANSFER_MONEY:
         return None
-    key = normalize_recipient(req.recipient)
-    if not key:
+    if not normalize_recipient(req.recipient):
         return None
     total = to_ore(req.amount)
     if total is None:
         return None
 
-    start = req.ts - timedelta(hours=config.TRANSFER_WINDOW_HOURS)
-    for prior in history or ():
-        if prior.action_type is not ActionType.TRANSFER_MONEY:
-            continue
-        if normalize_recipient(prior.recipient) != key:
-            continue
-        if not (start < prior.ts <= req.ts):
+    priors = matching_transfer_priors(req, history)
+    bounded = transfer_time_axis_is_usable(req, priors)
+    anchor = transfer_window_anchor(req, priors)
+    start = anchor - timedelta(hours=config.TRANSFER_WINDOW_HOURS)
+
+    for prior in priors:
+        if bounded and not (start < prior.ts <= anchor):
             continue
         ore = to_ore(prior.amount)
         if ore is not None:
@@ -390,6 +479,13 @@ RISK_RULES: tuple[tuple[str, RiskRule], ...] = (
     ("incomplete_request", incomplete_request),
     ("irreversible", irreversible),
 )
+
+# Navnet som havner i `reasons` naar `evaluate()` ikke klarte aa lese
+# forespoerselen i det hele tatt. Det staar her sammen med de andre
+# regelnavnene, slik at det finnes ett sted aa slaa opp alle navn som kan
+# komme ut av gateway. Ingen vekt: svaret er `block`, og da settes risikoen
+# til high uansett.
+UNJUDGEABLE_REQUEST = "unjudgeable_request"
 
 # Reglene som stopper noe helt. Navnene havner også i `reasons`.
 BLOCK_RULES: tuple[tuple[str, RiskRule], ...] = (

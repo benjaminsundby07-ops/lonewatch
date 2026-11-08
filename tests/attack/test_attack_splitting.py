@@ -3,14 +3,16 @@
 Grensen er 50 000 kr. Angrepet sender 49 000 kr om gangen og ser om reglene
 ser summen. `gateway.evaluate()` tar et `history`-argument nettopp for dette.
 
-Kort fasit:
-  HOLDER  naar historikken sendes inn OG kontonummeret staves likt hver gang.
-  HULL    naar kontonummeret staves med punktum eller bindestrek i stedet for
-          mellomrom - samme konto for en bank, ulik noekkel for Lonewatch.
-  HULL    naar agenten setter `ts` bakover: vinduet maales fra forespoerselens
-          eget tidsstempel.
-  HULL    naar betalingene spres paa flere kontoer.
-  HULL    naar den som kaller evaluate() glemmer `history`.
+Kort fasit etter at hullene H6 og H7 ble lukket i `gateway/`:
+  HOLDER  naar historikken sendes inn, uansett hvordan kontonummeret staves:
+          `normalize_recipient` fjerner alt som ikke er bokstav eller siffer.
+  HOLDER  naar agenten setter `ts` bakover: vinduet slutter paa det NYESTE
+          tidspunktet Lonewatch kjenner, ikke paa forespoerselens eget.
+  HOLDER  naar agenten setter `ts` langt FRAM i tid for aa flytte vinduet dit:
+          da henger tidsstemplene ikke sammen, og alt summeres.
+  HULL    naar betalingene spres paa flere kontoer (H9).
+  HULL    naar betalingene spres over mer enn vinduet (H8, bevisst satt).
+  HULL    naar den som kaller evaluate() glemmer `history` (H10).
 """
 
 from __future__ import annotations
@@ -85,20 +87,15 @@ def test_whitespace_and_case_in_the_account_number_do_not_help():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "HULL: `rules.normalize_recipient` fjerner BARE mellomrom "
-        "(`re.sub(r'\\s+', ...)`) og setter smaa bokstaver. Punktum og "
-        "bindestrek staar igjen, saa 'NO93 8601 1117 947', "
-        "'NO93.8601.1117.947' og 'NO93-8601-1117-947' er tre ulike mottakere "
-        "for Lonewatch og samme konto for banken. Angrepet sender 49 000 kr "
-        "til hver staving: 196 000 kr til samme konto, fire ganger ALLOW, "
-        "ingen summering, ingen roedt kort. Fiks: normaliser bort alt som ikke "
-        "er bokstav eller siffer foer sammenligningen."
-    ),
-)
 def test_punctuation_in_the_account_number_does_not_defeat_the_sum():
+    """H6 LUKKET: fire stavinger av samme konto er én noekkel.
+
+    Angrepet var: `normalize_recipient` fjernet BARE mellomrom, saa punktum og
+    bindestrek sto igjen. 'NO93 8601 1117 947', 'NO93.8601.1117.947' og
+    'NO93-8601-1117-947' var tre ulike mottakere for Lonewatch og samme konto
+    for banken - 196 000 kr til samme konto, fire ganger allow, ingen
+    summering. Naa fjernes alt som ikke er bokstav eller siffer.
+    """
     stavinger = [KONTO, "NO93.8601.1117.947", "NO93-8601-1117-947", "NO93/8601/1117/947"]
     results = _run([(DEL, s) for s in stavinger])
     assert results[0][0] is Verdict.ALLOW
@@ -106,6 +103,34 @@ def test_punctuation_in_the_account_number_does_not_defeat_the_sum():
         assert verdict is Verdict.RED, (
             f"staving {stavinger[i]!r} slapp gjennom; summen ble aldri sett"
         )
+        assert "recipient_total_over_limit" in reasons
+
+
+def test_all_the_spellings_collapse_to_one_key():
+    """Lest paa noekkelen, ikke bare paa svaret.
+
+    Samme konto skal gi samme noekkel uansett skilletegn og store bokstaver.
+    Testen staar her slik at en senere endring som bare treffer tilfeldig paa
+    dagens stavinger ikke ser riktig ut.
+    """
+    from gateway.rules import normalize_recipient
+
+    noekler = {
+        normalize_recipient(s)
+        for s in (
+            "NO93 8601 1117 947",
+            "NO93.8601.1117.947",
+            "NO93-8601-1117-947",
+            "NO93/8601/1117/947",
+            "NO9386011117947",
+            "  no93 8601.1117-947  ",
+        )
+    }
+    assert noekler == {"NO9386011117947"}
+    # Og to ULIKE kontoer skal fortsatt vaere to noekler.
+    assert normalize_recipient("NO93 8601 1117 947") != normalize_recipient(
+        "NO93 8601 1117 948"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -113,25 +138,81 @@ def test_punctuation_in_the_account_number_does_not_defeat_the_sum():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "HULL: vinduet regnes som `req.ts - 24t < prior.ts <= req.ts`, og "
-        "`ts` er et felt agenten fyller ut selv. Setter agenten tidsstemplet "
-        "BAKOVER for hver betaling, ligger alle tidligere betalinger etter "
-        "`req.ts` og faller utenfor vinduet. Fem betalinger paa 49 000 kr blir "
-        "fem ganger ALLOW. Aa regne fra `req.ts` i stedet for fra klokken er "
-        "bevisst (det gjoer avgjoerelsen deterministisk), men prisen er at "
-        "angriperen eier tidsaksen. Fiks: summer paa mottakstid i "
-        "integrasjonslaget, eller avvis en `ts` som ligger foer forrige "
-        "forespoersel fra samme agent."
-    ),
-)
 def test_backdating_the_timestamp_does_not_defeat_the_window():
+    """H7 LUKKET: vinduet slutter paa det nyeste tidspunktet vi KJENNER.
+
+    Angrepet var: vinduet var `req.ts - 24t < prior.ts <= req.ts`, og `ts` er
+    et felt den som ber om handlingen fyller ut selv. Satt bakover for hver
+    betaling laa alle de foregaaende ETTER vinduets slutt og falt utenfor - fem
+    betalinger paa 49 000 kr ble fem ganger allow.
+
+    Naa er slutten det seneste av forespoerselens eget tidspunkt og det seneste
+    i historikken. Et tidsstempel bakover flytter da bare forespoerselen selv
+    bakover, og den ligger fortsatt innenfor vinduet.
+    """
     results = _run([(DEL, KONTO)] * 5, descending=True)
-    assert results[0][0] is Verdict.ALLOW
+    assert results[0][0] is Verdict.ALLOW, "foerste betaling er lovlig alene"
     for verdict, reasons in results[1:]:
         assert verdict is Verdict.RED, "tilbakedatering gjorde summen usynlig"
+        assert "recipient_total_over_limit" in reasons
+
+
+def test_the_window_is_still_measured_without_a_clock():
+    """Fiksen maa ikke ha gjort avgjoerelsen avhengig av naa-tidspunktet.
+
+    Hele poenget med aa regne fra tidsstemplene er at samme rekke gir samme
+    svar hver gang. Et vindu som hadde begynt aa bruke klokken ville gjort
+    loggen umulig aa etterproeve.
+    """
+    from datetime import timedelta
+
+    historikk = [req(id="p0", ts=minutes(0), amount=DEL, recipient=KONTO)]
+    naa = req(id="p1", ts=minutes(1), amount=DEL, recipient=KONTO)
+    foerste = evaluate(naa, history=historikk)
+
+    # Samme rekke, flyttet ti aar fram. Svaret skal vaere identisk.
+    tiaar = timedelta(days=3653)
+    historikk_senere = [
+        req(id="p0", ts=minutes(0) + tiaar, amount=DEL, recipient=KONTO)
+    ]
+    senere = evaluate(
+        req(id="p1", ts=minutes(1) + tiaar, amount=DEL, recipient=KONTO),
+        history=historikk_senere,
+    )
+    assert senere.verdict is foerste.verdict
+    assert senere.reasons == foerste.reasons
+    assert senere.consequence_text == foerste.consequence_text
+
+
+def test_a_timestamp_far_in_the_future_cannot_push_the_window_off_the_payments():
+    """Det neste trekket etter tilbakedatering, og det er ogsaa stengt.
+
+    Med vinduet avsluttet paa det nyeste tidspunktet vi kjenner, er det ett
+    triks igjen: legg inn ÉN betaling med et tidsstempel langt fram i tid.
+    Vinduets slutt flytter seg dit, og de 24 timene dekker da ingen av de ekte
+    betalingene.
+
+    Svaret er fail-closed: ligger forespoerselen mer enn vinduet bak det
+    nyeste vi kjenner, henger tidsstemplene ikke sammen, og da summeres ALT til
+    samme mottaker. Teksten sier det ogsaa, i stedet for aa paastaa et vindu
+    den ikke brukte.
+    """
+    from datetime import timedelta
+
+    langt_fram = req(
+        id="gift", ts=T0 + timedelta(days=400), amount=DEL, recipient=KONTO
+    )
+    historikk = [langt_fram, req(id="p0", ts=minutes(0), amount=DEL, recipient=KONTO)]
+    decision = evaluate(
+        req(id="p1", ts=minutes(1), amount=DEL, recipient=KONTO), history=historikk
+    )
+    assert decision.verdict is Verdict.RED, (
+        f"et tidsstempel langt fram i tid stengte summen ute: {decision.reasons}"
+    )
+    assert "recipient_total_over_limit" in decision.reasons
+    assert "147 000 kr" in decision.consequence_text
+    assert "henger ikke sammen" in decision.consequence_text
+    assert "siste 24 timer" not in decision.consequence_text
 
 
 @pytest.mark.xfail(

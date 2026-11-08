@@ -7,6 +7,8 @@ teksten mennesket leser før det godkjenner.
 
 from __future__ import annotations
 
+import unicodedata
+
 from contracts import ActionRequest, ActionType, SandboxReport
 
 from . import config
@@ -31,6 +33,14 @@ DESTRUCTIVE_READ_NOTE = (
     "lesing: noe blir slettet eller overskrevet."
 )
 
+# Vi klarte ikke aa LESE forespoerselen i det hele tatt. Teksten er fast og
+# inneholder aldri noe fra det som kom inn: feilmeldinger fra Python kan
+# inneholde tekst noen andre har skrevet, og den skal ikke havne i varselet.
+UNJUDGEABLE_NOTE = (
+    "Lonewatch klarte ikke å lese denne forespørselen i det hele tatt, så den "
+    "stoppes. Ingen kan godkjenne den."
+)
+
 # Vi klarte ikke aa vurdere forespoerselen.
 INCOMPLETE_NOTE = (
     "Lonewatch klarte ikke å vurdere denne forespørselen, så den går til et "
@@ -50,7 +60,16 @@ ZERO_TRANSFER_AMOUNT_NOTE = (
 )
 
 # Sandkassen. Teksten sier hva vi SAA, aldri at noe er trygt.
-SANDBOX_NOT_TESTED = "Tillegget er ikke testet i sandkassen."
+#
+# Det kom INGEN rapport med kallet. Det er noe annet enn en rapport som sier
+# "not_tested" (SANDBOX_INCONCLUSIVE under): der ble sandkassen spurt, men
+# tillegget kom ikke i gang. Her ble den aldri spurt - og foer sa Lonewatch det
+# samme om de to tilfellene (H24 i docs/ANGREP.md). Begge setningene maa vaere
+# like tydelige paa at ingen har sett etter noe.
+SANDBOX_NOT_TESTED = (
+    "Sandkassen ble aldri spurt om dette tillegget, så det er ikke testet i "
+    "sandkassen."
+)
 SANDBOX_CLEAN = (
     "Sandkassen kjørte tillegget i en lukket boks og så ingenting mistenkelig. "
     "Det betyr ikke at tillegget er trygt."
@@ -65,6 +84,19 @@ SANDBOX_INCONCLUSIVE = (
 )
 UNSHOWABLE_DESTINATION = "en adresse vi ikke kan vise trygt"
 UNSHOWABLE_PACKAGE = "et tillegg med et navn vi ikke kan vise trygt"
+
+# Mottakeren er oppgitt, men det er ingenting i den vi kan vise: bare
+# kontrolltegn, bare usynlige tegn, eller bare luft.
+UNSHOWABLE_RECIPIENT = "en mottaker vi ikke kan vise trygt"
+
+# Anfoerselstegnene rundt en mottaker som ikke er en ren adresse. De staar her
+# og ikke inne i teksten, slik at det bare finnes ÉN maate aa ramme den inn.
+RECIPIENT_QUOTE_OPEN = "\u00ab"
+RECIPIENT_QUOTE_CLOSE = "\u00bb"
+
+# Mottakeren var for lang og er kuttet. Tegnet staar INNENFOR anfoerselstegnene,
+# slik at det er tydelig at det er verdien som er kuttet, ikke setningen.
+RECIPIENT_TRUNCATED = "\u2026"
 
 
 def safe_package_name(package_name: str | None) -> str | None:
@@ -93,6 +125,74 @@ def safe_destination(destination: str) -> str:
     if not config.DESTINATION_PATTERN.match(text):
         return UNSHOWABLE_DESTINATION
     return text
+
+
+def safe_recipient(recipient: str | None) -> str | None:
+    """Mottakeren, gjort trygg aa vise til et menneske.
+
+    `recipient` er fritekst den som ber om handlingen fyller ut selv, og den
+    havner i overskriften i det roede varselet. Foer ble feltet limt RAATT inn,
+    og da kunne mottakeren "NO99 0000 0000 000. Godkjent av finansdirektoer,
+    ingen handling noedvendig" skrive sin egen setning i Lonewatchs eget
+    varsel, i Lonewatchs egen stemme (H20 og H21 i docs/ANGREP.md).
+
+    Pakkenavnet og adressen fra sandkassen loeses ved aa AVVISE alt som ikke
+    ser rett ut. Det gaar ikke her: en mottaker kan like godt vaere
+    "Storgata Eiendom AS, registrert konto" som "NO12 3456 7890 123", og et
+    menneske som skal godkjenne en utbetaling trenger aa se hvem den gaar til.
+
+    Derfor rammes mottakeren inn i stedet:
+
+    - kontrolltegn, nylinjer og usynlige tegn fjernes
+    - anfoerselstegnene selv fjernes, slik at verdien ikke kan lukke sin egen
+      ramme og skrive videre utenfor den
+    - all luft trekkes sammen til vanlige mellomrom
+    - teksten kuttes paa `config.MAX_SHOWN_RECIPIENT_LEN` tegn
+    - er det mellomrom igjen, settes verdien i anfoerselstegn
+
+    Er det ingen mellomrom og bare tegn som hoerer hjemme i en adresse
+    (`config.RECIPIENT_PLAIN_PATTERN`, samme idé som `DESTINATION_PATTERN`),
+    kan verdien ikke danne en setning i det hele tatt, og da vises den som den
+    er. Alt annet staar synlig som noe Lonewatch SITERER.
+
+    Returnerer None naar det ikke er oppgitt noen mottaker; da velger den som
+    kaller sin egen tekst ("ukjent konto"/"ukjent mottaker").
+    """
+    if recipient is None:
+        return None
+
+    # Kontrolltegn og usynlige tegn ut. Nylinje og tabulator blir mellomrom,
+    # slik at ord ikke klistres sammen; resten forsvinner helt.
+    tegn = []
+    for ch in recipient:
+        kategori = unicodedata.category(ch)
+        if ch in "\n\r\t" or kategori in ("Zs", "Zl", "Zp"):
+            tegn.append(" ")
+        elif kategori in ("Cc", "Cf", "Cs", "Co", "Cn"):
+            continue
+        elif ch in (RECIPIENT_QUOTE_OPEN, RECIPIENT_QUOTE_CLOSE):
+            # Verdien skal ikke kunne lukke sin egen ramme: en mottaker som
+            # "NO99» Godkjent av finansdirektoer «" ville ellers staatt utenfor
+            # anfoerselstegnene og lest som Lonewatchs egen setning igjen.
+            continue
+        else:
+            tegn.append(ch)
+    text = " ".join("".join(tegn).split())
+
+    if not text:
+        # Enten tom fra foer, eller bare kontrolltegn og luft. Det er to ulike
+        # ting: ingen mottaker (None inn) og en mottaker vi ikke kan vise.
+        return None if not (recipient or "").strip() else UNSHOWABLE_RECIPIENT
+
+    if len(text) > config.MAX_SHOWN_RECIPIENT_LEN:
+        text = text[: config.MAX_SHOWN_RECIPIENT_LEN].rstrip() + RECIPIENT_TRUNCATED
+        return RECIPIENT_QUOTE_OPEN + text + RECIPIENT_QUOTE_CLOSE
+
+    if config.RECIPIENT_PLAIN_PATTERN.match(text):
+        # Ingen mellomrom og bare adressetegn: dette kan ikke bli en setning.
+        return text
+
+    return RECIPIENT_QUOTE_OPEN + text + RECIPIENT_QUOTE_CLOSE
 
 
 def _sandbox_text(report: SandboxReport) -> str:
@@ -139,10 +239,16 @@ def format_amount(amount: float | None) -> str:
 
 
 def _recipient_phrase(req: ActionRequest, unknown_text: str) -> str:
-    """'ukjent konto' når mottakeren ikke er kjent, ellers mottakeren selv."""
+    """'ukjent konto' naar mottakeren ikke er kjent, ellers mottakeren vist trygt.
+
+    Mottakeren gaar ALDRI raatt inn i teksten. Se `safe_recipient`.
+    """
     if not req.recipient_known or not req.recipient:
         return unknown_text
-    return req.recipient
+    shown = safe_recipient(req.recipient)
+    if shown is None:
+        return unknown_text
+    return shown
 
 
 def _base_text(req: ActionRequest) -> str:
@@ -182,12 +288,17 @@ def build_consequence_text(
     blocked: bool = False,
     sandbox_report: SandboxReport | None = None,
     recipient_total_ore: int | None = None,
+    recipient_total_time_bounded: bool = True,
 ) -> str:
     """Setter sammen hele teksten mennesket får se.
 
     `recipient_total_ore` er summen til samme mottaker innenfor tidsvinduet.
     Den regnes ut av reglene og vises som et tall, aldri som noe hentet fra
     `summary`.
+
+    `recipient_total_time_bounded` sier om vinduet faktisk ble brukt. Hang
+    tidsstemplene ikke sammen, gjelder summen alt Lonewatch har sett, og da
+    skal teksten si det i stedet for aa naevne 24 timer.
     """
     parts = [_base_text(req)]
 
@@ -227,10 +338,20 @@ def build_consequence_text(
         parts.append("Tillegget står på blokklisten.")
 
     if "recipient_total_over_limit" in reasons and recipient_total_ore is not None:
-        parts.append(
-            f"Til sammen {format_ore(recipient_total_ore)} til samme mottaker "
-            f"siste {config.TRANSFER_WINDOW_HOURS} timer."
-        )
+        if recipient_total_time_bounded:
+            parts.append(
+                f"Til sammen {format_ore(recipient_total_ore)} til samme mottaker "
+                f"siste {config.TRANSFER_WINDOW_HOURS} timer."
+            )
+        else:
+            # Tidsstemplene hang ikke sammen, saa summen gjelder alt vi har
+            # sett. Da maa teksten ikke paastaa et vindu den ikke har brukt.
+            parts.append(
+                f"Til sammen {format_ore(recipient_total_ore)} til samme mottaker "
+                "i alt Lonewatch har sett. Tidsstemplene i forespørslene henger "
+                f"ikke sammen, så vinduet på {config.TRANSFER_WINDOW_HOURS} timer "
+                "kan ikke brukes."
+            )
 
     if "transfer_over_hard_limit" in reasons:
         parts.append(f"Beløpet er over den harde grensen på {format_amount(config.HARD_TRANSFER_LIMIT_NOK)}.")

@@ -118,8 +118,9 @@ Disse feltene kommer fra agenten, og en agent kan være lurt eller lyve:
 | `contains_personal_data` | av/på-bryter | kan slå regelen **av** på en utlevering |
 | `recipient_known` | påstand om at kontoen er registrert | kan slå `unknown_recipient` **av** |
 | `reversible` | påstand om at handlingen kan angres | kan slå `irreversible` **av** |
-| `recipient` | fritekst | må treffe `INTERNAL_DOMAINS` for å gi noe |
+| `recipient` | fritekst | må treffe `INTERNAL_DOMAINS` for å gi noe. Vises bare som en **sitert, avkortet verdi** |
 | `package_name` | fritekst | må treffe `KNOWN_PACKAGES` for å gi noe |
+| `ts` | påstand om når handlingen skjer | kan flytte forespørselen innenfor tidsvinduet, men ikke **lukke** det |
 
 De tre øverste er hull vi har, og de står beskrevet over. Prinsippet handler om
 noe annet: at vi ikke skal **legge til** nye. En oppmykning får bare bygge på én
@@ -149,6 +150,32 @@ i motsetning til et domene som må stå på listen. Prefikset teller nå bare p�
 handlinger som ikke sender noe ut av huset. Null treff i de tre blindsettene, i
 demoen og i den syntetiske mengden — alle `kalender:`-mottakere der er
 `update_calendar`.
+
+**Og prefikset er strammet en gang til.** Selv der det fortsatt teller, var
+sjekken en naken `startswith("kalender:")` uten noe krav til resten, så
+`kalender:x@evil.example` var «intern» (H22 i `docs/ANGREP.md`). Nå må det som
+følger prefikset matche `config.INTERNAL_RESOURCE_PATTERN` — bokstaver, siffer,
+`_` og `-`, altså ingen `@`, ingen punktum-domene og ingen `//`. Punktum er
+holdt utenfor med vilje: et navn med punktum er ikke til å skille fra et
+domene, og en intern ressurs trenger det ikke. `INTERNAL_PREFIXES` brukes bare
+på dette ene stedet (`rules.internal_recipient`), så det finnes ikke en annen,
+slappere kopi av sjekken.
+
+**Tidsaksen var også en oppmykning på et agentfelt.** `recipient_total_ore`
+avsluttet vinduet på `req.ts`, og `ts` fyller den som ber om handlingen ut selv.
+Satt bakover for hver betaling lå alle de foregående **etter** vinduets slutt og
+falt utenfor: fem ganger 49 000 kr, fem ganger `allow` (H7). Nå slutter vinduet
+på det **nyeste tidspunktet Lonewatch kjenner i kallet** — forespørselens eget
+eller et nyere i historikken — og ligger forespørselen mer enn
+`TRANSFER_TS_SKEW_HOURS` bak det, henger tidsstemplene ikke sammen og **alt** til
+samme mottaker summeres. Klokken brukes fortsatt ikke: samme (forespørsel,
+historikk) gir samme svar i dag og om ti år.
+
+Det som står igjen på tidsaksen, og som ikke kan løses inne i `gateway/`: en
+agent kan sette `ts` **framover**. Fem betalinger som påstår å ligge 25 timer
+fra hverandre er fem betalinger utenfor hverandres vindu, og Lonewatch kan ikke
+motbevise påstanden uten et tidspunkt den ikke har fått. Se «Tidsvinduet hviler
+til slutt på at noen forteller oss hva klokken er» under.
 
 **Hva prinsippet IKKE løser.** Verdien i feltet er fortsatt agentens. En agent
 som skriver `recipient="kollega@nordlysforsikring.no"` på en utlevering som
@@ -389,8 +416,10 @@ tilfelle. `recipient_total_over_limit` summerer overføringer til **samme
 mottaker** innenfor et vindu på `TRANSFER_WINDOW_HOURS` (24) timer, og blir rød
 når summen når beløpsgrensen.
 
-Vinduet regnes fra forespørselens egen `ts`, ikke fra klokken, så samme rekke
-forespørsler alltid gir samme svar.
+Vinduet regnes fra tidsstemplene i kallet, ikke fra klokken, så samme rekke
+forespørsler alltid gir samme svar. Slutten på vinduet er det **nyeste**
+tidspunktet Lonewatch kjenner — se `rules.transfer_window_anchor` og avsnittet
+om tidsaksen i «Et prinsipp som ikke kan brytes».
 
 Det som fortsatt ikke oppdages:
 
@@ -402,13 +431,53 @@ Det som fortsatt ikke oppdages:
   og den forsvinner ved omstart og ved Nullstill. Starter appen på nytt, er
   telleren null igjen. Gateway husker ingenting selv - den tar imot en liste.
   En ekte versjon ville lest historikken fra loggen eller en database.
-- **Mottakere sammenlignes på tekst.** Vi fjerner mellomrom og store bokstaver,
-  så `NO12 3456 7890 123` og `no1234567890123` er samme konto. Men samme
-  mottaker med to ulike kontonumre er to mottakere for oss.
+- **Mottakere sammenlignes på tekst.** Vi fjerner alt som ikke er bokstav eller
+  siffer og setter store bokstaver, så `NO12 3456 7890 123`,
+  `NO12.3456.7890.123` og `no1234567890123` er samme konto. Men samme mottaker
+  med to ulike kontonumre er to mottakere for oss, og en kontoliste finnes ikke.
+  Normaliseringen kan bare slå mottakere **sammen**, aldri skille dem — treffer
+  den for bredt, blir summen større og flere forespørsler går til et menneske.
 - **En agent som plutselig gjør tusen ganger mer enn vanlig.** Vi har ingen
   normal å sammenligne med.
 - **Kjeden "les dokument med felle" -> "overfør penger".** `source_doc_id`
   logges, men brukes ikke i noen regel.
+
+## Tidsvinduet hviler til slutt på at noen forteller oss hva klokken er
+Dette er et **krav til den som kaller `gateway.evaluate()`**, og det er ikke
+oppfylt i dag.
+
+To av tre triks på tidsaksen er stengt inne i `gateway/`. Tilbakedatering virker
+ikke lenger (vinduet slutter på det nyeste vi kjenner), og et tidsstempel langt
+fram i tid virker ikke lenger (da legges vinduet bort og alt summeres). Det
+tredje står igjen: en agent som setter `ts` **jevnt framover** — 49 000 kr som
+påstår å ligge 25 timer fra forrige — får fem `allow`, akkurat som en agent som
+faktisk venter et døgn mellom hver betaling. Lonewatch kan ikke se forskjell,
+fordi den ikke vet hva klokken er.
+
+Det er bevisst at gateway ikke leser klokken selv: da ville samme logglinje gitt
+to forskjellige svar avhengig av når noen kjørte den om, og et revisjonsspor
+som ikke kan etterprøves er verre enn ingen måling. Alternativene er derfor
+alle på kallerens side:
+
+1. **Kalleren sender inn mottakstiden.** `ui/state.py`, `agent_gateway/` og
+   `run_demo.py` stempler forespørselen når de tar imot den, og gateway får et
+   tidspunkt den ikke trenger å stole på. Dette er den riktige fiksen.
+   `evaluate()` måtte da ta imot tidspunktet (et nytt, valgfritt argument), og
+   kallerne måtte faktisk sende det. Begge delene ligger **utenfor `gateway/`**,
+   og de er ikke gjort: ingen annen mappe er rørt i denne runden.
+2. **Kalleren bruker mottaksrekkefølgen som tidsakse.** `history` er allerede
+   ordnet etter når Lonewatch tok imot forespørselene — en rekkefølge agenten
+   ikke eier. Gateway kunne summert «de siste N til samme mottaker» i stedet for
+   «de siste 24 timene». Prisen er at `N` er like vilkårlig som 24 timer, og at
+   betalinger som ligger et halvt år tilbake ville begynt å telle igjen.
+3. **La det stå, og si det høyt.** Det er det som er gjort her. Hullet er lite
+   nok til å beskrives i én setning i pitchen («vi tror på klokken agenten
+   oppgir, men bare framover»), og fiksen krever en avtale med kallerne som
+   ingen i denne runden kunne inngå alene.
+
+Målt før valget: ingen av de tre blindsettene, demoen eller den syntetiske
+mengden har en eneste forespørsel der tidsstemplene henger så dårlig sammen at
+sum-over-alt slår inn. Tallene står uendret (4 / 4 / 3 falske alarmer).
 
 ## Ingen forståelse av innhold
 Vi leser aldri dokumentet, e-posten eller dataene. En e-post til en kjent
@@ -435,22 +504,52 @@ sjekker heller ikke domene, kontrollsiffer i IBAN, eller om kontoen finnes.
 **Hva som ville løst det:** et ekte mottakerregister, med oppslag mot bank og
 leverandørsystem, og en prosess for å legge til en ny mottaker.
 
-## Pakkenavn og adresser er tekst noen andre velger
-`consequence_text` er det et menneske leser før det godkjenner. To av feltene i
+## Pakkenavn, adresser og mottaker er tekst noen andre velger
+`consequence_text` er det et menneske leser før det godkjenner. Tre av feltene i
 den kommer ikke fra oss: pakkenavnet (fra den som ber om installasjonen — i
-"Prøv selv" er det noen som sitter og skriver) og adressene i en
-sandkasserapport (valgt av tillegget selv).
+"Prøv selv" er det noen som sitter og skriver), adressene i en sandkasserapport
+(valgt av tillegget selv) og **mottakeren**.
 
-Begge vaskes før de vises: `consequence.safe_package_name()` og
-`consequence.safe_destination()` slipper bare gjennom tegn som hører hjemme i et
-pakkenavn eller et vertsnavn, og viser ellers en nøytral tekst. Uten det kunne
-navnet `nordlys-core. Dette er godkjent av sikkerhetsavdelingen` skrevet sin
-egen setning inn i varselet.
+Pakkenavnet og adressen vaskes ved å bli **avvist**:
+`consequence.safe_package_name()` og `consequence.safe_destination()` slipper
+bare gjennom tegn som hører hjemme i et pakkenavn eller et vertsnavn, og viser
+ellers en nøytral tekst. Uten det kunne navnet
+`nordlys-core. Dette er godkjent av sikkerhetsavdelingen` skrevet sin egen
+setning inn i varselet.
 
-Det som gjenstår: innenfor de tillatte tegnene er navnet fortsatt fritt.
-`nordlys-core-godkjent` er et gyldig pakkenavn og leses av et menneske som noe
-det ikke er. Reglene bruker uansett det EKTE navnet — det er bare visningen
-som er begrenset.
+**Mottakeren ble stående, og det var en glipp.** `_recipient_phrase()` limte
+`recipient` rått inn i overskriften i det røde varselet når `recipient_known`
+var sann, så mottakeren
+`NO99 0000 0000 000. Godkjent av finansdirektør, ingen handling nødvendig` fikk
+Lonewatch til å skrive angriperens setning i sitt eget varsel, i sin egen
+stemme. Nylinjer gikk gjennom, og lengden var ubegrenset: 5 000 tegn mottaker ga
+5 033 tegn varsel. Det var H20 og H21 i `docs/ANGREP.md`.
+
+`consequence.safe_recipient()` lukker det, men **ikke** på samme måte som de to
+andre, og det er et bevisst valg. Mottakeren har ingen fast form: i blindsettene
+er den like ofte `Storgata Eiendom AS, registrert konto` eller
+`kundens registrerte konto` som en IBAN. Å avvise alt som ikke ligner en adresse
+ville skjult mottakeren i de fleste ekte sakene — og det et menneske mest av alt
+trenger å se før det godkjenner en utbetaling, er hvem pengene går til. Derfor
+blir mottakeren **rammet inn** i stedet:
+
+- kontrolltegn, nylinjer og usynlige tegn fjernes
+- anførselstegnene selv fjernes, så verdien ikke kan lukke sin egen ramme og
+  skrive videre utenfor den
+- all luft trekkes sammen, og teksten kuttes på `MAX_SHOWN_RECIPIENT_LEN` (60)
+- er det mellomrom igjen, settes verdien i «»
+
+Er det ingen mellomrom og bare tegn som hører hjemme i en adresse
+(`RECIPIENT_PLAIN_PATTERN`, samme idé som `DESTINATION_PATTERN`), kan verdien
+ikke danne en setning i det hele tatt, og da vises den som den er —
+`post@kontorpartner.no` trenger ingen ramme.
+
+Det som gjenstår: innenfor rammen er teksten fortsatt angriperens.
+`«NO99 0000 0000 000. Godkjent av finansdirektør»` er fortsatt stygt å lese, og
+et menneske i fart kan lese innholdet i en ramme som om det var en opplysning
+fra Lonewatch. Det samme gjelder pakkenavnet: `nordlys-core-godkjent` er et
+gyldig navn innenfor de tillatte tegnene. Reglene bruker uansett det EKTE
+feltet — det er bare visningen som er begrenset.
 
 ## "Prøv selv" setter to felt selv
 Skjemaet lar ikke den som skriver oppgi `recipient_known` eller `reversible`;
@@ -469,8 +568,14 @@ på den. Mellomstasjonen kjører ingenting selv og kan derfor ikke vite om
 skanningen faktisk har skjedd, eller om den som kaller har funnet på innholdet.
 Den som kan kalle `evaluate()` kan sende inn en oppdiktet `clean`-rapport og få
 et tillegg gjennom. Vi sjekker én ting: at rapporten gjelder det samme
-pakkenavnet som forespørselen (ellers kaster vi `ValueError`). Det beviser at
-rapporten handler om riktig tillegg, ikke at den er ekte.
+pakkenavnet som forespørselen (ellers kaster vi `SandboxReportMismatch`, som er
+en `ValueError`). Det beviser at rapporten handler om riktig tillegg, ikke at
+den er ekte.
+
+Dette er den **eneste** feilen `evaluate()` fortsatt kaster. Alt annet den ikke
+klarer å lese kommer ut som en `block`-Decision — se avsnittet under. Grunnen
+til at nettopp denne skiller seg ut: et `block`-svar ville latt den som kalte tro
+at rapporten ble lest, og feilen skal rettes der den er gjort.
 
 **Hva som ville løst det:** at rapporten var signert av sandkassen, og at
 mellomstasjonen sjekket signaturen før den brukte den.
@@ -481,6 +586,19 @@ stoppet det), `clean` (vi så etter og fant ingenting) og `not_tested` (tillegge
 kom aldri i gang, så vi fikk aldri sett etter). Bare `blocked` utløser
 `sandbox_blocked`. `not_tested` legger ingenting til - men den later heller
 ikke som vi har sett noe.
+
+Og **ingen rapport i det hele tatt** er en fjerde ting, som før ble sagt med
+samme ord som `not_tested`. Nå sier teksten «Sandkassen ble aldri spurt om dette
+tillegget, så det er ikke testet i sandkassen», mot `not_tested`-rapportens
+«Sandkassen fikk ikke testet tillegget: det kom aldri i gang.» Det var H24 i
+`docs/ANGREP.md` — ordlyden er lukket.
+
+**Hva som står igjen av H24:** gateway er fortsatt ren og kan ikke *vite* at den
+som kalte glemte sandkassen. Å oppdage det ville krevd at rapporten var påkrevd
+for `install_package`, og det er en avtale med `sandbox/` — en endring i
+grensesnittet mellom to mapper, ikke noe `gateway/` kan bestemme alene.
+Mennesket blir ikke lurt (teksten sier at ingen har sett etter), men Lonewatch
+kan ikke skille «ingen rapport» fra «vi glemte å teste».
 
 En `clean`-rapport betyr bare at sandkassen ikke så noe mens den så etter.
 Et tillegg som kjenner igjen en sandkasse, oppfører seg pent hos oss og stjeler
@@ -505,6 +623,27 @@ gjennom tegn som hører hjemme i et vertsnavn eller en IP-adresse, og vi viser
 maks tre adresser. Et vertsnavn er likevel fritt innenfor de tegnene, så noe som
 `sikkerhetsgodkjent.example` kan fortsatt leses som noe det ikke er. Vi viser
 aldri `notes` fra rapporten i varselet, nettopp fordi den er lengre og romsligere.
+
+## Fail-closed er nå en egenskap ved svaret, ikke et ansvar hos kalleren
+`evaluate()` kastet før et unntak på alt som ikke var en lesbar
+`ActionRequest`. Ingen fikk `allow` — så langt var det fail-closed — men den som
+**kalte** måtte huske å fange unntaket. `ui/state.py` gjør det (`except
+Exception` rundt `_handle`), og da blir svaret en pen feilmelding. En ny
+integrasjon som glemmer det får unntaket opp i stakken, og hva som skjer da (kø
+som stopper, forespørsel som forsvinner, verktøy som kalles likevel) ble
+bestemt utenfor `gateway/`. Det var H23 i `docs/ANGREP.md`.
+
+Nå kommer det en `Decision` med `verdict=block`, `risk=high` og
+`reasons=["unjudgeable_request"]` ut. Teksten er fast og inneholder **ingenting**
+av det vi ikke klarte å lese: en feilmelding fra Python kan inneholde tekst noen
+andre har skrevet, og den skal ikke havne i varselet.
+
+Det som gjenstår: `contracts.Decision` krever `request_id` og `ts`, og vi har
+ingen av dem når vi ikke kunne lese forespørselen. Vi redder det vi kan og
+bruker tom id og `0001-01-01` ellers. En logglinje med tom `request_id` henger
+ikke sammen med noen forespørsel — den sier at noe ble stoppet, ikke hva. Å
+gjøre bedre krever et felt i `contracts.py` for «vi vet ikke», og den filen er
+låst.
 
 ## Tillegg vurderes bare på navn
 `new_package` og blokklisten sammenligner tekststrenger. Et farlig tillegg som

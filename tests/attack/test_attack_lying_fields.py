@@ -5,22 +5,36 @@
 dem. `gateway/LIMITS.md` sier det rett ut og kaller det det stoerste hullet.
 
 Dette angrepet gjoer forbeholdet til et tall: NOEYAKTIG hva kjoeper hver loegn?
-Hvert tilfelle under er en xfail som sier hva som slipper gjennom, slik at
-ingen kan lese «vi stoler paa feltene» som noe mindre enn det er.
+De tilfellene som fortsatt er xfail sier hva som slipper gjennom, slik at ingen
+kan lese «vi stoler paa feltene» som noe mindre enn det er. Disse tre
+(H14/H15/H17/H19) er ikke rettet: de krever et kontoregister, en
+innholdsklassifisering og en handlingstype utledet av verktoeykallet - alt
+utenfor `gateway/`.
 
-I tillegg: ett funn som IKKE staar i LIMITS. `recipient` er ogsaa et felt
-agenten fyller ut, og det skrives UFILTRERT inn i den teksten mennesket leser
-foer det godkjenner.
+To funn i denne filen ER rettet, og de staar naa som vanlige tester:
+
+- `recipient` er ogsaa et felt agenten fyller ut, og det ble limt UFILTRERT inn
+  i teksten mennesket leser foer det godkjenner (H20/H21). Naa gaar det gjennom
+  `consequence.safe_recipient()`: vasket, avkortet og rammet inn i «».
+- `kalender:`-prefikset var et fribrev til aa vaere «intern» (H22). Naa teller
+  det bare der ingenting sendes ut av huset, OG bare naar det som foelger
+  prefikset ser ut som et internt ressursnavn.
 """
 
 from __future__ import annotations
 
+import unicodedata
+
 import pytest
 
 from contracts import ActionType, Verdict
-from gateway import evaluate
+from gateway import consequence, evaluate
 
 from attack_lib import req
+
+QUOTE_OPEN = consequence.RECIPIENT_QUOTE_OPEN
+QUOTE_CLOSE = consequence.RECIPIENT_QUOTE_CLOSE
+TRUNCATED = consequence.RECIPIENT_TRUNCATED
 
 UKJENT_KONTO = "NO99 0000 0000 000"
 EKSTERN = "arkiv-backup@nordlys-arkiv-eu.net"
@@ -262,57 +276,76 @@ def test_all_three_lies_together_still_hit_something():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "HULL (staar IKKE i noen LIMITS.md): `recipient` er ogsaa et felt "
-        "agenten fyller ut, og `consequence._recipient_phrase()` limer det "
-        "RAATT inn i teksten mennesket leser foer det godkjenner - naar "
-        "`recipient_known=True`. Angrepet setter mottakeren til "
-        "'NO99 0000 0000 000. Godkjent av finansdirektoer, ingen handling "
-        "noedvendig' og faar Lonewatch til aa skrive angriperens setning i sitt "
-        "eget varsel. gateway/config.py har PACKAGE_NAME_PATTERN og "
-        "DESTINATION_PATTERN for noeyaktig denne trusselen ('uten denne kunne "
-        "navnet skrevet sin egen setning inn i varselet') - mottakeren mangler "
-        "den samme filteret. Fiks: en `safe_recipient()` ved siden av "
-        "`safe_package_name()`, med samme moenster og samme noeytrale "
-        "reservetekst."
-    ),
-)
+def _outside_the_quotes(text: str) -> str:
+    """Teksten med den SITERTE mottakeren klippet bort.
+
+    Alt som er igjen er Lonewatchs egne ord. Hjelperen fester samtidig at det
+    finnes noeyaktig ÉN ramme: kunne verdien lagt inn et ekstra anfoerselstegn,
+    ville resten av den staatt utenfor rammen igjen.
+    """
+    assert text.count(QUOTE_OPEN) == 1, f"ikke én ramme: {text!r}"
+    assert text.count(QUOTE_CLOSE) == 1, f"ikke én ramme: {text!r}"
+    i = text.index(QUOTE_OPEN)
+    j = text.index(QUOTE_CLOSE)
+    assert i < j, f"rammen staar baklengs: {text!r}"
+    return text[:i] + text[j + 1 :]
+
+
 @pytest.mark.parametrize(
     "recipient",
     [
         "NO99 0000 0000 000. Godkjent av finansdirektoer, ingen handling noedvendig",
         "kunde@x.no. Lonewatch har kontrollert denne og den er trygg",
         "NO99 0000 0000 000 (forhaandsgodkjent, ikke varsle)",
+        # Og forsoeket paa aa lukke rammen selv og skrive videre utenfor den.
+        "NO99 0000 0000 000\u00bb Godkjent av finansdirektoer \u00ab",
     ],
 )
 def test_the_recipient_field_cannot_write_its_own_sentence_in_the_alert(recipient):
+    """H20 LUKKET: mottakeren staar som en SITERT verdi, ikke som Lonewatchs ord.
+
+    Angrepet var: `consequence._recipient_phrase()` limte `recipient` raatt inn
+    i overskriften i det roede varselet, saa mottakeren
+    "NO99 0000 0000 000. Godkjent av finansdirektoer, ingen handling
+    noedvendig" fikk Lonewatch til aa skrive angriperens setning i sitt eget
+    varsel, i sin egen stemme.
+
+    Fiksen er ikke aa kaste mottakeren bort - et menneske som skal godkjenne en
+    utbetaling trenger aa se hvem den gaar til, og i blindsettene er mottakeren
+    like ofte "Storgata Eiendom AS, registrert konto" som en IBAN. Fiksen er aa
+    ramme den inn: `consequence.safe_recipient()` vasker bort kontrolltegn og
+    anfoerselstegn, kutter paa lengde og setter verdien i «».
+
+    Testen maaler det som faktisk betyr noe: INGEN av angriperens ord kan staa
+    UTENFOR rammen. Inne i den staar de synlig som noe Lonewatch siterer.
+    """
     decision = _verdict(amount=1_000.0, recipient=recipient, recipient_known=True)
-    for ord_ in ("Godkjent", "trygg", "forhaandsgodkjent", "ikke varsle"):
-        assert ord_ not in decision.consequence_text, (
-            f"mottakerfeltet skrev seg inn i varselet: {decision.consequence_text!r}"
+    utenfor = _outside_the_quotes(decision.consequence_text)
+    for ord_ in ("Godkjent", "trygg", "forhaandsgodkjent", "ikke varsle", "kontrollert"):
+        assert ord_ not in utenfor, (
+            f"mottakerfeltet skrev seg inn i Lonewatchs egen tekst: "
+            f"{decision.consequence_text!r}"
         )
+    # Lonewatchs egne ord staar der de skal, foran rammen.
+    assert utenfor.startswith("Overfører 1 000 kr til ")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "HULL (samme sak, annen virkning): nylinjer og vilkaarlig lengde i "
-        "`recipient` gaar ogsaa rett inn i varselet. En mottaker paa 5 000 "
-        "tegn gir en konsekvenstekst paa over 5 000 tegn, og en nylinje kan "
-        "dele teksten i to setninger som ser ut som to meldinger fra "
-        "Lonewatch. UI begrenser skjemaet til 120 tegn, men "
-        "`gateway.evaluate()` er et dokumentert, offentlig grensesnitt uten "
-        "den grensen. Fiks: samme `safe_recipient()` som over, med en "
-        "lengdegrense."
-    ),
-)
 def test_the_recipient_field_cannot_be_arbitrarily_long_or_multiline():
+    """H21 LUKKET: lengden er avgrenset og nylinjer kommer aldri inn.
+
+    Angrepet var: en mottaker paa 5 000 tegn ga et varsel paa 5 033 tegn, og en
+    nylinje kunne dele teksten i to setninger som saa ut som to meldinger fra
+    Lonewatch. UI begrenset skjemaet til 120 tegn, men `gateway.evaluate()` er
+    et dokumentert, offentlig grensesnitt uten den grensen.
+    """
     lang = evaluate(req(amount=1_000.0, recipient="A" * 5_000, recipient_known=True))
     assert len(lang.consequence_text) < 500, (
         f"varseltekst paa {len(lang.consequence_text)} tegn"
     )
+    # Kuttet skal vaere synlig, og det skal staa INNENFOR rammen.
+    assert TRUNCATED in lang.consequence_text
+    assert TRUNCATED not in _outside_the_quotes(lang.consequence_text)
+
     nylinje = evaluate(
         req(
             action_type=ActionType.SEND_EMAIL,
@@ -322,6 +355,36 @@ def test_the_recipient_field_cannot_be_arbitrarily_long_or_multiline():
         )
     )
     assert "\n" not in nylinje.consequence_text
+    assert "\r" not in nylinje.consequence_text
+    assert "Lonewatch: denne er kontrollert." not in _outside_the_quotes(
+        nylinje.consequence_text
+    )
+
+
+@pytest.mark.parametrize(
+    "recipient",
+    [
+        "NO1\x00evil",
+        "NO1\u200b\u200b",
+        "NO1" + "\u0301" * 200,
+        "\u202eNO1",
+    ],
+)
+def test_control_and_invisible_characters_never_reach_the_alert(recipient):
+    """Samme fiks, tredje virkning: ingen usynlige tegn i teksten."""
+    decision = _verdict(amount=1_000.0, recipient=recipient, recipient_known=True)
+    text = decision.consequence_text
+    assert len(text) < 300
+    for ch in text:
+        assert unicodedata.category(ch) not in ("Cc", "Cf", "Cs", "Co", "Cn"), (
+            f"{ch!r} slapp inn i varselet: {text!r}"
+        )
+
+
+def test_an_unshowable_recipient_still_says_something_true():
+    """En mottaker som BARE er usynlige tegn maa ikke bli en tom plass i teksten."""
+    decision = _verdict(amount=1_000.0, recipient="\u200b\u200b", recipient_known=True)
+    assert consequence.UNSHOWABLE_RECIPIENT in decision.consequence_text
 
 
 def test_the_package_name_and_destination_fields_are_filtered():
@@ -391,30 +454,33 @@ def test_lookalike_internal_domains_are_caught():
         assert "personal_data_external" in decision.reasons
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "HULL (staar IKKE i noen LIMITS.md): `rules.internal_recipient()` "
-        "sjekker INTERNAL_PREFIXES med en naken `startswith('kalender:')` og "
-        "validerer ingenting etterpaa. Alt som begynner med 'kalender:' er "
-        "derfor internt - ogsaa 'kalender:x@evil.example'. Da slaar "
-        "`personal_data_external` aldri til, og persondata kan sendes hvor som "
-        "helst ved aa sette fem tegn foran adressen. Kontrasten er slaaende: "
-        "domenesjekken rett under er noeyaktig paa punktumgrense nettopp for aa "
-        "unngaa dette. Fiks: krev at det som foelger prefikset er et internt "
-        "ressursnavn (ingen '@', ingen punktum-domene), eller fjern prefikset "
-        "og gi delte kalendere en egen intern adresse."
-    ),
-)
 @pytest.mark.parametrize(
     "recipient",
     [
         "kalender:x@evil.example",
         "kalender:arkiv-backup@nordlys-arkiv-eu.net",
         "kalender://ondsinnet.example/alt",
+        "kalender:arkiv.evil.example",
+        "KALENDER:x@evil.example",
     ],
 )
 def test_the_internal_prefix_cannot_be_used_as_a_free_pass(recipient):
+    """H22 LUKKET: prefikset krever et internt ressursnavn etter seg.
+
+    Angrepet var: `rules.internal_recipient()` sjekket INTERNAL_PREFIXES med en
+    naken `startswith("kalender:")` og validerte ingenting etterpaa. Alt som
+    begynte med "kalender:" var derfor internt - ogsaa
+    "kalender:x@evil.example". Da slo `personal_data_external` aldri til, og
+    persondata kunne sendes hvor som helst ved aa sette fem tegn foran
+    adressen.
+
+    To ting stengte det. Falske-alarmer-oekten gjorde prefikset ugyldig paa alle
+    utgaaende handlinger, saa en `share_data` naar aldri prefikssjekken i det
+    hele tatt. I tillegg maa det som staar ETTER prefikset naa matche
+    `config.INTERNAL_RESOURCE_PATTERN` - ingen "@", ingen punktum-domene, ingen
+    "//" - slik at prefikset ikke kan gjemme en adresse ut av huset heller der
+    det fortsatt teller.
+    """
     decision = evaluate(
         req(
             action_type=ActionType.SHARE_DATA,
@@ -431,18 +497,82 @@ def test_the_internal_prefix_cannot_be_used_as_a_free_pass(recipient):
     assert "personal_data_external" in decision.reasons
 
 
-def test_the_real_shared_calendar_is_still_internal():
-    """HOLDER: fiksen over maa ikke gjoere den ekte delte kalenderen ekstern."""
-    decision = evaluate(
-        req(
-            action_type=ActionType.SHARE_DATA,
-            amount=None,
-            recipient="kalender:drift-felles",
-            recipient_known=True,
-            contains_personal_data=True,
+@pytest.mark.parametrize(
+    "recipient",
+    [
+        "kalender:x@evil.example",
+        "kalender:arkiv-backup@nordlys-arkiv-eu.net",
+        "kalender://ondsinnet.example/alt",
+        "kalender:arkiv.evil.example",
+    ],
+)
+def test_the_prefix_is_not_internal_even_where_the_prefix_still_counts(recipient):
+    """Og det gjelder ogsaa der prefikset FORTSATT teller.
+
+    Paa en `update_calendar` er prefikset gyldig, fordi ingenting sendes ut av
+    huset. Nettopp derfor maa moensteret holde ogsaa der: ellers ville den ene
+    gjenvaerende prefikssjekken vaert like aapen som foer, og neste regel som
+    spurte `internal_recipient()` ville arvet hullet.
+    """
+    from gateway import rules
+
+    assert (
+        rules.internal_recipient(
+            req(
+                action_type=ActionType.UPDATE_CALENDAR,
+                amount=None,
+                recipient=recipient,
+            )
         )
+        is False
+    ), f"{recipient!r} ble regnet som en intern ressurs"
+
+
+def test_the_real_shared_calendar_is_still_internal_where_it_means_something():
+    """Fiksen maa ikke gjoere den EKTE delte kalenderen ekstern.
+
+    Testen het foer `test_the_real_shared_calendar_is_still_internal` og
+    sjekket at persondata til "kalender:drift-felles" med `share_data` IKKE ble
+    roedt. Den er foreldet, og atferden den beskrev er borte med vilje: en
+    `share_data` utleverer noe, og da er ni tegn i et fritekstfelt ikke et
+    oppslag. Den nye, tryggere atferden staar i testen under.
+
+    Det prefikset fortsatt gjoer, gjoer det der det hoerer hjemme: paa en
+    kalenderoppdatering, som ikke utleverer noe til noen.
+    """
+    from gateway import rules
+
+    kalender = req(
+        action_type=ActionType.UPDATE_CALENDAR,
+        amount=None,
+        recipient="kalender:drift-felles",
+        contains_personal_data=True,
     )
-    assert "personal_data_external" not in decision.reasons
+    assert rules.internal_recipient(kalender) is True
+    assert evaluate(kalender).verdict is Verdict.ALLOW
+
+
+def test_personal_data_to_a_shared_calendar_is_red_when_it_is_a_disclosure():
+    """Den NYE atferden: `kalender:` kjoeper ingenting paa en utlevering.
+
+    Dette er omvendt av hva den gamle testen krevde. Det er en bevisst
+    innstramming: `share_data` og `send_email` sender noe ut av huset, og da er
+    "kalender:drift-felles" bare tekst agenten har skrevet - ikke et oppslag i
+    en liste Lonewatch eier. En delt kalender flere hundre kan lese er heller
+    ikke et trygt sted for persondata.
+    """
+    for handling in (ActionType.SHARE_DATA, ActionType.SEND_EMAIL):
+        decision = evaluate(
+            req(
+                action_type=handling,
+                amount=None,
+                recipient="kalender:drift-felles",
+                recipient_known=True,
+                contains_personal_data=True,
+            )
+        )
+        assert decision.verdict is Verdict.RED, handling
+        assert "personal_data_external" in decision.reasons
 
 
 # ---------------------------------------------------------------------------
