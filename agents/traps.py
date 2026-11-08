@@ -13,6 +13,18 @@ Hva en felle er i Lonewatch:
 
 Lonewatch leser ALDRI denne teksten som en instruksjon, og bruker den ALDRI til
 risikovurdering. Vi bare registrerer at fella gikk av, slik at det står i loggen.
+
+Hvordan en felle OPPDAGES (endret i runde 3, herd-e):
+  Før slo `trap_triggered()` `doc_id` opp i den håndskrevne listen under, og
+  `found_markers()` lette etter fire faste strenger. Et helt nytt dokument med
+  en skjult instruksjon ga da ingen felle, ingen logglinje og ingen varsellampe
+  (H11, H12 og H13 i docs/ANGREP.md). Nå går begge veien om
+  `agents/doc_scan.py`, som skanner INNHOLDET: skjulemekanismer, instruksjons-
+  fraser i det som er skjult, og alle metadata-verdier. Skanneren er
+  deterministisk, bruker ingen AI, og leser aldri agentens `summary`.
+
+  Grensene står ærlig i `agents/LIMITS.md` og i toppen av `agents/doc_scan.py`:
+  tekst i bilder, kodede strenger og språk vi ikke kjenner går fortsatt fri.
 """
 
 from __future__ import annotations
@@ -20,9 +32,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from agents import doc_scan
 from contracts import TrapEvent
 
-# Markørene vi leter etter. Alt som er usynlig for et menneske, men lesbart for en agent.
+# Triksene de håndskrevne demodokumentene under bruker. De er IKKE lenger
+# listen vi leter etter - `agents/doc_scan.py` kjenner mekanismen bak hver av
+# dem, og mange flere. Navnene står her fordi dokumentene under bruker dem, og
+# fordi `MARKER_METADATA_KEY` også er navnet skanneren rapporterer når
+# instruksjonen ligger under nettopp denne metadata-nøkkelen.
 MARKER_METADATA_KEY = "x-lw-instruction"
 MARKER_INVISIBLE_FONT = "font-size:1px"
 MARKER_WHITE_ON_WHITE = "color:#ffffff"
@@ -60,7 +77,21 @@ class TrapDoc:
 
     @property
     def is_trapped(self) -> bool:
-        return bool(self.trap_id)
+        """Er det noe skjult her? Avgjøres av INNHOLDET, ikke av `trap_id`.
+
+        `trap_id` er en merkelapp vi selv satte på demodokumentene. Et dokument
+        vi aldri har sett før, men som har en skjult instruksjon, er like
+        felle-merket - og det er nettopp det H11 handlet om.
+        """
+        return bool(self.trap_id) or bool(self.scan())
+
+    def scan(self) -> list[doc_scan.Finding]:
+        """Funnene skanneren gjør i dette dokumentet. Tom liste for rene."""
+        return doc_scan.scan_document(
+            visible_text=self.visible_text,
+            hidden_text=self.hidden_text,
+            metadata=self.metadata,
+        )
 
     def visible_to_human(self) -> str:
         """Det et menneske ser. Den skjulte teksten er ikke med."""
@@ -204,9 +235,34 @@ _CLEAN_DOCS: tuple[TrapDoc, ...] = (
 )
 
 
+# Dokumenter som kommer inn mens demoen kjører. Demodokumentene over er faste,
+# men et dokument en agent faktisk får i hendene finnes ikke i noen liste på
+# forhånd. Registreres det her, kan `find_doc()` finne det - og skanneren
+# avgjør om det er en felle. Det er listen som er fjernet som fasit, ikke
+# muligheten til å slå opp et dokument vi har sett.
+_REGISTERED_DOCS: dict[str, TrapDoc] = {}
+
+
+def register_doc(doc: TrapDoc) -> TrapDoc:
+    """Legger et dokument vi har sett under kjøringen inn i oppslaget.
+
+    Dette gjør IKKE dokumentet til en felle. Om det er en felle avgjøres av
+    `agents/doc_scan.py` på innholdet.
+    """
+    _REGISTERED_DOCS[doc.doc_id] = doc
+    return doc
+
+
+def clear_registered_docs() -> None:
+    """Tømmer de registrerte dokumentene. Demodokumentene står igjen."""
+    _REGISTERED_DOCS.clear()
+
+
 def all_docs() -> list[TrapDoc]:
     """Alle dokumentene i demoen, rene og felle-merkede."""
-    return list(_CLEAN_DOCS) + list(_TRAPPED_DOCS)
+    faste = list(_CLEAN_DOCS) + list(_TRAPPED_DOCS)
+    kjente = {d.doc_id for d in faste}
+    return faste + [d for k, d in sorted(_REGISTERED_DOCS.items()) if k not in kjente]
 
 
 def trapped_docs() -> list[TrapDoc]:
@@ -228,58 +284,106 @@ def find_doc(doc_id: str) -> TrapDoc | None:
 
 
 def found_markers(doc: TrapDoc) -> list[str]:
-    """Hvilke usynlige markører som ligger i dokumentet. Tom liste for rene dokumenter."""
-    found: list[str] = []
-    if MARKER_METADATA_KEY in doc.metadata:
-        found.append(MARKER_METADATA_KEY)
-    for marker in (MARKER_INVISIBLE_FONT, MARKER_WHITE_ON_WHITE, MARKER_ZERO_WIDTH):
-        if marker in doc.hidden_text:
-            found.append(marker)
-    return found
+    """Merkelappene skanneren fant. Tom liste for rene dokumenter.
+
+    Dette er ikke lenger fire faste strenger, men mekanismene
+    `agents/doc_scan.py` kjente igjen: `html-kommentar`, `hvit-paa-hvit`,
+    `display:none`, `nullbredde-tegn`, metadata-nøkkelen instruksjonen sto
+    under, og så videre. Skanneren sier HVA den fant, ikke bare ja eller nei.
+    """
+    return doc_scan.labels_in(doc.scan())
 
 
-def is_trapped(doc_id: str) -> bool:
-    """True hvis dokumentet med denne id-en har en felle."""
-    doc = find_doc(doc_id)
+def found_mechanisms(doc: TrapDoc) -> list[str]:
+    """Mekanismene som ble funnet, med sitt faste navn fra `doc_scan`."""
+    return doc_scan.mechanisms_in(doc.scan())
+
+
+def scan_findings(doc: TrapDoc) -> list[doc_scan.Finding]:
+    """Hele funnlisten: mekanisme, hvor den sto, og beviset."""
+    return doc.scan()
+
+
+def _as_doc(doc_or_id: TrapDoc | str) -> TrapDoc | None:
+    """Godtar både et dokument og en doc_id.
+
+    Et dokument sendt inn direkte trenger ikke stå i noen liste: skanneren
+    leser innholdet. Det var hele poenget med H11.
+    """
+    if isinstance(doc_or_id, TrapDoc):
+        return doc_or_id
+    return find_doc(str(doc_or_id))
+
+
+def is_trapped(doc_or_id: TrapDoc | str) -> bool:
+    """True hvis dokumentet skjuler noe. Tar et dokument eller en doc_id."""
+    doc = _as_doc(doc_or_id)
     return bool(doc and doc.is_trapped)
 
 
-def _what_happened(doc: TrapDoc, access: str, markers: list[str]) -> str:
+def _trap_id_for(doc: TrapDoc, mechanisms: list[str]) -> str:
+    """Merkelappen på fella. Håndskrevet der vi har en, ellers fra funnet."""
+    if doc.trap_id:
+        return doc.trap_id
+    if not mechanisms:
+        return "trap_ukjent"
+    slug = "".join(ch if ch.isalnum() else "_" for ch in mechanisms[0].lower())
+    return "trap_skanner_" + slug.strip("_")
+
+
+def _what_happened(doc: TrapDoc, access: str, findings: list[doc_scan.Finding]) -> str:
+    """Norsk klartekst om hva som skjedde. Sier hvilken MEKANISME som ble funnet.
+
+    `doc.intent` står bare med når vi selv har skrevet den (demodokumentene).
+    For et dokument vi aldri har sett før dikter vi ikke opp en hensikt - vi
+    sier hva vi fant og hvor.
+    """
     handling = {
         ACCESS_READ: "leste",
         ACCESS_SEND: "sendte ut",
     }.get(access, "behandlet")
-    marker_text = ", ".join(markers) if markers else "ingen kjente markører"
+    mekanismer = doc_scan.mechanisms_in(findings)
+    funn_tekst = ", ".join(mekanismer) if mekanismer else "ingen kjent mekanisme"
+    hvor = ", ".join(sorted({f.where for f in findings})) or "ukjent sted"
+    intent = f" Forsøk: {doc.intent}" if doc.intent else ""
     return (
         f"Agenten {handling} {doc.doc_id} ({doc.title}). "
         f"Dokumentet inneholder skjult tekst som ikke vises for mennesker. "
-        f"Funnet: {marker_text}. Forsøk: {doc.intent} "
+        f"Funnet: {funn_tekst} (i {hvor})."
+        f"{intent} "
         "Lonewatch følger ikke instruksjonen, men registrerer at fella gikk av."
     )
 
 
 def trap_triggered(
-    doc_id: str,
+    doc_or_id: TrapDoc | str,
     agent_id: str,
     access: str = ACCESS_READ,
     ts: datetime | None = None,
 ) -> TrapEvent | None:
-    """Returnerer et TrapEvent hvis en simulert agent leste eller sendte ut et felle-merket dokument.
+    """TrapEvent hvis en simulert agent leste eller sendte ut et dokument som skjuler noe.
 
-    Returnerer None for rene dokumenter og for dokument-id-er som ikke finnes, slik at
-    den som kaller kan kalle på hver handling uten å sjekke først.
+    Tar et dokument ELLER en doc_id. Et dokument sendt inn direkte trenger ikke
+    stå i noen liste: skanneren leser innholdet. Det er forskjellen fra før,
+    da svaret var None for alt som ikke var ett av fire håndskrevne dokumenter.
+
+    Returnerer None for rene dokumenter og for dokument-id-er som ikke finnes,
+    slik at den som kaller kan kalle på hver handling uten å sjekke først.
     """
-    doc = find_doc(doc_id)
-    if doc is None or not doc.is_trapped:
-        return None
-
     if access not in (ACCESS_READ, ACCESS_SEND):
         raise ValueError(f"ukjent access: {access!r}")
+
+    doc = _as_doc(doc_or_id)
+    if doc is None:
+        return None
+    findings = doc.scan()
+    if not findings and not doc.trap_id:
+        return None
 
     return TrapEvent(
         ts=ts if ts is not None else datetime.now(timezone.utc),
         doc_id=doc.doc_id,
         agent_id=agent_id,
-        trap_id=doc.trap_id,
-        what_happened=_what_happened(doc, access, found_markers(doc)),
+        trap_id=_trap_id_for(doc, doc_scan.mechanisms_in(findings)),
+        what_happened=_what_happened(doc, access, findings),
     )

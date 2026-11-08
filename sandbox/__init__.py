@@ -10,8 +10,15 @@ utviklermiljø. Alt tillegget gjør skrives ned, og rapporten sier `clean`,
 `blocked` eller `not_tested` (tillegget kom aldri i gang, så vi fikk ikke sett
 hva det ville gjort).
 
+Før noe kjøres leses kilden av en deterministisk statisk sjekk
+(`sandbox/static_check.py`). Kjente rømningsmønstre - `__globals__`,
+`__subclasses__`, `eval`, `getattr` med streng - avvises FØR kjøring, og
+tillegget blir `blocked` uten at det startes en prosess.
+
 Avgjørelsen er en fast regel på det tillegget faktisk gjorde - aldri en
-AI-modell, og aldri tilleggets egen beskrivelse av seg selv.
+AI-modell, og aldri tilleggets egen beskrivelse av seg selv. `clean` krever
+bevis: harness-et må ha bekreftet at sperrene sto igjen etterpå. Uten det
+beviset sier rapporten `not_tested`.
 
 Les `sandbox/LIMITS.md` før du tror dette er ekte isolasjon. Det er det ikke.
 """
@@ -40,8 +47,16 @@ if sys.version_info < MIN_PYTHON:  # pragma: no cover - avhenger av tolkeren
         "pip install -r requirements.txt"
     )
 
-from . import config, fake_home
-from .report import INCONCLUSIVE_EVENTS, NOT_TESTED_NOTE, is_inconclusive
+from . import config, fake_home, static_check
+from .report import (
+    GUARDS_INTACT_EVENT,
+    INCONCLUSIVE_EVENTS,
+    NOT_PROVEN_NOTE,
+    NOT_TESTED_NOTE,
+    guards_proven,
+    is_inconclusive,
+)
+from .static_check import Finding, check_source
 from .runner import (
     SandboxRun,
     UnknownPackage,
@@ -60,8 +75,14 @@ HANGING_PACKAGE = config.HANGING_PACKAGE
 __all__ = [
     "MIN_PYTHON",
     "INCONCLUSIVE_EVENTS",
+    "GUARDS_INTACT_EVENT",
     "NOT_TESTED_NOTE",
+    "NOT_PROVEN_NOTE",
     "is_inconclusive",
+    "guards_proven",
+    "static_check",
+    "check_source",
+    "Finding",
     "scan",
     "scan_cached",
     "clear_scan_cache",
