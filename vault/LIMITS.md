@@ -128,6 +128,14 @@ som skjedde - men ikke aa sitere ordrett hva skjermen sa.
 **Og naar en forespørsel logges, vet vi ennaa ikke avgjørelsen**, saa den kan ikke
 minimeres like hardt som en `allow`-avgjørelse. Vi beholder feltene reglene trenger.
 
+**Arten `"execution"` kjenner `redact_payload()` ikke.** Den kom til i runde 2
+(utfoereren), og den faller gjennom til den generelle regelen: `summary` og
+`consequence_text` kastes - og ingen av dem staar i en utfoeringslinje - mens
+resten blir staaende som den er. Det gaar bra i dag fordi `executor/mail.py`
+maskerer mottakeren FOER linjen naar hit (`o***@nordlys.no`). Men det betyr at
+minimeringen ikke er et sikkerhetsnett for denne arten: legger noen et nytt felt
+i `ExecutionResult`, gaar det rett i loggen. Se `executor/LIMITS.md` punkt 2.
+
 ## 8. Loggen er ikke slettbar paa forespørsel
 En logg som bare vokser og som er hash-kjedet, kan ikke rette seg etter et krav om sletting
 av persondata uten aa knekke kjeden. Det er en reell konflikt med personvern som denne

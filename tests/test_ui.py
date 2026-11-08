@@ -19,7 +19,9 @@ from pathlib import Path
 
 import pytest
 
+from conftest import HUMAN_KEY
 from contracts import ActionRequest, ActionType, Verdict
+from ui.human_key import HUMAN_KEY_HEADER
 from ui.state import (
     STATUS_ALLOW,
     STATUS_APPROVED,
@@ -185,16 +187,23 @@ def test_the_right_amount_approves_it_and_lands_in_the_log(state):
     request_id = card["request"]["id"]
     before = len(state.vault.entries())
 
-    out = state.respond(request_id, approved=True, typed_amount="10 000 000", seconds_to_decide=9.5)
+    out = state.respond(request_id, approved=True, typed_amount="10 000 000")
     assert out["ok"] is True
     assert state.cards[request_id]["status"] == STATUS_APPROVED
-    assert len(state.vault.entries()) == before + 1
+    # To linjer: svaret fra mennesket, og hva utfoereren gjorde etterpaa.
+    assert len(state.vault.entries()) == before + 2
 
-    human = state.vault.entries()[-1]
+    human = state.vault.entries()[-2]
     assert human.kind == "human"
     assert human.payload["approved"] is True
     assert human.payload["typed_amount"] == BIG_TRANSFER_NOK
-    assert human.payload["seconds_to_decide"] == pytest.approx(9.5)
+    # Betenkningstiden maales av tjeneren, fra kortet kom i koeen. Den kan
+    # ikke oppgis, saa det eneste vi kan si er at den er et tall >= 0.
+    assert human.payload["seconds_to_decide"] >= 0.0
+
+    utforing = state.vault.entries()[-1]
+    assert utforing.kind == "execution"
+    assert utforing.payload["request_id"] == request_id
 
 
 def test_the_log_never_contains_the_employee_name_only_the_pseudonym(state):
@@ -646,11 +655,18 @@ def _get(base: str, path: str):
         return res.status, json.loads(res.read())
 
 
-def _post(base: str, path: str, body: dict | None = None):
+def _post(base: str, path: str, body: dict | None = None, human_key: str | None = HUMAN_KEY):
+    """POST med menneskenoekkelen paa.
+
+    Noekkelen sendes paa ALLE kall her, ikke bare paa /api/respond. Det er
+    enklest, og de andre rutene leser ikke hodet. `human_key=None` sender
+    den ikke - det bruker testen som sjekker at godkjenning krever den.
+    """
     data = json.dumps(body or {}).encode()
-    req = urllib.request.Request(
-        base + path, data=data, headers={"Content-Type": "application/json"}
-    )
+    headers = {"Content-Type": "application/json"}
+    if human_key is not None:
+        headers[HUMAN_KEY_HEADER] = human_key
+    req = urllib.request.Request(base + path, data=data, headers=headers)
     with urllib.request.urlopen(req, timeout=5) as res:
         return res.status, json.loads(res.read())
 
@@ -713,14 +729,11 @@ def test_approving_over_http_needs_the_right_amount(server):
     status, out = _post(
         server,
         "/api/respond",
-        {
-            "request_id": request_id,
-            "approved": True,
-            "typed_amount": "10 000 000",
-            "seconds_to_decide": 4.0,
-        },
+        {"request_id": request_id, "approved": True, "typed_amount": "10 000 000"},
     )
     assert status == 200 and out["ok"] is True
+    # Betenkningstiden er maalt av tjeneren, ikke oppgitt av oss.
+    assert out["card"]["human"]["seconds_to_decide"] >= 0.0
 
     _post(server, "/api/reset")
 

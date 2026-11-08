@@ -4,38 +4,54 @@ Utføreren er det eneste stedet i Lonewatch som rører omverdenen. Den er med
 vilje liten, og det er mye den ikke gjør. Her står hullene, slik at ingen tror
 noe annet. Den ikke-tekniske versjonen står i `docs/UTFORER.md`.
 
-## 1. Boka over hva som er forsøkt lever bare i minnet
-`AttemptLedger` er et sett i RAM. Starter du prosessen på nytt, er boka tom, og
-den samme forespørselen kan utføres en gang til. Kravet "aldri to ganger"
-holder derfor bare innenfor én kjøring.
+## 1. Boka over hva som er forsøkt leses fra loggen - men bare den loggen
+**Rettet denne runden.** `AttemptLedger` er fortsatt et sett i RAM, men
+`ui/state.py` fyller det fra loggen ved oppstart: hver `"execution"`-linje gjør
+at den forespørselen er merket som forsøkt. En omstart lar derfor ikke den
+samme forespørselen gå ut en gang til.
 
-En ekte versjon ville lest svaret ut av den låste loggen ved oppstart, eller
-hatt en egen fil ved siden av. Begge krever at utføringen faktisk LOGGES, og
-det er den ikke - se punkt 2.
+Det som FORTSATT ikke holder:
 
-## 2. Utføringen logges ikke
-`ExecutionResult` havner ingen steder. Den returneres til den som kalte
-`execute()`, og der stopper den.
+- Boka følger **loggfilen**. Trykker noen Nullstill, begynner en ny logg, og
+  boka begynner på nytt sammen med den. Demodataene har faste IDer (`req_0001`
+  …), så etter en nullstilling kan de samme forespørslene utføres igjen. Det er
+  riktig for en demo og galt for et produkt.
+- To prosesser mot samme logg deler ikke bok i sanntid. `vault.LogLock` hindrer
+  at det skjer i det hele tatt, så i praksis er det ikke nåbart - men boka er
+  ikke en lås, den er en avlesning gjort én gang ved oppstart.
+- Alt som har stått i loggen regnes som forsøkt, også det som endte "ikke
+  utført". Det er med vilje (se punkt 5), men det betyr at en handling som ble
+  nektet av et feil oppsett ikke kan prøves om uten en ny forespørsel.
 
-Grunnen er at `contracts.py` er låst. `LogKind` er i dag
-`Literal["request", "decision", "human", "trap", "sandbox"]`, og det finnes
-ingen verdi som passer for en utføring. Å presse resultatet inn i `"decision"`
-ville gjort loggen løgnaktig: en avgjørelse og en utføring er to forskjellige
-hendelser, og det er forskjellen mellom "vi sa ja" og "det skjedde".
+## 2. Utføringen logges nå - som arten `"execution"`
+**Rettet denne runden.** `LogKind` i `contracts.py` har fått `"execution"` som
+sjette verdi. Det var den ENE endringen i den låste filen, og den ble gjort med
+eierens beslutning.
 
-Tre veier videre, ingen av dem valgt her:
+Hele `ExecutionResult` skrives til loggen: `request_id`, tidspunkt, `executed`,
+`status`, den norske "utført / ikke utført"-setningen, hvilken utfører det var,
+regelen som eventuelt sa nei, hvor det gikk (maskert) og avtrykket.
 
-- **Legg til `"execution"` i `LogKind`.** Én linje i den låste filen. Alt som
-  leser loggen (`ui/`, `vault/after.py`, `eval/`) må tåle en ny art.
-- **Legg til en `ExecutionResult`-type i contracts** i tillegg til arten. Mer
-  å endre, men da er formen på linjen avtalt mellom modulene i stedet for
-  bestemt av `executor/`.
-- **Ikke endre contracts.** Utføringen logges som en vanlig `"decision"`- eller
-  `"request"`-linje med et felt som sier at dette er en utføring. Loggen
-  trenger ingen endring, men den blir vanskeligere å lese riktig, og en teller
-  i `ui/` vil regne feil med mindre alle husker å se etter feltet.
+To ting er verdt å vite om den linjen:
 
-Dette er eierens valg, ikke utførerens.
+- **Mottakeren er maskert før den kommer dit.** Teksten kommer fra
+  `mail.mask_address()`, altså `o***@nordlys.no`. Det er ikke
+  `vault/redaction.py` som rydder opp - den kjenner ikke arten `"execution"` og
+  lar payloaden stå som den er. Maskeringen skjer i `executor/mail.py`, og hvis
+  noen senere legger et nytt felt i `ExecutionResult`, går det RETT i loggen.
+- **Avtrykket står i linjen, men sendes aldri til nettleseren.** Det er det som
+  gjør at en `.eml`-fil på disk (den har avtrykket i et hode) kan holdes opp mot
+  loggen og svare "ja, dette er den forespørselen som ble godkjent".
+
+Alt som leser loggen tåler arten: `ui/state.py` (tellere, logg-tabell,
+tidslinjer), `ui/after_view.py`, `vault/after.py`, loggsjekken og hale-ankeret.
+`eval/` leser ikke loggen i det hele tatt. Det er målt i
+`tests/test_executor_wiring.py`, som sammenligner Oversikt-tellerne og
+Etter-fanen med og uten en `"execution"`-linje.
+
+Hva den nye arten IKKE gir: linjen sier hva utføreren MENTE skjedde. Brekker et
+SMTP-kall midtveis, står det "ikke utført" om en e-post som kanskje kom fram
+(punkt 5). Loggen er like sann som utføreren, ikke sannere.
 
 ## 3. Forseglingen beviser ingenting mot den som kjører koden
 Avtrykket (`Approval.request_fingerprint`) er en SHA-256 uten nøkkel. Den
@@ -91,6 +107,19 @@ enn på maskinen til den som holder demoen.
 Meldinger over 1 MB avvises med 552 og lagres ikke. Mappen med `.eml`-filer
 vokser til noen rydder den.
 
-## 10. Utføreren er ikke koblet til noe ennå
-Ingenting i `agent_gateway/` eller `ui/` kaller `execute()`. Koblingen gjøres
-etter sammenslåingen. Hvor den skal gjøres står i `docs/UTFORER.md`.
+## 10. Utføreren er koblet inn i `ui/`, ikke i `run_demo.py`
+**Endret denne runden.** `ui/state.py` forsegler ved `evaluate()` og utfører to
+steder: ved `allow` med én gang, og ved `approved=True` i `respond()`. En rød
+sak som venter, en avvist sak og en blokkert sak kommer aldri til utføreren.
+
+Standard er `SimulatedExecutor`. `SmtpExecutor` brukes bare når
+`LONEWATCH_EXECUTOR=smtp` er satt, og bare for `send_email`.
+
+`agent_gateway/` kaller den fortsatt ikke direkte - den trenger det ikke:
+agentens forespørsler går gjennom `ui/state.py` som alt annet, og blir utført
+der. Teksten MCP-tjeneren gir agenten sier fortsatt "UTFØRT (simulert)" uten å
+spørre hva utføreren faktisk svarte. Det er et hull i det agenten får vite, ikke
+i det som skjer: loggen vet, og dashbordet viser det.
+
+`run_demo.py` er ikke koblet til utføreren. Den er en ren regel- og
+loggdemonstrasjon, og skriver fortsatt 88 linjer.

@@ -13,5 +13,11 @@ lonewatch_pseudonyms.enc
 # MCP-oppsettet for den ekte agenten: den delte hemmeligheten staar i det.
 .mcp.json
 
-# Noklene til broen mot en ekte agent. Lages av `python -m agent_gateway.oppsett`.
+# Noklene til broen mot en ekte agent OG menneskenokkelen som godkjenner et
+# rodt kort. Lages av `python -m agent_gateway.oppsett`.
 .lonewatch-agent-env
+
+# E-postene postfangeren tar imot (`python -m executor.mailcatcher`). Hver fil
+# er en .eml med mottaker, emne og saksnummer i. De hoerer ikke i git: de er
+# resultatet av en demokjoring, og de kan inneholde det den som demoet skrev.
+maildrop/

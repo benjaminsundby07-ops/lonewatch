@@ -75,13 +75,164 @@ let activeTab = "overview";   // Oversikt er forsiden
 /* ---------------- nettverk ---------------- */
 
 async function api(path, body) {
+  const headers = body === undefined ? {} : { "Content-Type": "application/json" };
+  /* Menneskenoekkelen sendes som et EGET hode, ikke som en informasjonskapsel.
+   * Grunnen staar i ui/LIMITS.md: et egendefinert hode kan en fremmed
+   * nettside ikke sette uten en CORS-forhaandssjekk appen ikke svarer paa,
+   * saa modellen er immun mot CSRF av seg selv - mens en informasjonskapsel
+   * ville blitt sendt automatisk fra hvilken som helst side. */
+  const nokkel = menneskeNokkel();
+  if (nokkel) headers[HUMAN_KEY_HEADER] = nokkel;
+
   const res = await fetch(path, {
     method: body === undefined ? "GET" : "POST",
-    headers: body === undefined ? {} : { "Content-Type": "application/json" },
+    headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(path + " svarte " + res.status);
+  if (!res.ok) {
+    let detalj = "";
+    try {
+      const feil = await res.json();
+      detalj = typeof feil.detail === "string" ? feil.detail : "";
+    } catch (e) {
+      /* Ikke JSON. Da har vi bare statuskoden, og den er nok. */
+    }
+    const exc = new Error(detalj || path + " svarte " + res.status);
+    exc.status = res.status;
+    throw exc;
+  }
   return res.json();
+}
+
+/* ---------------- menneskenoekkelen («BankID»-steget) ----------------
+ *
+ * Valget: noekkelen skrives inn i et felt og lagres i `sessionStorage`, og
+ * sendes som `X-Lonewatch-Human-Key` paa hvert kall. Den ligger ALDRI i en
+ * statisk fil nettleseren laster ned.
+ *
+ * Hvorfor sessionStorage og et hode, og ikke en httpOnly-informasjonskapsel:
+ *   - et egendefinert hode kan ikke settes fra en fremmed nettside uten en
+ *     CORS-forhaandssjekk, saa godkjenningen er ikke naabar via CSRF. En
+ *     informasjonskapsel sendes automatisk, og da maatte vi i tillegg bygget
+ *     et CSRF-token.
+ *   - `sessionStorage` er tomt naar fanen lukkes. Ingen blir staaende
+ *     innlogget paa en projektor.
+ * Hva det IKKE loeser staar i ui/LIMITS.md: noekkelen er lesbar for JS som
+ * kjoerer paa siden, og den ligger i klartekst i et miljoe og en fil paa
+ * maskinen. En agent med Bash kan lese den.
+ */
+const HUMAN_KEY_HEADER = "X-Lonewatch-Human-Key";
+const HUMAN_NOKKEL_LAGER = "lonewatch:menneskenokkel";
+
+let menneskeOk = false;        // har noekkelen vi har blitt godtatt?
+let menneskePseudonym = null;  // hva loggen vil si at det var
+
+function menneskeNokkel() {
+  try {
+    return sessionStorage.getItem(HUMAN_NOKKEL_LAGER) || "";
+  } catch (e) {
+    /* Privat vindu eller blokkert lagring. Da maa noekkelen skrives inn paa
+     * nytt hver gang, og det er riktigere enn aa legge den et annet sted. */
+    return "";
+  }
+}
+
+function settMenneskeNokkel(verdi) {
+  try {
+    if (verdi) sessionStorage.setItem(HUMAN_NOKKEL_LAGER, verdi);
+    else sessionStorage.removeItem(HUMAN_NOKKEL_LAGER);
+  } catch (e) {
+    /* ingen lagring: noekkelen gjelder bare dette kallet */
+  }
+}
+
+function kanGodkjenne() {
+  return menneskeOk;
+}
+
+async function sjekkMenneskeNokkel() {
+  /* To spoersmaal, i denne rekkefoelgen: er laasen satt opp i det hele tatt,
+   * og holder noekkelen vi alt har? */
+  try {
+    const svar = await api("/api/human");
+    if (svar.configured === false) {
+      menneskeOk = false;
+      menneskePseudonym = null;
+      tegnLaas("av");
+      return;
+    }
+  } catch (e) {
+    tegnLaas("feil", e.message);
+    return;
+  }
+
+  if (!menneskeNokkel()) {
+    menneskeOk = false;
+    menneskePseudonym = null;
+    tegnLaas("laast");
+    return;
+  }
+  try {
+    const svar = await api("/api/human/check", {});
+    menneskeOk = svar.ok === true;
+    menneskePseudonym = svar.pseudonym || null;
+    tegnLaas(menneskeOk ? "aapen" : "laast");
+  } catch (e) {
+    menneskeOk = false;
+    menneskePseudonym = null;
+    settMenneskeNokkel("");
+    tegnLaas(e.status === 503 ? "av" : "laast", e.message);
+  }
+}
+
+function tegnLaas(tilstand, melding) {
+  const boks = el("human-lock");
+  if (!boks) return;
+  const tittel = el("human-lock-title");
+  const notis = el("human-lock-note");
+  const hint = el("human-hint");
+  const felt = el("human-key");
+  const innlogging = el("human-login");
+  const utKnapp = el("human-logout");
+
+  boks.classList.remove("hidden", "is-open", "is-off");
+  innlogging.classList.remove("hidden");
+  utKnapp.classList.add("hidden");
+  hint.className = "app-hint";
+  hint.textContent = melding || "";
+
+  if (tilstand === "aapen") {
+    boks.classList.add("is-open");
+    tittel.textContent = "Godkjenning er låst opp";
+    notis.textContent =
+      "Loggen vil føre godkjenningene dine på " +
+      (menneskePseudonym || "et pseudonym") +
+      ". Nøkkelen glemmes når du lukker fanen.";
+    felt.value = "";
+    innlogging.classList.add("hidden");
+    utKnapp.classList.remove("hidden");
+    return;
+  }
+  if (tilstand === "av") {
+    boks.classList.add("is-off");
+    tittel.textContent = "Godkjenning er slått av";
+    notis.textContent =
+      "LONEWATCH_HUMAN_KEY er ikke satt i terminalen som kjører appen, eller " +
+      "den er satt til samme verdi som agentnøkkelen. Ingenting kan " +
+      "godkjennes. Kjør «python -m agent_gateway.oppsett», gjør «source " +
+      ".lonewatch-agent-env», og start appen på nytt.";
+    innlogging.classList.add("hidden");
+    return;
+  }
+  if (tilstand === "feil") {
+    tittel.textContent = "Fikk ikke sjekket låsen";
+    notis.textContent = "Appen svarte ikke på /api/human. Prøv å laste siden på nytt.";
+    return;
+  }
+  tittel.textContent = "Godkjenning er låst";
+  notis.textContent =
+    "Et rødt kort kan bare godkjennes av et menneske med menneskenøkkelen. " +
+    "Den står i .lonewatch-agent-env (LONEWATCH_HUMAN_KEY). Agentnøkkelen duger ikke.";
 }
 
 /* ---------------- den rolige strømmen ---------------- */
@@ -478,6 +629,32 @@ function fellerBlokk() {
   );
 }
 
+/* ---------------- utfoereren ----------------
+ *
+ * `card.execution` er svaret fra executor/: ble handlingen gjort, eller ble
+ * den ikke gjort. Det finnes ingen tredje mulighet, og teksten kommer fra
+ * utfoereren - vi skriver den ikke om her.
+ */
+const EXEC_TEKST = {
+  done: "Utført",
+  refused: "Ikke utført",
+  failed: "Ikke utført",
+  already_attempted: "Ikke utført",
+};
+
+function utforingBlokk(card) {
+  const e = card.execution;
+  if (!e) return "";
+  const klasse = e.executed ? "is-done" : "is-not-done";
+  return (
+    '<div class="app-exec ' + klasse + '">' +
+    "<b>" + esc(EXEC_TEKST[e.status] || e.status) + "</b> " +
+    esc(e.detail) +
+    (e.target ? ' <span class="app-muted">' + esc(e.target) + "</span>" : "") +
+    "</div>"
+  );
+}
+
 function renderQueueDetail() {
   const box = el("queue-detail");
   const card = alleKort().find((c) => c.request.id === valgt);
@@ -502,7 +679,15 @@ function renderQueueDetail() {
     esc(RISK_TEXT[d.risk] || d.risk) + "</span>";
 
   let gate = "";
-  if (card.status === "waiting") {
+  if (card.status === "waiting" && !kanGodkjenne()) {
+    /* Laast. Knappene tegnes ikke i det hele tatt: en knapp som ser trykkbar
+     * ut og gir 403 er en loegn om hva som er mulig. */
+    gate =
+      '<div class="app-gate is-locked"><div class="app-gate-row">' +
+      '<span class="app-hint is-bad">Låst. Lås opp Godkjenning øverst med ' +
+      "menneskenøkkelen for å kunne svare på dette.</span>" +
+      "</div></div>";
+  } else if (card.status === "waiting") {
     if (d.requires_typed_amount) {
       const val = typed[r.id] || "";
       const ok = amountMatches(val, r.amount);
@@ -540,6 +725,11 @@ function renderQueueDetail() {
   } else if (d.verdict === "block") {
     gate = '<div class="app-gate is-done">Stoppet av Lonewatch. Ingen kan klikke dette gjennom.</div>';
   }
+
+  /* Hva utfoereren gjorde. `null` betyr at den aldri ble spurt - en roed sak
+   * som venter, en avvist sak og en blokkert sak kommer ikke dit. Da staar det
+   * ingenting, for det er sant: ingenting skjedde. */
+  gate += utforingBlokk(card);
 
   box.innerHTML =
     '<section class="lw-panel app-detail-panel ' + st.klasse + '">' +
@@ -1106,7 +1296,19 @@ async function sendCustom(ev) {
   }
 }
 
-const VERDICT_TEXT = { allow: "gikk gjennom", red: "venter på et menneske", block: "stoppet" };
+/* Hva det staar paa et av dine egne kort i "Proev selv".
+ *
+ * Teksten foelger STATUS, ikke `verdict`. Foer sto det «venter paa et
+ * menneske» paa et kort du nettopp hadde besvart selv, fordi `verdict`
+ * fortsatt er `red` etter at noen har svart - avgjoerelsen endrer seg ikke
+ * naar mennesket svarer, det er statusen som gjoer det. */
+const STATUS_TEXT = {
+  allow: "gikk gjennom",
+  waiting: "venter på et menneske",
+  approved: "godkjent av et menneske",
+  rejected: "avvist av et menneske",
+  blocked: "stoppet",
+};
 
 function renderCustom(list) {
   el("custom-count").textContent = list.length;
@@ -1127,11 +1329,13 @@ function renderCustom(list) {
         '<article class="app-flat is-mine ' + klasse + '">' +
         '<div class="app-line1">' +
         '<span class="app-agent">' + esc(card.action_label) + "</span>" +
-        '<span class="app-muted">' + esc(VERDICT_TEXT[d.verdict] || d.verdict) + "</span>" +
+        '<span class="app-muted">' +
+        esc(STATUS_TEXT[card.status] || d.verdict) + "</span>" +
         "</div>" +
         '<div class="app-line2">' + esc(d.consequence_text) + "</div>" +
         '<div class="app-line2 app-said-mini"><b>Du skrev</b> ' + esc(r.summary) + "</div>" +
         chips(d) +
+        utforingBlokk(card) +
         "</article>"
       );
     })
@@ -1463,13 +1667,31 @@ document.addEventListener("click", async (ev) => {
   const reject = t.getAttribute("data-reject");
   if (approve || reject) {
     const id = approve || reject;
-    const started = shownAt[id] || Date.now();
-    const out = await api("/api/respond", {
-      request_id: id,
-      approved: Boolean(approve),
-      typed_amount: typed[id] || null,
-      seconds_to_decide: (Date.now() - started) / 1000,
-    });
+    /* Betenkningstiden sendes IKKE herfra lenger. Tjeneren maaler den selv,
+     * fra kortet ble lagt i koeen - et tall nettleseren oppgir er ikke en
+     * maaling, det er en paastand. Se H2 i docs/ANGREP.md. */
+    let out;
+    try {
+      out = await api("/api/respond", {
+        request_id: id,
+        approved: Boolean(approve),
+        typed_amount: typed[id] || null,
+      });
+    } catch (e) {
+      /* 403: noekkelen holdt ikke (eller mangler). 503: laasen er ikke satt
+       * opp. Begge betyr at INGENTING ble godkjent, og det skal staa paa
+       * skjermen - ikke bare i konsollen. */
+      if (e.status === 403 || e.status === 503) {
+        menneskeOk = false;
+        menneskePseudonym = null;
+        if (e.status === 403) settMenneskeNokkel("");
+        tegnLaas(e.status === 503 ? "av" : "laast", e.message);
+        showTab("queue");
+      } else {
+        tegnLaas("feil", e.message);
+      }
+      return;
+    }
     delete typed[id];
     apply(out.state);
     if (activeTab === "after") loadAfter();
@@ -1697,6 +1919,29 @@ el("btn-present").addEventListener("click", () => {
 
 el("btn-bell").addEventListener("click", () => showTab("queue"));
 
+/* Laas opp og laas igjen. Noekkelen sjekkes mot tjeneren med én gang, slik at
+ * ingen staar og tror de er innlogget til de proever aa godkjenne noe. */
+el("human-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const verdi = el("human-key").value.trim();
+  if (!verdi) {
+    tegnLaas("laast", "Skriv inn nøkkelen.");
+    return;
+  }
+  settMenneskeNokkel(verdi);
+  await sjekkMenneskeNokkel();
+  if (!menneskeOk) el("human-key").focus();
+  if (activeTab === "queue") renderQueueDetail();
+});
+
+el("human-logout").addEventListener("click", async () => {
+  settMenneskeNokkel("");
+  menneskeOk = false;
+  menneskePseudonym = null;
+  await sjekkMenneskeNokkel();
+  if (activeTab === "queue") renderQueueDetail();
+});
+
 el("custom-form").addEventListener("submit", sendCustom);
 el("c-action").addEventListener("change", syncCustomFields);
 el("btn-verify").addEventListener("click", verify);
@@ -1742,6 +1987,9 @@ window.addEventListener("hashchange", () => {
   } catch (e) {
     /* ingen lagring tilgjengelig - start i vanlig modus */
   }
+  /* Laasen foerst. Da er knappene i koeen riktige fra foerste tegning, og
+   * ingen ser en Godkjenn-knapp som ikke ville virket. */
+  await sjekkMenneskeNokkel();
   apply(await api("/api/state"));
   showTab(tabFraAdressen());
   /* Sjekk loggen med én gang siden aapnes, saa ringen viser OK og de tolv

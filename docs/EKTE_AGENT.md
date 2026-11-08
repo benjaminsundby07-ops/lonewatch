@@ -41,13 +41,23 @@ pip install -r requirements.txt
 python -m agent_gateway.oppsett
 ```
 
-Den lager de tre nøklene appen trenger, og skriver dem i to filer som begge er
+Den lager de fire nøklene appen trenger, og skriver dem i to filer som begge er
 utenfor git:
 
 | Fil | Hva |
 |---|---|
-| `.lonewatch-agent-env` | nøklene. Du bruker den i steg 3 |
-| `.mcp.json` | oppsettet Claude Code leser, med samme agentnøkkel |
+| `.lonewatch-agent-env` | alle fire nøklene. Du bruker den i steg 3 |
+| `.mcp.json` | oppsettet Claude Code leser, med **bare** agentnøkkelen |
+
+To av dem er med vilje atskilt, og det er hele BankID-tanken i demoen:
+
+| Nøkkel | Hva den åpner | Hvor den står |
+|---|---|---|
+| `LONEWATCH_AGENT_KEY` | `/api/agent/*` — agenten **ber om** noe | i `.mcp.json`, altså i en fil agenten selv leser |
+| `LONEWATCH_HUMAN_KEY` | `/api/respond` — et menneske **godkjenner** | bare i `.lonewatch-agent-env` |
+
+Agentnøkkelen kan ikke godkjenne noe. Setter noen de to til samme verdi, slås
+godkjenningen helt av i stedet for å late som skillet finnes.
 
 Nøkkelen skrives aldri ut på skjermen, og du skal ikke lime den noe sted.
 Kjører du kommandoen igjen senere, beholder den nøklene du alt har.
@@ -69,6 +79,23 @@ curl -s -H "X-Lonewatch-Agent-Key: $LONEWATCH_AGENT_KEY" \
   http://127.0.0.1:8000/api/agent/ping
 # {"ok":true,"app":"lonewatch"}
 ```
+
+### Steg 3b: lås opp Godkjenning
+
+Gå til **Godkjenning**-fanen. Øverst står en stripe som sier at godkjenning er
+låst. Hent menneskenøkkelen:
+
+```bash
+grep LONEWATCH_HUMAN_KEY .lonewatch-agent-env
+```
+
+Lim verdien inn i feltet «Menneskenøkkel» og trykk **Lås opp**. Stripen blir
+grønn og sier hvilket `emp_xxxx` loggen kommer til å føre godkjenningene dine
+på. Nøkkelen ligger i fanens `sessionStorage` og glemmes når du lukker den.
+
+Uten dette steget står Godkjenn- og Avvis-knappene ikke der i det hele tatt, og
+et `curl` mot `/api/respond` svarer 403 — også med agentnøkkelen. Det er
+poenget. Hva det ikke løser står i `ui/LIMITS.md`.
 
 ### Steg 4: start agenten (terminalvindu 2)
 
@@ -144,11 +171,16 @@ Konkret hva det betyr:
 * Ber du om det samme, og agenten i stedet skriver et lite Python-skript og
   kjører det med Bash, ser du **ingenting**. Lonewatch blir ikke spurt, og det
   står ingenting i loggen.
-* En agent med Bash kan til og med godkjenne sitt eget kort: `/api/respond` er
-  menneskets endepunkt i nettleseren, og det spør ikke om agentnøkkelen. Vi har
-  en test som pinner nettopp dette hullet
-  (`test_aerlig_hull_alt_som_kjoerer_lokalt_kan_godkjenne`), slik at ingen tror
-  det er lukket.
+* En agent med Bash kan fortsatt godkjenne sitt eget kort — men den må lete
+  først. `/api/respond` krever nå menneskenøkkelen, og agentnøkkelen den har
+  fått utlevert i `.mcp.json` duger ikke. Men menneskenøkkelen er en tekst i
+  `.lonewatch-agent-env`, og `cat` er ett kall. Vi har to tester: én som måler
+  at agentnøkkelen avvises
+  (`test_agentnoekkelen_kan_ikke_godkjenne_men_menneskenoekkelen_kan`) og én som
+  pinner det som står igjen
+  (`test_aerlig_hull_menneskenoekkelen_ligger_paa_maskinen`). Det som ville
+  lukket det er en egen enhet eller konto, slik BankID er — noe som ikke finnes
+  på maskinen agenten kjører på.
 
 Demoen forutsetter altså at **agenten frivillig bruker Lonewatch-verktøyene.**
 Det er en forutsetning, ikke en sikkerhetsmekanisme. Og det er ubehagelig
@@ -198,6 +230,9 @@ Hva reserven **ikke** viser: at MCP-protokollen virker (det gjør
 |---|---|
 | `503` fra endepunktet | `LONEWATCH_AGENT_KEY` er ikke satt i terminalen som kjører appen. Gjorde du `source .lonewatch-agent-env`? |
 | `403` | Nøkkelen i `.mcp.json` er ikke den samme som appens. Kjør `python -m agent_gateway.oppsett` og start begge på nytt |
+| `403` fra `/api/respond` | Feil eller manglende **menneske**nøkkel. Agentnøkkelen gjelder ikke der. Lås opp Godkjenning først (steg 3b) |
+| `503` fra `/api/respond` | `LONEWATCH_HUMAN_KEY` er ikke satt, eller den er satt til samme verdi som agentnøkkelen |
+| Godkjenn-knappen finnes ikke på et rødt kort | Godkjenning er låst. Se steg 3b |
 | «Fikk ikke kontakt med Lonewatch» | Appen kjører ikke, eller står på en annen port |
 | «Pakken `mcp` mangler» | `.mcp.json` peker på et annet Python-miljø enn der du installerte. Kjør oppsettet fra det miljøet du vil bruke |
 | Claude Code ser ikke tjeneren | Du startet `claude` fra en annen mappe enn den `.mcp.json` ligger i |
@@ -209,6 +244,8 @@ Hva reserven **ikke** viser: at MCP-protokollen virker (det gjør
 | Miljøvariabel | Standard | Hva |
 |---|---|---|
 | `LONEWATCH_AGENT_KEY` | *(ingen)* | Delt hemmelighet mellom appen og broen. Uten den er broen av |
+| `LONEWATCH_HUMAN_KEY` | *(ingen)* | Menneskenøkkelen. Uten den kan ingenting godkjennes (503). Flere nøkler skilles med komma — én per person gir én `emp_xxxx` per person i loggen |
+| `LONEWATCH_EXECUTOR` | *(simulert)* | `smtp` gjør `send_email` ekte. Se `docs/UTFORER.md` |
 | `LONEWATCH_AGENT_URL` | `http://127.0.0.1:8000` | Må peke på denne maskinen |
 | `LONEWATCH_AGENT_WAIT_SECONDS` | `120` | Hvor lenge agenten venter på et menneske |
 | `LONEWATCH_AGENT_POLL_SECONDS` | `2` | Hvor ofte den spør |

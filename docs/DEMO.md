@@ -12,10 +12,18 @@ og ingen nettverkskall. Se README for den fulle listen.
 source .venv/bin/activate
 export LONEWATCH_LOG_KEY=$(python -m vault.gen_key)
 export LONEWATCH_PSEUDONYM_KEY=$(python -m vault.gen_key --pseudonym)
+export LONEWATCH_HUMAN_KEY=$(python -m vault.gen_key --human)
+echo "menneskenøkkel: $LONEWATCH_HUMAN_KEY"     # du skal lime den inn i UI
 python3 -m ui
 ```
 
-Åpne <http://127.0.0.1:8000>. Fanen **Oversikt** er åpen fra start, og den rolige strømmen begynner med
+Åpne <http://127.0.0.1:8000>, gå til **Godkjenning** og lim menneskenøkkelen inn i feltet øverst. Uten den
+er Godkjenn- og Avvis-knappene ikke der i det hele tatt — det er med vilje, og det er verdt å si høyt i
+demoen: *et rødt kort kan ikke godkjennes av noe som bare når porten. Agentens egen nøkkel duger ikke.*
+(Og si også hva det ikke løser: nøkkelen er en tekst på maskinen. Hele regningen står i `ui/LIMITS.md`.)
+
+Kjører du med `python -m agent_gateway.oppsett`, ligger nøkkelen i `.lonewatch-agent-env` i stedet:
+`grep LONEWATCH_HUMAN_KEY .lonewatch-agent-env`. Fanen **Oversikt** er åpen fra start, og den rolige strømmen begynner med
 én gang: hvert andre sekund slippes neste forespørsel fra demodataene gjennom mellomstasjonen. Tallene på
 Oversikt teller opp mens du ser på.
 
@@ -123,6 +131,18 @@ Og hvis du vil være ærlig om prosessen: *denne sjekken var feil først. Den sa
 
 Trykk **Avvis**. Kortet flytter seg ned til **Besvart** med pseudonymet til den som svarte — `emp_` og fire
 tegn — og hvor mange sekunder det tok. Si at loggen aldri ser navnet.
+
+To ting er verdt å peke på i den linjen, og begge var hull for en uke siden:
+
+- **Sekundene er tjenerens egen måling**, fra kortet kom i køen til du trykket. De kom før fra nettleseren,
+  og da kunne et skript skrive «37,5 sekunder» på en godkjenning som tok millisekunder.
+- **`emp_xxxx` følger menneskenøkkelen du låste opp med**, ikke en fast konstant. To mennesker med hver
+  sin nøkkel får hvert sitt pseudonym i loggen. Deler de én nøkkel, kan loggen ikke skille dem — og det
+  står i `ui/LIMITS.md`.
+
+Hadde du trykket **Godkjenn** i stedet, ville kortet fått en linje til nederst: **«Utført»** eller **«Ikke
+utført»**, med hva utføreren faktisk gjorde. I demoen er det simulert. Med `LONEWATCH_EXECUTOR=smtp` og
+postfangeren i gang er en e-post ekte — se `docs/UTFORER.md`.
 
 ## 1:50 — Sjekk loggen (ca. 10 s)
 

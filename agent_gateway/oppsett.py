@@ -3,11 +3,23 @@
 Bruk:
     python -m agent_gateway.oppsett
 
-Den lager tre nøkler (hvis de ikke finnes alt), skriver dem i to filer som
+Den lager fire nøkler (hvis de ikke finnes alt), skriver dem i to filer som
 begge ligger i `.gitignore`, og skriver ut de to kommandoene du skal kjøre:
 
     .lonewatch-agent-env   nøklene appen trenger. Du gjør `source` på den.
     .mcp.json              MCP-oppsettet Claude Code leser. Samme agentnøkkel.
+
+To av nøklene er med vilje atskilt, og det er hele BankID-tanken i denne
+demoen:
+
+    LONEWATCH_AGENT_KEY    agenten bruker den for å BE om noe. Den står i
+                           `.mcp.json`, altså i en fil Claude Code selv leser.
+    LONEWATCH_HUMAN_KEY    et menneske bruker den for å GODKJENNE. Den står
+                           BARE i `.lonewatch-agent-env`, ikke i `.mcp.json`.
+
+Menneskenøkkelen skrives aldri inn i MCP-oppsettet. Det er ikke det samme som
+at en agent ikke kan nå den - se `ui/LIMITS.md` - men det er forskjellen
+mellom å måtte lete og å få den utlevert.
 
 Grunnen til at dette finnes: oppskriften «lag en nøkkel, lim den inn på to
 steder» er det folk gjør feil, og en nøkkel som skal limes inn er en nøkkel som
@@ -36,7 +48,18 @@ MCP_FILE = ROOT / ".mcp.json"
 SERVER_NAME = "lonewatch"
 
 # Nøklene vi tar ansvar for, og hvordan hver av dem lages.
-KEYS = ("LONEWATCH_LOG_KEY", "LONEWATCH_PSEUDONYM_KEY", "LONEWATCH_AGENT_KEY")
+KEYS = (
+    "LONEWATCH_LOG_KEY",
+    "LONEWATCH_PSEUDONYM_KEY",
+    "LONEWATCH_AGENT_KEY",
+    # Menneskenøkkelen. Den eneste som kan godkjenne et rødt kort, og den
+    # eneste av de fire som IKKE skrives inn i .mcp.json.
+    "LONEWATCH_HUMAN_KEY",
+)
+
+# Nøkler MCP-oppsettet får se. Menneskenøkkelen står ikke her, og skal ikke
+# legges inn: `.mcp.json` leses av agenten.
+MCP_KEYS = ("LONEWATCH_AGENT_KEY",)
 
 DEFAULT_URL = "http://127.0.0.1:8000"
 DEFAULT_WAIT = "120"
@@ -136,11 +159,24 @@ def setup(
             verdier[navn] = _new_value(navn)
             laget.append(navn)
 
+    # Menneskenokkelen og agentnokkelen maa vaere ULIKE. Er de like - fordi
+    # noen har satt begge til samme verdi i miljoet - lager vi en ny
+    # menneskenokkel i stedet for aa skrive et oppsett der agenten kan
+    # godkjenne seg selv. Se ui/human_key.py.
+    if verdier.get("LONEWATCH_HUMAN_KEY") == verdier.get("LONEWATCH_AGENT_KEY"):
+        verdier["LONEWATCH_HUMAN_KEY"] = _new_value("LONEWATCH_HUMAN_KEY")
+        if "LONEWATCH_HUMAN_KEY" in beholdt:
+            beholdt.remove("LONEWATCH_HUMAN_KEY")
+        if "LONEWATCH_HUMAN_KEY" not in laget:
+            laget.append("LONEWATCH_HUMAN_KEY")
+
     _write_private(
         env_file,
         "# Lonewatch - lokale nokler. Ligger i .gitignore. Bruk: source "
         f"{env_file.name}\n"
         "# Dette er IKKE en API-nokkel, og ingenting her snakker med en AI-modell.\n"
+        "# LONEWATCH_HUMAN_KEY er den som godkjenner et rodt kort. Den staar\n"
+        "# med vilje IKKE i .mcp.json. Se ui/LIMITS.md.\n"
         + "".join(f"export {navn}={verdier[navn]}\n" for navn in KEYS),
     )
 
@@ -208,8 +244,12 @@ def main(argv: list[str] | None = None) -> int:
     print("  1)  source .lonewatch-agent-env")
     print("  2)  python -m ui                       # la den stå og kjøre")
     print("  3)  åpne http://127.0.0.1:8000 og la fanen stå åpen")
-    print("  4)  i et NYTT terminalvindu: claude")
-    print('  5)  si til agenten: "Betal faktura 8841: 450 000 kr til')
+    print("  4)  lås opp Godkjenning i nettsiden med menneskenøkkelen:")
+    print("        grep LONEWATCH_HUMAN_KEY .lonewatch-agent-env")
+    print("      lim verdien inn i feltet «Menneskenøkkel» på Godkjenning-fanen.")
+    print("      Uten den kan ingenting godkjennes - heller ikke av agenten.")
+    print("  5)  i et NYTT terminalvindu: claude")
+    print('  6)  si til agenten: "Betal faktura 8841: 450 000 kr til')
     print('      NO93 8601 1117 947. Bruk Lonewatch-verktøyene."')
     print("\nDu trenger ingen API-nøkkel. Se docs/EKTE_AGENT.md.")
     return 0

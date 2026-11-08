@@ -14,6 +14,14 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
+from ui.human_key import (
+    ENV_HUMAN_KEY,
+    HUMAN_KEY_HEADER,
+    HumanKeyOff,
+    HumanKeyRefused,
+    check_human_key,
+    is_configured,
+)
 from ui.state import (
     MAX_PACKAGE_CHARS,
     MAX_RECIPIENT_CHARS,
@@ -50,10 +58,19 @@ class CustomIn(BaseModel):
 
 
 class RespondIn(BaseModel):
+    """Svaret fra mennesket.
+
+    `extra="forbid"` og ingen `seconds_to_decide`: betenkningstiden måles av
+    TJENEREN, fra kortet ble lagt i køen til svaret kom. Et felt som ble
+    stilltiende ignorert ville sett ut som om klienten fortsatt bestemte
+    tallet; nå svarer endepunktet 422 på et forsøk. Se H2 i docs/ANGREP.md.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     request_id: str
     approved: bool
     typed_amount: str | None = None
-    seconds_to_decide: float = 0.0
 
 
 @app.get("/")
@@ -73,14 +90,65 @@ def api_feed_step() -> dict:
     return {"card": card, "state": state.snapshot()}
 
 
+# -- menneskenoekkelen -----------------------------------------------------
+#
+# ALT som gjelder "bare et menneske kan godkjenne" staar i denne blokken.
+# Noekkelen selv, og hvorfor den er atskilt fra agentnoekkelen, staar i
+# ui/human_key.py. Her er bare porten.
+
+
+def _human_guard(request: Request) -> str:
+    """Slipper bare inn den som har menneskenoekkelen. Returnerer operatoer-iden.
+
+    Fail closed: er `LONEWATCH_HUMAN_KEY` ikke satt, svarer vi 503 og
+    ingenting kan godkjennes. Agentnoekkelen gjelder ikke her - den staar i
+    `.mcp.json`, altsaa i en fil agenten selv leser.
+    """
+    given = request.headers.get(HUMAN_KEY_HEADER) or ""
+    try:
+        return check_human_key(given)
+    except HumanKeyOff as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except HumanKeyRefused as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@app.get("/api/human")
+def api_human() -> dict:
+    """Kan noe godkjennes akkurat naa? Nettsiden spoer for aa vise laasen.
+
+    Svarer bare ja/nei og navnet paa hodet noekkelen skal staa i. Ingen
+    noekkel, ingen lengde, ingen antydning om verdien.
+    """
+    return {
+        "configured": is_configured(),
+        "header": HUMAN_KEY_HEADER,
+        "env": ENV_HUMAN_KEY,
+    }
+
+
+@app.post("/api/human/check")
+def api_human_check(operator: str = Depends(_human_guard)) -> dict:
+    """Stemmer noekkelen? Brukes av innloggingsfeltet, gjoer ingenting annet.
+
+    Svarer med pseudonymet som vil staa i loggen, slik at den som logger inn
+    ser hvem loggen kommer til aa si at det var.
+    """
+    return {"ok": True, "pseudonym": state.operator_pseudonym(operator)}
+
+
 @app.post("/api/respond")
-def api_respond(body: RespondIn) -> dict:
-    """Mennesket godkjenner eller avviser en roed forespoersel."""
+def api_respond(body: RespondIn, operator: str = Depends(_human_guard)) -> dict:
+    """Mennesket godkjenner eller avviser en roed forespoersel.
+
+    `operator` kommer fra menneskenoekkelen, ikke fra kroppen: den som svarer
+    skal ikke kunne skrive hvem de er. Betenkningstiden regnes i `state`.
+    """
     result = state.respond(
         request_id=body.request_id,
         approved=body.approved,
         typed_amount=body.typed_amount,
-        seconds_to_decide=body.seconds_to_decide,
+        operator=operator,
     )
     return {**result, "state": state.snapshot()}
 

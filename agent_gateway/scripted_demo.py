@@ -148,7 +148,7 @@ class ScriptedHuman:
 
         if self.wrong_amount_first is not None:
             svar = self.client.state.respond(
-                self.request_id, True, self.wrong_amount_first, 9.0
+                self.request_id, True, self.wrong_amount_first
             )
             self.answers.append({"typed": self.wrong_amount_first, "ok": bool(svar.get("ok"))})
             self.log(
@@ -158,8 +158,10 @@ class ScriptedHuman:
             self.wrong_amount_first = None
             return
 
+        # Betenkningstiden maales av tjeneren, ikke oppgitt her. Manuset later
+        # ikke som det har brukt 12 sekunder paa aa tenke.
         svar = self.client.state.respond(
-            self.request_id, self.approve, self.typed_amount, 12.0
+            self.request_id, self.approve, self.typed_amount
         )
         self.answers.append({"typed": self.typed_amount, "ok": bool(svar.get("ok"))})
         if svar.get("ok"):

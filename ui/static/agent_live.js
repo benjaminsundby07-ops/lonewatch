@@ -10,8 +10,6 @@
  * Grunnen til at den maa finnes: et kall fra en agent kommer naar DEN vil, ikke
  * naar noen trykker paa noe. Uten denne filen staar et roedt kort i koeen uten
  * at skjermen viser det foer man laster siden paa nytt.
- *
- * CSS-en ligger ogsaa her, av samme grunn: style.css eies av en annen oekt.
  */
 
 "use strict";
@@ -19,48 +17,13 @@
 (() => {
   const POLL_MS = 1500;
 
-  /* Merket paa kortet. Lagt inn herfra slik at style.css staar uroert. */
-  const css = document.createElement("style");
-  css.textContent = `
-    .app-live {
-      background: rgba(240, 145, 141, .16);
-      color: var(--negative);
-      border: 1px solid rgba(240, 145, 141, .35);
-      border-radius: var(--radius-pill);
-      padding: 1px var(--space-2);
-      font-size: 11px;
-      font-weight: 600;
-    }
-    .app-live-notis {
-      position: fixed;
-      left: 24px;
-      bottom: 24px;
-      max-width: 380px;
-      z-index: 60;
-      background: var(--panel, #171a21);
-      border: 1px solid rgba(240, 145, 141, .35);
-      border-left: 3px solid var(--negative);
-      border-radius: 12px;
-      padding: 14px 16px;
-      box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
-      font-size: 13px;
-      line-height: 19px;
-      color: var(--ink-muted);
-    }
-    .app-live-notis b { display: block; color: var(--ink); margin-bottom: 4px; }
-    .app-live-notis button {
-      margin-top: 10px;
-      background: none;
-      border: 1px solid var(--line);
-      color: var(--ink-muted);
-      border-radius: var(--radius-pill);
-      padding: 3px 12px;
-      font: inherit;
-      font-size: 12px;
-      cursor: pointer;
-    }
-  `;
-  document.head.appendChild(css);
+  /* CSS-en ligger i ui/static/style.css, sammen med resten av appens stiler.
+   * Den sto en stund HER - lagt inn i <head> ved oppstart - fordi style.css
+   * den gang var en annen oekts fil. Naa eies begge samme sted, og en side
+   * som faar stilene sine injisert av et skript ser uferdig ut i det halve
+   * sekundet foer skriptet kjoerer. Klassene er `.app-live` og
+   * `.app-live-notis`. */
+
 
   /* Signaturen er det som faktisk betyr noe paa skjermen. Vi tegner bare om
    * naar den endrer seg, saa en side som staar stille ikke blinker. */
@@ -138,7 +101,11 @@
     lukk.textContent = "Lukk";
     lukk.addEventListener("click", () => ny.remove());
     ny.append(tittel, tekst, lukk);
-    document.body.appendChild(ny);
+    /* Inne i `.lw`, ikke paa `document.body`. Designsystemets farger ligger
+     * paa `.lw` og ikke paa `:root` (se tokens.css), saa en notis som henger
+     * utenfor faar `var(--negative)` til aa slaa feil - og da forsvant den
+     * roede kanten uten at noe feilet. */
+    (document.querySelector(".lw") || document.body).appendChild(ny);
   }
 
   const timer = setInterval(tikk, POLL_MS);
