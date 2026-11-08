@@ -21,6 +21,7 @@ import json
 from datetime import datetime
 
 import pytest
+from attack_lib2 import refuse_to_touch_real_log  # noqa: F401  (autouse: aldri roer den ekte loggen)
 
 from attack_lib2 import fresh_vault, log_file, read_raw_lines, write_raw_lines
 from vault.anchor import anchor_path, derive_anchor_key, write_anchor

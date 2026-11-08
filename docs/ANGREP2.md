@@ -17,8 +17,8 @@ maa denne filen oppdateres i samme slengen. **Et hull skal ikke kunne bli borte 
 stillhet.**
 
 ```bash
-pytest tests/attack2/     # 49 passed, 15 xfailed
-pytest -q                 # hele suiten (se "Om de 6 roede i tests/attack/" nederst)
+pytest tests/attack2/     # 51 passed, 13 xfailed (etter sammenslaaing med herd-gw og herd-ui)
+pytest -q                 # 1364 passed, 47 xfailed (hele suiten)
 ```
 
 Alt kjoerte lokalt mot simuleringen, paa `127.0.0.1` med ferske engangsnoekler og
@@ -43,10 +43,10 @@ internett: oppdiktede adresser bruker `.example`/`.invalid` eller RFC 5737-nette
 | 7 | **kapploep** | **HOLDER** | RLock serialiserer respond() og submit. Et kort faar noeyaktig ett utfall, samtidige submits faar unike id-er, kjeden forblir hel. |
 | 8 | **last / tjenestenekt** | **DELVIS** | Feltgrenser og dyp JSON haandteres uten krasj. Men ingen grense paa kroppsstoerrelse og ingen grense paa antall kort, mot et uautentisert endepunkt. |
 | 9 | **de oevrige rutene** | **DELVIS** | Lese-ruter endrer ikke loggen og laekker ingen noekkel. /api/reset arkiverer (sletter ikke) - men er uautentisert (H4/LIMITS#10). |
-| 10 | **kjeding ende-til-ende** | **HULL** | H14 (loegn) + H6 (staving) og H14 + H7 (tilbakedatering) flytter >100 000 kr til én konto uten ett roedt kort. |
+| 10 | **kjeding ende-til-ende** | **LUKKET for staving og tilbakedatering** (herd-gw: H6, H7) | Rundet av runde 2 mot koden FOER rettelsene: H14 + H6 og H14 + H7 flyttet >100 000 kr til én konto uten ett roedt kort. Etter sammenslaaingen stoppes begge. H14 (loegn om `recipient_known`) og H9 (mange kontoer) staar igjen. |
 | 11 | **informasjonslekkasje** | **HULL (nytt)** | /api/state er uautentisert og viser full mottaker, full summary og de interne regelnavnene i klartekst - akkurat det loggen minimerer bort. |
 
-**15 hull i alt** (15 `xfail(strict=True)`). Tre er helt nye (staar ikke i
+**15 hull ved runden, 13 aapne etter sammenslaaingen** (13 `xfail(strict=True)`; kjedehullene H6/H7 er lukket av `herd-gw`). Tre er helt nye (staar ikke i
 `docs/ANGREP.md` og ikke i noen `LIMITS.md`): ingen kroppsgrense, ingen
 kortgrense, og at `/api/state` laekker raa persondata og regelnavn. Resten er
 forbehold prosjektet selv har skrevet ned i `vault/LIMITS.md` og
@@ -214,18 +214,9 @@ Like viktig som funnene. Alt under er **uproevd denne runden** - ikke «trygt».
 
 ---
 
-## Om de 6 roede i `tests/attack/`
+## Om de 6 roede i `tests/attack/` (historisk)
 
-Hele suiten (`pytest -q`) viser **6 failed** i `tests/attack/` (runde en). De er
-IKKE fra runde to og ble bekreftet foer en eneste attack2-fil ble skrevet. De
-skyldes at grenen har utviklet seg siden runde en:
-
-- `agent_gateway/` finnes naa, saa tester som festet at «det finnes ingen
-  MCP-flate» feiler med vilje (XPASS-mekanismen i omvendt retning).
-- H22 (`kalender:`-prefikset som gratis omvei) er **fikset** i `samlet2`:
-  prefikset teller naa bare paa handlinger som ikke sender noe ut av huset. Runde
-  ens regresjonstester som forventet det gamle (saarbare) oppfoerselen feiler
-  derfor - hullet ble lukket, slik `strict=True` skal tvinge fram.
-
-De roerer ikke `tests/attack2/`, og jeg har ikke endret `tests/attack/`.
-`tests/attack2/` kjoerer rent for seg (`49 passed, 15 xfailed`).
+Da runde to ble skrevet mot `samlet2`, viste hele suiten 6 failed i `tests/attack/`.
+De var ikke fra runde to. Etter sammenslaaingen (`samlet3`) er alle rettet i
+`herd-gw` og `herd-ui`, og hele suiten er groenn: `1364 passed, 47 xfailed`.
+`tests/attack2/` kjoerer for seg med `51 passed, 13 xfailed`.

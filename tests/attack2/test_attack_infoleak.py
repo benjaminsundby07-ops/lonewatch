@@ -15,6 +15,7 @@ Gir feilmeldinger, /api/state eller HTTP-hodene noe en angriper kan bruke
 from __future__ import annotations
 
 import pytest
+from attack_lib2 import refuse_to_touch_real_log  # noqa: F401  (autouse: aldri roer den ekte loggen)
 
 from attack_lib2 import live_app
 

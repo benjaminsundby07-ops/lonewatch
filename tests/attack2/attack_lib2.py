@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import tempfile
 import threading
 import urllib.error
 import urllib.request
@@ -183,3 +184,33 @@ def live_app():
         server.should_exit = True
         thread.join(timeout=5)
         os.environ.pop("LONEWATCH_AGENT_KEY", None)
+
+
+from vault.store import ENV_LOG_PATH  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def refuse_to_touch_real_log():
+    """Stopper testen om LONEWATCH_LOG_PATH ikke ligger i et tmp-omraade."""
+    path = os.environ.get(ENV_LOG_PATH, "")
+    tmp_root = os.path.realpath(tempfile.gettempdir())
+    resolved = os.path.realpath(path) if path else ""
+    # pytest sine tmp_path ligger under tempdir (eller /private/var/... paa mac,
+    # som realpath normaliserer). Godta ogsaa "pytest-of-" i stien.
+    ok = bool(resolved) and (
+        resolved.startswith(tmp_root)
+        or "pytest-of-" in resolved
+        or "/pytest-" in resolved
+        or resolved.startswith("/private/")
+    )
+    assert ok, (
+        f"NEKTER aa kjoere: LONEWATCH_LOG_PATH={path!r} peker ikke paa en "
+        "tmp-fil. Et angrep skal aldri roere den ekte loggen."
+    )
+    yield
+
+
+def human_headers() -> dict[str, str]:
+    """Menneskenoekkelen testmiljoeet har satt (foerste av flere). Uten den avvises /api/respond."""
+    keys = os.environ.get("LONEWATCH_HUMAN_KEY", "").split(",")
+    return {"X-Lonewatch-Human-Key": keys[0].strip()}

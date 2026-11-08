@@ -13,8 +13,8 @@ borte i stillhet.** Det er nøyaktig det som har skjedd nå: sju hull er lukket 
 tabellene under er skrevet om. Testene for dem står nå som vanlige tester.
 
 ```bash
-pytest tests/attack/     # TALL_ATTACK
-pytest -q                # TALL_ALL (hele suiten)
+pytest tests/attack/     # 212 passed, 33 xfailed
+pytest -q                # 1364 passed, 47 xfailed (hele suiten)
 ```
 
 > **Runde 2 (menneskenøkkelen og utføreren) og hullene i `gateway/`.** H1, H2 og H3

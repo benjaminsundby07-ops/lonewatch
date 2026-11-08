@@ -18,6 +18,7 @@ import hmac
 from hashlib import sha256
 
 import pytest
+from attack_lib2 import refuse_to_touch_real_log  # noqa: F401  (autouse: aldri roer den ekte loggen)
 
 from vault.crypto import ENV_PSEUDONYM_KEY, new_pseudonym_key
 from vault.identity import NotAuthorized, pseudonymize, reveal

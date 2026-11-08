@@ -10,6 +10,7 @@ testen.
 from __future__ import annotations
 
 import pytest
+from attack_lib2 import refuse_to_touch_real_log  # noqa: F401  (autouse: aldri roer den ekte loggen)
 
 from attack_lib2 import fresh_vault
 from vault.crypto import (

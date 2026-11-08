@@ -14,8 +14,9 @@ from __future__ import annotations
 import threading
 
 import pytest
+from attack_lib2 import refuse_to_touch_real_log  # noqa: F401  (autouse: aldri roer den ekte loggen)
 
-from attack_lib2 import AGENT_KEY, AGENT_KEY_HEADER, live_app
+from attack_lib2 import AGENT_KEY, AGENT_KEY_HEADER, human_headers, live_app
 
 
 def _first_waiting(client):
@@ -42,12 +43,12 @@ def test_simultaneous_approve_and_reject_yields_exactly_one_outcome(live_app):
 
     def hammer(i: int) -> None:
         approve = i % 2 == 0
-        body = {"request_id": rid, "approved": approve, "seconds_to_decide": 5.0}
+        body = {"request_id": rid, "approved": approve}
         if approve and needs_amount:
             # Skriv beloepet noeyaktig som kortet viser det.
             body["typed_amount"] = str(expected_amount)
         barrier.wait()
-        _, resp = live_app.post("/api/respond", body)
+        _, resp = live_app.post("/api/respond", body, headers=human_headers())
         if isinstance(resp, dict) and resp.get("ok"):
             with lock:
                 results.append(resp["card"]["status"])
@@ -72,7 +73,7 @@ def test_double_approve_cannot_write_two_human_lines(live_app):
     rid = card["request"]["id"]
     expected_amount = card["request"].get("amount")
     needs_amount = card["decision"].get("requires_typed_amount")
-    body = {"request_id": rid, "approved": True, "seconds_to_decide": 3.0}
+    body = {"request_id": rid, "approved": True}
     if needs_amount:
         body["typed_amount"] = str(expected_amount)
 
@@ -82,7 +83,7 @@ def test_double_approve_cannot_write_two_human_lines(live_app):
 
     def hammer() -> None:
         barrier.wait()
-        _, resp = live_app.post("/api/respond", dict(body))
+        _, resp = live_app.post("/api/respond", dict(body), headers=human_headers())
         if isinstance(resp, dict) and resp.get("ok"):
             with lock:
                 oks.append(True)

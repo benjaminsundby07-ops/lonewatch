@@ -16,6 +16,7 @@ from __future__ import annotations
 import threading
 
 import pytest
+from attack_lib2 import refuse_to_touch_real_log  # noqa: F401  (autouse: aldri roer den ekte loggen)
 
 from attack_lib2 import fresh_vault, log_file
 from vault.store import acquire_log_lock, LogLocked
