@@ -3,3 +3,6 @@ pytest>=8
 cryptography>=42
 fastapi>=0.110
 uvicorn>=0.29
+# Bare for agent_gateway/ (MCP-tjeneren mot en ekte agent). Resten av
+# Lonewatch kjorer uten denne. mcp 2.x: API-et heter MCPServer.
+mcp>=2.3,<3

@@ -312,3 +312,17 @@ folk å lese varselet. Vi måler ikke hvor mange røde et menneske faktisk tåle
 `gateway/evaluation.py` viser 15 av 15 farlige fanget og 0 falske alarmer, men
 samme person skrev reglene og testmengden. Den måler at koden gjør det vi mente,
 ikke at vi mente det riktige.
+
+## Broen mot en ekte agent fjerner ingen vei, den legger til én
+`agent_gateway/` lar Claude Code kalle fire oppdiktede verktøy som går gjennom
+`evaluate()`, loggen og det røde varselet. Det hullet som betyr mest står ikke
+i regelsettet, men i agenten: **Claude Code har egne innebygde verktøy (Bash,
+filer, nettverk) som ikke går gjennom Lonewatch i det hele tatt.** Demoen
+forutsetter at agenten frivillig bruker Lonewatch-verktøyene. Det er en
+forutsetning, ikke en sikkerhetsmekanisme.
+
+En MCP-tjener legger til en vei inn; den fjerner ingen. Et ekte produkt måtte
+pakket inn kjøremiljøet til agenten, slik at det ikke FINNES en annen vei.
+
+Hele listen - og de ni andre forbeholdene - står i `agent_gateway/LIMITS.md`.
+Oppskriften står i `docs/EKTE_AGENT.md`.

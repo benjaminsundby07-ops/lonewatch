@@ -49,6 +49,21 @@ CALM_LIMIT = 40
 # Agenten juryens forespørsler kommer fra. Ingen regel leser agent_id.
 CUSTOM_AGENT_ID = "jury"
 
+# -- den ekte agenten (MCP) ------------------------------------------------
+#
+# Samme vei som "Prøv selv", bare med en annen avsender. Kortene merkes med
+# source="agent" slik at man i dashbordet ser forskjell på et manusstyrt
+# demokort og et kall fra en agent som faktisk kjører. Se docs/EKTE_AGENT.md.
+AGENT_SOURCE = "agent"
+
+# agent_id settes HER, ikke av den som kaller. En agent skal ikke kunne
+# utgi seg for å være en annen. Ingen regel leser agent_id, men loggen gjør.
+AGENT_AGENT_ID = "claude_code"
+
+# Vises i kortet. Ligger her og ikke i agents/scenarios.py, fordi den ekte
+# agenten ikke er en av demoens oppdiktede agenter.
+AGENT_LABEL = "Ekte agent (Claude Code)"
+
 # Lengdegrenser. Alt brukeren skriver vises i UI, og selv om alt escapes der,
 # skal ingen kunne sende inn en roman eller fylle loggen.
 MAX_SUMMARY_CHARS = 200
@@ -193,8 +208,10 @@ class DemoState:
             self.verify_result: dict[str, Any] | None = None
             # (doc_id, agent_id, access) for feller som allerede står i loggen.
             self._fired_traps: set[tuple[str, str, str]] = set()
-            # "Prøv selv": juryens egne forespørsler, nummerert for seg.
-            self._custom_count = 0
+            # Forespørsler noen har SKREVET, i stedet for å komme fra
+            # demodataene: "Prøv selv" og den ekte agenten. Nummerert for seg
+            # per kilde, slik at IDene aldri kolliderer.
+            self._written_counts: dict[str, int] = {}
             # Forespørslene gateway har sett, i rekkefølge. Brukes bare til å
             # summere overføringer til samme mottaker innenfor tidsvinduet.
             # Den ligger i MINNET og forsvinner ved omstart og Nullstill - se
@@ -413,6 +430,10 @@ class DemoState:
         recipient: str = "",
         package_name: str = "",
         contains_personal_data: bool = False,
+        *,
+        source: str = "custom",
+        agent_id: str = CUSTOM_AGENT_ID,
+        id_prefix: str = "custom",
     ) -> dict[str, Any]:
         """Bygger en ActionRequest fra skjemaet og sender den samme vei som de 40.
 
@@ -429,6 +450,12 @@ class DemoState:
           egenskap ved handlingen, ikke en påstand fra den som ber om den.
 
         `summary` er fritt, vises i kortet, og brukes ALDRI i vurderingen.
+
+        `source`, `agent_id` og `id_prefix` er nøkkelordargumenter med
+        standardverdier, slik at "Prøv selv" ser helt uendret ut. Den ekte
+        agenten (`submit_agent`) bruker den samme veien med en annen avsender,
+        nettopp for at det ikke skal finnes to validerings-steder som kan komme
+        ut av takt.
         """
         with self._lock:
             try:
@@ -467,11 +494,12 @@ class DemoState:
             if kind in PACKAGE_ACTIONS and not package_text:
                 return {"ok": False, "error": "Et tillegg må ha et navn."}
 
-            self._custom_count += 1
+            teller = self._written_counts.get(id_prefix, 0) + 1
+            self._written_counts[id_prefix] = teller
             req = ActionRequest(
-                id=f"custom_{self._custom_count:04d}",
+                id=f"{id_prefix}_{teller:04d}",
                 ts=datetime.now(timezone.utc),
-                agent_id=CUSTOM_AGENT_ID,
+                agent_id=agent_id,
                 action_type=kind,
                 summary=summary or "(ingen forklaring)",
                 amount=amount_value,
@@ -484,9 +512,9 @@ class DemoState:
             )
 
             try:
-                card = self._handle(req, source="custom")
+                card = self._handle(req, source=source)
             except Exception as exc:  # pragma: no cover - siste skanse
-                self._custom_count -= 1
+                self._written_counts[id_prefix] = teller - 1
                 return {"ok": False, "error": f"Forespørselen kunne ikke behandles: {exc}"}
 
             return {"ok": True, "card": card}
@@ -509,6 +537,97 @@ class DemoState:
                 "package_name": MAX_PACKAGE_CHARS,
             },
         }
+
+    # -- den ekte agenten (MCP) ------------------------------------------
+    #
+    # Tre metoder, og ingen av dem har en egen vurdering, en egen logg eller en
+    # egen snillere vei. `submit_agent` er `submit_custom` med en annen
+    # avsender; `agent_status` leser bare kortet; `agent_gave_up` skriver en
+    # notis i UI og rører ikke loggen.
+
+    def submit_agent(
+        self,
+        action_type: str,
+        summary: str = "",
+        amount: str = "",
+        recipient: str = "",
+        package_name: str = "",
+        contains_personal_data: bool = False,
+    ) -> dict[str, Any]:
+        """Et verktøykall fra en agent som faktisk kjører, inn samme vei som alt annet.
+
+        Nøyaktig samme felt som "Prøv selv", og nøyaktig samme to felt settes av
+        oss: `recipient_known` regnes ut mot demoens liste, og `reversible`
+        kommer fra handlingstypen. En agent kan ikke oppgi noen av dem, og kan
+        heller ikke velge sin egen `agent_id` eller `id`.
+        """
+        result = self.submit_custom(
+            action_type=action_type,
+            summary=summary,
+            amount=amount,
+            recipient=recipient,
+            package_name=package_name,
+            contains_personal_data=contains_personal_data,
+            source=AGENT_SOURCE,
+            agent_id=AGENT_AGENT_ID,
+            id_prefix="agent",
+        )
+        if result.get("ok"):
+            # Kortet ligger i self.cards, så dette endrer det som vises.
+            result["card"]["agent_label"] = AGENT_LABEL
+        return result
+
+    def agent_status(self, request_id: str) -> dict[str, Any] | None:
+        """Hvor står forespørselen nå? None hvis vi ikke har den.
+
+        Dette er det agenten får lov å spørre om mens den venter. Den får ikke
+        regelnavnene: de ville vært en oppskrift på hva som må endres for å
+        slippe gjennom neste gang.
+        """
+        with self._lock:
+            card = self.cards.get(request_id)
+            if card is None:
+                return None
+            human = card.get("human") or {}
+            return {
+                "request_id": request_id,
+                "status": card["status"],
+                "verdict": card["decision"].get("verdict"),
+                "risk": card["decision"].get("risk"),
+                "requires_typed_amount": card["decision"].get("requires_typed_amount", False),
+                "consequence_text": card["decision"].get("consequence_text"),
+                "approved": human.get("approved"),
+                "typed_amount": human.get("typed_amount"),
+                "seconds_to_decide": human.get("seconds_to_decide"),
+                "source": card.get("source"),
+            }
+
+    def agent_gave_up(self, request_id: str, waited_seconds: float) -> bool:
+        """Agenten sluttet å vente på svar. Returnerer True hvis kortet fortsatt venter.
+
+        Dette skrives IKKE i loggen. Ingen `HumanResponse` har skjedd, og en
+        linje som sa "avvist" ville vært en påstand om at et menneske svarte.
+        Kortet blir liggende i køen. Notisen er til den som sitter i
+        dashbordet: agenten har gitt opp, men saken venter fortsatt på deg.
+        """
+        with self._lock:
+            card = self.cards.get(request_id)
+            if card is None or card["status"] != STATUS_WAITING:
+                return False
+            ventet = max(0, int(waited_seconds))
+            self.notices.append(
+                {
+                    "kind": "agent",
+                    "title": "Agenten sluttet å vente",
+                    "detail": (
+                        f"Den ekte agenten ventet {ventet} s på svar på {request_id} "
+                        "og ga opp. Den utførte ingenting. Saken venter fortsatt "
+                        "på deg - ingenting er avgjort."
+                    ),
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            return True
 
     # -- svaret fra mennesket --------------------------------------------
 
