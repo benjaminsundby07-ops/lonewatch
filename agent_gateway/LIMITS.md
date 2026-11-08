@@ -15,6 +15,13 @@ nettverkskall, `git`. Ingen av dem går gjennom Lonewatch. Ber du agenten om å
 Ber du den om det samme, og den i stedet skriver et lite skript og kjører det
 med Bash, ser du ingenting.
 
+Det går enda lenger: `/api/respond` er menneskets endepunkt i nettleseren, og
+det spør ikke om agentnøkkelen. En agent med Bash kan altså godkjenne sitt eget
+røde kort med ett `curl`-kall. MCP-tjeneren gir agenten ingen vei til å
+godkjenne - det er testet - men det er ikke det samme som at veien ikke finnes.
+`tests/test_agent_mcp_live.py::test_aerlig_hull_alt_som_kjoerer_lokalt_kan_godkjenne`
+pinner hullet med vilje, slik at ingen tror det er lukket.
+
 Demoen forutsetter altså at **agenten frivillig bruker Lonewatch-verktøyene.**
 Det er en forutsetning, ikke en sikkerhetsmekanisme. En agent som er lurt av et
 dokument - akkurat scenarioet Lonewatch handler om - er nettopp en agent som
@@ -112,13 +119,37 @@ vi ikke har prøvd er en påstand om dekning vi ikke har.
 ikke appen som beskyttes av det - det er deg: en MCP-tjener som kunne pekt hvor
 som helst, ville vært en kanal ut av maskinen som agenten selv kontrollerte.
 
-## 10. Hva som er testet, og hva som ikke er
+## 10. Nøkkelen i to filer er praktisk, ikke trygg
 
-Automatisk (`tests/test_agent_gateway.py`, `tests/test_agent_mcp_live.py`):
-allow, rødt, block, tidsavbrudd, mistet kontakt, feil nøkkel, feil beløp, at
-agenten ikke kan oppgi de fire feltene, at et blokkert kall ikke får
-regelnavnene, at loggen og loggsjekken stemmer - og hele veien gjennom en ekte
-MCP-klient mot `python -m agent_gateway` mot den kjørende appen.
+`python -m agent_gateway.oppsett` skriver nøklene i `.lonewatch-agent-env` og
+agentnøkkelen i `.mcp.json`. Begge er `chmod 600` og begge står i `.gitignore`.
+Det er det samme nivået som en `.env`-fil: det hindrer et uhell, og ingenting
+annet. Nøkkelen står i klartekst på disken, den har ingen utløpstid, og
+`.mcp.json` leses av Claude Code - altså av et program som også kan lese den og
+sende den videre. Grunnen til at oppsettet likevel finnes: alternativet var at
+nøkkelen ble limt inn for hånd, og en nøkkel som limes inn havner i et
+chatlogg, et skjermbilde eller en commit.
+
+## 11. Reserven er ikke et bevis på at en agent virker
+
+`python -m agent_gateway.scripted_demo` kjører samme `run_action`, samme
+endepunkter, samme regler og samme logg som den ekte agenten. Det den IKKE
+viser: at MCP-protokollen virker (det gjør `tests/test_agent_mcp_live.py`), og
+at en ekte agent velger å bruke verktøyene. Manuset kaller dem alltid. En agent
+gjør ikke nødvendigvis det, og det er nettopp punkt 1.
+
+Reserven skriver dessuten loggen i en midlertidig mappe som slettes etterpå.
+Den er til for å vises, ikke til å etterforske noe i.
+
+## 12. Hva som er testet, og hva som ikke er
+
+Automatisk (`tests/test_agent_gateway.py`, `tests/test_agent_mcp_live.py`,
+`tests/test_agent_scripted_demo.py`): allow, rødt, block, tidsavbrudd, mistet
+kontakt, feil nøkkel, feil beløp, at agenten ikke kan oppgi de fire feltene, at
+et blokkert kall ikke får regelnavnene, at agenten ikke har noe verktøy, felt
+eller kall som godkjenner noe, at loggen og loggsjekken stemmer, at reserven
+gir samme svar hver gang og ikke åpner en socket - og hele veien gjennom en
+ekte MCP-klient mot `python -m agent_gateway` mot den kjørende appen.
 
 **Ikke testet automatisk:** Claude Code selv. En ekte agent velger når og
 hvordan den kaller verktøyene, og kan velge å ikke kalle dem i det hele tatt

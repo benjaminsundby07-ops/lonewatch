@@ -16,6 +16,13 @@ Verktøyene utfører heller ingenting ekte. "Utført" betyr at tjeneren returner
 en tekst som sier at det er simulert. Ingen penger, ingen e-post, ingen
 pakkeinstallasjon, ingen nettverkskall utenom til 127.0.0.1.
 
+To kommandoer hører til her:
+
+    python -m agent_gateway.oppsett         lager nøkler og .mcp.json, uten at
+                                            noen trenger å lime inn noe
+    python -m agent_gateway.scripted_demo   reserven: samme flyt, samme kode,
+                                            manusstyrt, uten agent og uten nett
+
 Ærlige begrensninger - og særlig det store hullet (Claude Code har andre
 verktøy som går rett forbi Lonewatch): se `agent_gateway/LIMITS.md`.
 """

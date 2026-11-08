@@ -344,3 +344,162 @@ def test_tjeneren_starter_ikke_uten_noekkel():
     assert p.returncode == 1
     assert "LONEWATCH_AGENT_KEY" in p.stderr
     assert p.stdout == ""  # stdout er MCP-kanalen og skal vaere helt stille
+
+
+async def _vent_paa_agentkort(base: str, timeout: float = 10.0) -> str:
+    """IDen paa det roede kortet agenten nettopp la i koeen."""
+    for _ in range(int(timeout / 0.1)):
+        await asyncio.sleep(0.1)
+        snap = await asyncio.to_thread(_get, base, "/api/state")
+        venter = [c for c in snap["waiting"] if c["source"] == "agent"]
+        if venter:
+            return str(venter[0]["request"]["id"])
+    return ""
+
+
+# Ord som ville avsloert et verktoey som lot agenten avgjoere sin egen sak.
+GODKJENNINGSORD = ("approve", "reject", "respond", "decide", "override", "resolve", "confirm")
+
+# Navn en agent kunne gjettet paa hvis den lette etter en bakvei.
+GJETNINGER = (
+    "lonewatch_approve",
+    "lonewatch_respond",
+    "lonewatch_approve_request",
+    "approve",
+)
+
+
+def test_agenten_har_ingen_vei_til_aa_godkjenne_sitt_eget_kort(live_app):
+    """Agenten kan ikke avgjøre sin egen sak - og den kan ikke finne på en vei heller.
+
+    Vi gjør det en agent ville prøvd: ser hva som finnes, lar et rødt kort stå
+    og vente, gjetter på navn som kunne godkjent det, og kaller et lovlig
+    verktøy i mellomtiden. Kortet skal fortsatt vente når vi er ferdige.
+
+    Alt samles i `funnet` og sjekkes etter at sesjonen er lukket. Grunnen er
+    praktisk: en assert inne i sesjonen, mens agenten står og venter, henger
+    stdio-forbindelsen i stedet for å gi en lesbar feil.
+    """
+    _post(live_app, "/api/reset")
+    funnet: dict = {}
+
+    async def kjoer():
+        async with MCPProve(live_app, wait_seconds=20.0) as p:
+            verktoey = await p.session.list_tools()
+            funnet["navn"] = sorted(t.name for t in verktoey.tools)
+            funnet["felt"] = {
+                t.name: set(
+                    (
+                        getattr(t, "inputSchema", None)
+                        or getattr(t, "input_schema", None)
+                        or {}
+                    ).get("properties", {})
+                )
+                for t in verktoey.tools
+            }
+
+            oppgave = asyncio.create_task(
+                p.session.call_tool(
+                    "lonewatch_transfer_money",
+                    {"amount": 450_000, "recipient": UKJENT_KONTO, "summary": "Faktura 8841"},
+                    read_timeout_seconds=60.0,
+                )
+            )
+            try:
+                funnet["request_id"] = await _vent_paa_agentkort(live_app)
+
+                gjetninger: dict[str, str] = {}
+                for navn in GJETNINGER:
+                    try:
+                        res = await asyncio.wait_for(
+                            p.session.call_tool(
+                                navn,
+                                {"request_id": funnet["request_id"], "approved": True},
+                            ),
+                            timeout=20,
+                        )
+                        gjetninger[navn] = _tekst(res)
+                    except Exception as exc:  # noen klienter kaster i stedet
+                        gjetninger[navn] = f"{type(exc).__name__}: {exc}"
+                funnet["gjetninger"] = gjetninger
+
+                # Et LOVLIG verktoey roerer heller ikke det kortet som venter.
+                await asyncio.wait_for(
+                    p.session.call_tool(
+                        "lonewatch_read_document",
+                        {"document": "fakturaer.pdf", "summary": "Ser paa fakturaen"},
+                        read_timeout_seconds=20.0,
+                    ),
+                    timeout=30,
+                )
+
+                snap = await asyncio.to_thread(_get, live_app, "/api/state")
+                funnet["venter_fortsatt"] = [c["request"]["id"] for c in snap["waiting"]]
+                funnet["agenten_ferdig"] = oppgave.done()
+            finally:
+                # Mennesket avviser, slik at agenten slipper aa vente ut tiden.
+                if funnet.get("request_id"):
+                    await asyncio.to_thread(
+                        _post,
+                        live_app,
+                        "/api/respond",
+                        {"request_id": funnet["request_id"], "approved": False},
+                    )
+                funnet["svar"] = _tekst(await asyncio.wait_for(oppgave, timeout=40))
+
+    asyncio.run(kjoer())
+
+    # 1. Fire verktoey, og ingen av dem hoeres ut som en godkjenning.
+    assert len(funnet["navn"]) == 4
+    for navn in funnet["navn"]:
+        assert not any(ord_ in navn for ord_ in GODKJENNINGSORD), navn
+
+    # 2. Ingen av dem har et felt som avgjoer noe.
+    for navn, felt in funnet["felt"].items():
+        assert not felt & {"approved", "typed_amount", "verdict", "risk"}, (navn, felt)
+
+    # 3. Ingen av gjetningene godkjente noe. Tjeneren sier bare at den ikke
+    #    kjenner verktoeyet.
+    assert funnet["request_id"], "kortet kom aldri i koeen"
+    for navn, tekst in funnet["gjetninger"].items():
+        assert "GODKJENT" not in tekst and "UTFØRT" not in tekst, (navn, tekst)
+
+    # 4. Kortet ventet fortsatt paa et menneske, og agenten stod stille.
+    assert funnet["request_id"] in funnet["venter_fortsatt"]
+    assert funnet["agenten_ferdig"] is False
+
+    # 5. Det var mennesket som til slutt avgjorde det.
+    assert "AVVIST" in funnet["svar"]
+    _post(live_app, "/api/reset")
+
+
+def test_aerlig_hull_alt_som_kjoerer_lokalt_kan_godkjenne(live_app):
+    """Denne testen pinner et HULL, ikke en beskyttelse. Den skal stå.
+
+    `/api/respond` er menneskets endepunkt i nettleseren, og det spør ikke om
+    agentnøkkelen. Alt som kjører som deg på maskinen - inkludert en agent med
+    Bash - kan altså godkjenne et rødt kort uten å gå gjennom MCP-tjeneren.
+
+    MCP-tjeneren gir agenten ingen vei til å godkjenne (testen over). Det er
+    ikke det samme som at veien ikke finnes. Se agent_gateway/LIMITS.md punkt 1
+    og docs/EKTE_AGENT.md.
+    """
+    _post(live_app, "/api/reset")
+
+    # Et rødt kort, laget utenom agenten.
+    kort = _post(
+        live_app,
+        "/api/custom",
+        {"action_type": "transfer_money", "amount": "450000", "recipient": UKJENT_KONTO},
+    )
+    request_id = kort["card"]["request"]["id"]
+    assert kort["card"]["status"] == "waiting"
+
+    # Ingen agentnøkkel i dette kallet. Det går likevel gjennom.
+    svar = _post(
+        live_app,
+        "/api/respond",
+        {"request_id": request_id, "approved": True, "typed_amount": "450000"},
+    )
+    assert svar["ok"] is True, "hvis denne feiler, er hullet lukket - oppdater LIMITS.md"
+    _post(live_app, "/api/reset")

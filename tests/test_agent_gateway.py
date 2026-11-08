@@ -17,6 +17,7 @@ docs/EKTE_AGENT.md for hva som må prøves for hånd.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import socket
 import threading
@@ -653,3 +654,86 @@ def test_klienten_skiller_avvist_fra_nede(agent_server):
     klient = LonewatchClient(agent_server, "helt-feil-noekkel-her")
     with pytest.raises(LonewatchRefused):
         klient.submit({"action_type": "read_document", "recipient": "x"})
+
+
+# ---------------------------------------------------------------------------
+# agenten kan ikke godkjenne seg selv
+# ---------------------------------------------------------------------------
+
+
+# Ord som ville avslørt et verktøy som lot agenten avgjøre sin egen sak.
+GODKJENNINGSORD = (
+    "approve",
+    "approval",
+    "reject",
+    "respond",
+    "decide",
+    "decision",
+    "override",
+    "confirm",
+    "resolve",
+    "godkjenn",
+    "avvis",
+    "bekreft",
+)
+
+
+def test_ingen_av_verktoeyene_er_et_godkjenningsverktoey():
+    """Fire verktøy, og ingen av dem avgjør noe. Avgjørelsen er menneskets."""
+    assert len(tools.TOOL_SPECS) == 4
+    for spec in tools.TOOL_SPECS:
+        for ord_ in GODKJENNINGSORD:
+            assert ord_ not in spec.name.lower(), (spec.name, ord_)
+
+
+def test_verktoeyene_har_ingen_felt_som_godkjenner_noe():
+    """Et felt som `approved` eller `typed_amount` ville vært den samme bakveien."""
+    mcp = pytest.importorskip("mcp")
+    from agent_gateway.config import AgentConfig
+    from agent_gateway.server import build_server
+
+    server = build_server(AgentConfig("http://127.0.0.1:8000", NOEKKEL, 120.0, 2.0))
+    verktoey = asyncio.run(server.list_tools())
+
+    for t in verktoey:
+        skjema = getattr(t, "input_schema", None) or getattr(t, "inputSchema", None) or {}
+        felt = set(skjema.get("properties", {}))
+        assert not felt & {
+            "approved",
+            "approve",
+            "typed_amount",
+            "human_response",
+            "employee_pseudonym",
+            "seconds_to_decide",
+            "verdict",
+            "risk",
+        }, (t.name, felt)
+    assert mcp is not None
+
+
+def test_klienten_har_bare_tre_kall_og_ingen_av_dem_svarer_for_mennesket():
+    """`LonewatchClient` er hele agentens vei inn. Den kan ikke nå /api/respond.
+
+    Testen leser metodene som finnes: send inn, spør om status, si at vi ga opp.
+    Et fjerde kall ville vært et kall som avgjorde noe.
+    """
+    offentlige = {
+        navn
+        for navn in dir(LonewatchClient)
+        if not navn.startswith("_") and callable(getattr(LonewatchClient, navn))
+    }
+    assert offentlige == {"submit", "status", "abandon"}
+
+    kilde = inspect.getsource(LonewatchClient)
+    assert "/api/respond" not in kilde
+    assert "/api/reset" not in kilde
+
+
+def test_et_paafunnet_godkjenningsverktoey_finnes_ikke():
+    """Finner agenten på et navn selv, skjer det ingenting."""
+    klient = FalskKlient(
+        {"ok": True, "request_id": "agent_0001", "verdict": "allow", "status": "allow"}
+    )
+    svar = tools.run_action(klient, tool_name="lonewatch_approve")
+    assert "Ukjent verktøy" in svar
+    assert klient.sendt == []

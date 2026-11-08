@@ -1,5 +1,8 @@
 {
   "_kommentar": [
+    "ENKLESTE VEI: kjor `python -m agent_gateway.oppsett` - den skriver",
+    ".mcp.json og noklene for deg, uten at du limer inn noe. Denne filen",
+    "er for deg som vil gjore det for hand.",
     "Kopier til .mcp.json og lim inn den samme LONEWATCH_AGENT_KEY som",
     "terminalen der `python -m ui` kjorer. .mcp.json ligger i .gitignore,",
     "nettopp fordi noekkelen staar i den. Se docs/EKTE_AGENT.md.",
