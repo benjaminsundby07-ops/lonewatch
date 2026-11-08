@@ -8,6 +8,10 @@ begge ligger i `.gitignore`, og skriver ut de to kommandoene du skal kjøre:
 
     .lonewatch-agent-env   nøklene appen trenger. Du gjør `source` på den.
     .mcp.json              MCP-oppsettet Claude Code leser. Samme agentnøkkel.
+    .claude/settings.json  det låste agentoppsettet: bare Lonewatch-verktøyene
+                           er tillatt, de innebygde er nektet. Ingen nøkkel i
+                           den. Se `agent_gateway/laas.py` for hva den IKKE
+                           låser - den er klientkonfigurasjon, ikke en grense.
 
 To av nøklene er med vilje atskilt, og det er hele BankID-tanken i denne
 demoen:
@@ -41,6 +45,8 @@ import secrets
 import stat
 import sys
 from pathlib import Path
+
+from agent_gateway import laas
 
 ROOT = Path(__file__).resolve().parent.parent
 ENV_FILE = ROOT / ".lonewatch-agent-env"
@@ -197,6 +203,11 @@ def setup(
         + "\n",
     )
 
+    # Det laaste agentoppsettet: en Claude Code-innstillingsfil der bare
+    # Lonewatch-verktoeyene er tillatt. Den inneholder ingen noekkel. Se
+    # agent_gateway/laas.py for hva den faktisk laaser - og ikke laaser.
+    laast = laas.write_settings(root)
+
     return {
         "env_file": str(env_file),
         "mcp_file": str(mcp_file),
@@ -205,6 +216,9 @@ def setup(
         "kept": beholdt,
         "env_ignored": _gitignored(env_file.name, root),
         "mcp_ignored": _gitignored(mcp_file.name, root),
+        "settings_file": laast["settings_file"],
+        "settings_mode": laast["mode"],
+        "settings_ignored": laast["ignored"],
     }
 
 
@@ -219,18 +233,33 @@ def main(argv: list[str] | None = None) -> int:
     print("Oppsettet er klart.\n")
     print(f"  {resultat['env_file']}   nøklene (ikke i git)")
     print(f"  {resultat['mcp_file']}              MCP-oppsettet (ikke i git)")
+    print(f"  {resultat['settings_file']}   låst agentoppsett (ikke i git)")
     if resultat["kept"]:
         print(f"\nBeholdt nøkler du alt hadde: {', '.join(resultat['kept'])}")
     if resultat["created"]:
         print(f"Laget nye nøkler: {', '.join(resultat['created'])}")
     print("Ingen nøkkel skrives ut her. De står bare i de to filene.")
 
-    for fil, ignorert in (("env_file", "env_ignored"), ("mcp_file", "mcp_ignored")):
+    for fil, ignorert in (
+        ("env_file", "env_ignored"),
+        ("mcp_file", "mcp_ignored"),
+        ("settings_file", "settings_ignored"),
+    ):
         if not resultat[ignorert]:
             print(
                 f"\nADVARSEL: {Path(str(resultat[fil])).name} står ikke i .gitignore. "
                 "Legg den inn FØR du committer."
             )
+
+    print()
+    for linje in laas.summary_lines():
+        print(linje)
+    print(
+        f"\nMerk: {laas.SETTINGS_REL} gjelder for ALLE Claude Code-økter du "
+        "starter i\ndenne mappen - også din egen utvikler-økt. Vil du ikke det, "
+        "slett filen.\nStartskriptet virker fortsatt: det sender de samme "
+        "listene som flagg."
+    )
 
     try:
         import mcp  # noqa: F401
@@ -248,7 +277,9 @@ def main(argv: list[str] | None = None) -> int:
     print("        grep LONEWATCH_HUMAN_KEY .lonewatch-agent-env")
     print("      lim verdien inn i feltet «Menneskenøkkel» på Godkjenning-fanen.")
     print("      Uten den kan ingenting godkjennes - heller ikke av agenten.")
-    print("  5)  i et NYTT terminalvindu: claude")
+    print("  5)  i et NYTT terminalvindu: python -m agent_gateway.start_agent")
+    print("      (den starter `claude` låst. Vil du bare se kommandolinjen:")
+    print("       python -m agent_gateway.start_agent --vis)")
     print('  6)  si til agenten: "Betal faktura 8841: 450 000 kr til')
     print('      NO93 8601 1117 947. Bruk Lonewatch-verktøyene."')
     print("\nDu trenger ingen API-nøkkel. Se docs/EKTE_AGENT.md.")
