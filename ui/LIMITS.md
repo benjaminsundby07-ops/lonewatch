@@ -164,33 +164,68 @@ sendingen står i `executor/LIMITS.md`.
 `run_demo.py` er IKKE koblet til utføreren. Den er en ren regel- og
 loggdemonstrasjon i terminalen, og den skriver fortsatt 88 linjer.
 
-## 9. «Oversikt», «Godkjenning» og «Etter» kan bli høyere enn skjermen
+## 9. Ingen fane ruller siden - men noe ruller innvendig
 
-Målt i nettleseren (Playwright, Chromium) på 1440×900 og 1920×1080, både låst
-og opplåst side, gjennom alle fem fanene: **ingen vannrett rulling noe sted**,
-og **null forespørsler ut av maskinen**.
+Regelen er én nå: **siden skal aldri rulle.** Skallet er nøyaktig
+skjermhøyden (`.app-backdrop { height: 100vh }`), den aktive fanen får resten
+av den, og det som ikke får plass ruller inne i sin egen blokk.
 
-Loddrett, slik det ble målt denne runden:
+Målt i nettleseren (Chrome) på 1440×900 og 1920×1080, låst og opplåst, med
+hele strømmen kjørt (6 røde, 1 blokkert, 33 rolige, 7 egne forespørsler fra
+«Prøv selv»), med hendelsesbåndet oppe og i presentasjonsmodus: **ingen fane
+er høyere enn skjermen, og ingenting ruller sidelengs.**
 
-| Fane | 1440×900 | 1920×1080 |
+### Hva som faktisk var galt, og hvor mye
+
+Forrige runde sa at bare «Prøv selv» stod 22 px for høy. Det var riktig for
+tilstanden den ble målt i - tidlig i strømmen. Med hele demoen kjørt var det
+tre faner som stod utenfor på 1440×900:
+
+| Fane | Var | Hvorfor |
 |---|---|---|
-| Oversikt, Før, Godkjenning | innenfor | innenfor |
-| **Etter** (med «Bryt loggen») | innenfor | innenfor |
-| **Prøv selv** | **922 px, altså 22 px for høy** | innenfor |
+| **Godkjenning** | 1388 px | køen 560 px + «Går gjennom» 420 px er 1110 px i en kolonne som har 742 |
+| **Etter** | 974 px | fire seksjoner, og loggtabellen og «Oppfølging» hadde hver sitt faste tak |
+| **Prøv selv** | 924 px | tre hjelpetekster brøt til en linje ekstra i en 560 px smal kolonne |
+| Oversikt, Før | innenfor | - |
 
-«Prøv selv» var 22 px for høy FØR denne runden også - det er skjemaet med ni
-felt som er høyt, og ingenting her gjorde det høyere. Den står igjen.
+Feilen var den samme alle tre stedene: **høydene stod som faste tall**
+(`calc(100vh - 340px)`, 340 px, 200 px, 96 px). Et fast tall kan bare være
+riktig for én skjerm og én tilstand. Det tok ikke hensyn til at «Går gjennom»
+stod under køen og krevde sine egne 420 px, og det ga like lite plass på 1080
+som på 900.
 
-«Bryt loggen» kom inn på Etter denne runden, og det kostet noe: logg-tabellen
-ruller nå innvendig fra 200 px i stedet for 520 px, og «Oppfølging» og
-resultatkortet fikk også innvendig rulling. Det er et bevisst bytte - «Bryt
-loggen» skal kunne leses ved siden av «Sjekk loggen» rett over, og det kan den
-ikke hvis den ene er utenfor skjermen. Resultatet viser dessuten **ett** angrep
-av gangen og ikke fire under hverandre; knappene viser hvilke som er kjørt.
+### Hva som er gjort
 
-Låst-banneret vises ikke på «Prøv selv». Der står beskjeden i skjemaet, rett
-under knappen man trykket - og tre linjer banner i tillegg hadde gjort den
-høyeste fanen høyere.
+* **Skallet er et tak, ikke bare et gulv.** `min-height: 100vh` ble til
+  `height: 100vh` i tillegg. Siden *kan* ikke bli høyere enn skjermen.
+* **Fanen får resten av høyden** (`.app-main` er en kolonne, `.app-view` er
+  `flex: 1`). Topprad, bannere, hendelsesbånd og bunntekst beholder sitt.
+* **Blokkene deler høyden i stedet for å ha hvert sitt tall.** Køen får to
+  tredeler av venstre kolonne og «Går gjennom» én; loggtabellen får to
+  tredeler av det Etter har til overs og «Oppfølging» én. Da gir 1080
+  faktisk mer enn 900.
+* **«Prøv selv»: skjemakolonnen er 640 px i stedet for 560.** Det var ikke
+  luften som var feil - det var tre hjelpetekster som brøt til en linje
+  ekstra hver. Bredere kolonne, samme skrift, samme avstander, 24 px kortere
+  fane.
+
+### Hva det ikke løser
+
+* **«Ruller ikke» betyr ikke «alt er synlig samtidig».** Køen, «Går gjennom»,
+  loggtabellen, «Oppfølging», «Dine forespørsler» og saken som er åpen ruller
+  hver for seg. Du ser færre rader av gangen enn du gjorde da siden fikk lov
+  til å bli 1388 px høy. Det er byttet: en liste som ruller i sin egen ramme
+  er lesbar ved siden av det som står rundt den; en side som ruller er det
+  ikke.
+* **Under 1241 px bredde eller 700 px høyde gjelder faste tak igjen**, og da
+  er det *fanen* som ruller innvendig. Siden ruller fortsatt ikke, men da er
+  kolonnene stablet og det er ingen projektor å stå på.
+* **Målingen er ikke en test.** `tests/test_ui_height.py` pinner reglene
+  målingen hvilte på - at taket står, at fanen får resten, at hver liste som
+  kan vokse ruller innvendig. Den måler ingen piksler. En ekte måling krever
+  en nettleser, og den må kjøres for hånd.
+* **Låst-banneret vises fortsatt ikke på «Prøv selv».** Der står beskjeden i
+  skjemaet, rett under knappen man trykket.
 
 ## 10. `/api/state` har to nivåer, og det laveste er en allowliste
 
