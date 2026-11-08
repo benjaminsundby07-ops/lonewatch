@@ -197,7 +197,26 @@ sitter i dashbordet må gå gjennom alle for å finne den ene som betyr noe. Det
 er en tjenestenekt mot MENNESKET, ikke mot appen. Pinnet som
 `xfail(strict=True)`.
 
-## 13. Hva som er testet, og hva som ikke er
+## 13. `lonewatch_read_document` sier ikke HVILKET dokument det var
+
+Verktøyet tar et dokumentnavn, men navnet legges i `recipient` - det finnes
+ikke noe felt for `source_doc_id` i `tools.run_action()`, og `AgentSubmitIn` i
+`ui/app.py` har ikke noe å ta det imot i.
+
+Følgen: felle-skanneren i `agents/doc_scan.py` kjører **aldri** for en ekte
+agent. `DemoState._maybe_trap()` ser på `req.source_doc_id`, og det feltet er
+alltid tomt når forespørselen kom fra broen. En ekte agent som leser et
+dokument med en skjult instruksjon får derfor ingen felle, ingen logglinje og
+ingen varsellampe. Fellene virker i demostrømmen og i historien, ikke her.
+
+Dette påvirker ikke avgjørelsen - risikovurderingen bruker ikke dokumentet, og
+skal ikke bruke det. Det er oppdagelsen som mangler.
+
+Å lukke det krever ett nytt felt i to filer i `ui/` (`AgentSubmitIn` og
+`DemoState.submit_agent`), som eies av en annen økt. Se `docs/E_RAPPORT.md` for
+de to alternativene.
+
+## 14. Hva som er testet, og hva som ikke er
 
 Automatisk (`tests/test_agent_gateway.py`, `tests/test_agent_mcp_live.py`,
 `tests/test_agent_scripted_demo.py`): allow, rødt, block, tidsavbrudd, mistet

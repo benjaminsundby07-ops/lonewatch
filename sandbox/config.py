@@ -57,4 +57,12 @@ BLOCKING_EVENTS = (
     "denied_file",
     "denied_process",
     "denied_import",
+    # Avvist av den statiske sjekken (sandbox/static_check.py) foer kjoering.
+    # Et kjent roemningsmoenster i kilden er et funn i seg selv.
+    "static_reject",
+    # Tillegget strakk seg etter de EKTE funksjonene bak sperrene og fikk en
+    # snare. Dette er den veien `open.__globals__` gikk foer.
+    "guard_bypass",
+    # Sperrene sto ikke igjen etter kjoeringen. Da er alt annet vi saa usikkert.
+    "guard_tampered",
 )

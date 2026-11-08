@@ -32,6 +32,21 @@ OUTBOUND_EVENTS = ("network_connect", "network_lookup", "network_send")
 # saa - det nektet aa gi seg - og det blir `blocked` som foer.
 INCONCLUSIVE_EVENTS = ("plugin_error", "no_entry_point")
 
+# Hendelsen harness-et skriver HELT til slutt, etter aa ha sjekket at sperrene
+# fortsatt staar der de ble satt. Den er beviset vi krever for aa si `clean`:
+# uten den har vi ikke sett ferdig etter, og da sier vi `not_tested`.
+#
+# Dette er regelen "alt vi ikke kan bevise er ikke clean". Foer dette kunne et
+# tillegg bryte ut via `open.__globals__`, lese en fil utenfor boksen, og
+# rapporten sa `clean` fordi ingen sperre var blitt spurt.
+GUARDS_INTACT_EVENT = "guards_intact"
+
+NOT_PROVEN_NOTE = (
+    "IKKE TESTET: sandkassen fikk ikke bekreftet at sperrene sto igjen etter "
+    "kjoeringen, saa den kan ikke si at tillegget ikke gjorde noe. Dette er "
+    "ikke det samme som at vi saa etter og ikke fant noe."
+)
+
 NOT_TESTED_NOTE = (
     "IKKE TESTET: sandkassen fikk ikke kjørt tillegget ferdig, så vi vet ikke "
     "hva det ville gjort. Dette er ikke det samme som at vi så etter og ikke "
@@ -42,6 +57,11 @@ NOT_TESTED_NOTE = (
 def is_inconclusive(events: list[dict]) -> bool:
     """Kom tillegget aldri i gang?"""
     return any(str(e.get("kind", "")) in INCONCLUSIVE_EVENTS for e in events)
+
+
+def guards_proven(events: list[dict]) -> bool:
+    """Bekreftet harness-et at sperrene sto igjen da tillegget var ferdig?"""
+    return any(str(e.get("kind", "")) == GUARDS_INTACT_EVENT for e in events)
 
 
 def _unique(values: list[str], limit: int) -> list[str]:
@@ -74,6 +94,9 @@ def build_report(
 ) -> SandboxReport:
     kinds = [str(e.get("kind", "")) for e in events]
     finished = "done" in kinds
+    # Avvist av den statiske sjekken: da ble det ikke startet noen delprosess,
+    # og "stoppet foer tillegget var ferdig" ville vaert en misvisende setning.
+    static = [e["data"] for e in events if e.get("kind") == "static_reject"]
 
     outbound = _unique(
         [str(e["data"].get("destination", "")) for e in events if e.get("kind") in OUTBOUND_EVENTS],
@@ -151,12 +174,41 @@ def build_report(
             f"Tillegget prøvde å hente inn {_antall(len(denied_imports), 'sperret modul', 'sperrede moduler')} "
             f"({', '.join(denied_imports)}). Det er en kjent måte å gå rundt sandkassen på, og det ble stoppet."
         )
+    bypass = _unique(
+        [str(e["data"].get("name", "")) for e in events if e.get("kind") == "guard_bypass"],
+        config.MAX_LISTED_FILES,
+    )
+    if bypass:
+        notes.append(
+            f"Tillegget strakk seg etter {_antall(len(bypass), 'ting sandkassen holder for seg selv', 'ting sandkassen holder for seg selv')} "
+            f"({', '.join(bypass)}) - altsaa de EKTE funksjonene bak sperrene. "
+            "Det fikk en snare i stedet, og forsoeket staar her."
+        )
+    tampered = _unique(
+        [str(e["data"].get("guard", "")) for e in events if e.get("kind") == "guard_tampered"],
+        config.MAX_LISTED_FILES,
+    )
+    if tampered:
+        notes.append(
+            f"Sperrene sto ikke igjen etter kjoeringen ({', '.join(tampered)}). "
+            "Tillegget har byttet dem ut, saa vi kan ikke stole paa noe av det vi "
+            "ellers saa."
+        )
+    if static:
+        regler = _unique([str(d.get("rule", "")) for d in static], config.MAX_LISTED_FILES)
+        linjer = _unique([str(d.get("text", "")) for d in static], config.MAX_LISTED_FILES)
+        notes.append(
+            "AVVIST FOER KJOERING: den statiske sjekken fant "
+            f"{_antall(len(static), 'kjent roemningsmoenster', 'kjente roemningsmoenstre')} "
+            f"i kilden ({', '.join(regler)}): " + "; ".join(linjer) + ". "
+            "Tillegget ble derfor ikke kjoert i det hele tatt."
+        )
     if timed_out:
         notes.append(
             f"Tillegget ble ikke ferdig innen tidsgrensen på {_sekunder(timeout_s)} sekunder. "
             "Delprosessen ble drept."
         )
-    elif not finished:
+    elif not finished and not static:
         notes.append(
             "Delprosessen stoppet før tillegget var ferdig"
             + (f" (sluttkode {returncode})" if returncode not in (None, 0) else "")
@@ -167,6 +219,12 @@ def build_report(
     if plugin_errors:
         first = plugin_errors[0]
         notes.append(f"Tillegget krasjet: {first.get('type', 'Feil')}: {first.get('message', '')}")
+
+    proven = guards_proven(events)
+    if not proven and not static and not inconclusive and not blocked:
+        # Vi kan ikke si "ingenting skjedde" naar vi ikke fikk bekreftet at
+        # sperrene sto igjen. Da er svaret `not_tested`, ikke `clean`.
+        notes.append(NOT_PROVEN_NOTE)
 
     if not notes:
         # Denne setningen er en klarering, og den skal bare staa naar tillegget
@@ -188,8 +246,13 @@ def build_report(
         #
         # Saa vi et forsoek paa aa naa nettet eller lese et agn, er det et ekte
         # funn, og det gjelder selv om tillegget krasjet rett etterpaa. Det er
-        # bare naar vi IKKE saa noe - fordi tillegget aldri kom i gang - at
-        # svaret er at vi ikke fikk testet det.
-        verdict="blocked" if blocked else ("not_tested" if inconclusive else "clean"),
+        # bare naar vi IKKE saa noe - fordi tillegget aldri kom i gang, eller
+        # fordi vi ikke fikk bekreftet at sperrene sto igjen - at svaret er at
+        # vi ikke fikk testet det. `clean` krever bevis, ikke bare stillhet.
+        verdict=(
+            "blocked"
+            if blocked
+            else ("not_tested" if (inconclusive or not proven) else "clean")
+        ),
         notes=" ".join(notes),
     )

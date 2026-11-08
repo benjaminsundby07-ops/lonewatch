@@ -33,7 +33,7 @@ from pathlib import Path
 
 from contracts import SandboxReport
 
-from . import config, fake_home
+from . import config, fake_home, static_check
 from .report import build_report, is_inconclusive
 
 HARNESS = Path(__file__).with_name("harness.py")
@@ -154,6 +154,35 @@ def _kill_tree(proc: subprocess.Popen) -> None:
             pass
 
 
+def _static_reject(package_name: str, source: str, timeout: float) -> SandboxRun | None:
+    """Leser kilden foer noe kjoeres. Gir en blocked-rapport hvis den avvises.
+
+    Sperrene i harness-et ligger i samme prosess som tillegget, saa et tillegg
+    som naar funksjonsobjektene staar utenfor dem UTEN aa utloese en eneste
+    sperre. Den eneste maaten aa se den veien er aa nekte moensteret foer
+    koden kjoerer. Se sandbox/static_check.py og sandbox/LIMITS.md.
+    """
+    findings = static_check.check_source(source)
+    if not findings:
+        return None
+    events = [
+        {
+            "kind": "static_reject",
+            "data": {"rule": f.rule, "detail": f.detail, "lineno": f.lineno, "text": f.text()},
+        }
+        for f in findings
+    ]
+    report = build_report(
+        package_name,
+        events,
+        timed_out=False,
+        timeout_s=timeout,
+        returncode=None,
+        stderr="",
+    )
+    return SandboxRun(report=report, events=events)
+
+
 def run_in_box(
     package_name: str,
     source: str,
@@ -161,6 +190,10 @@ def run_in_box(
 ) -> SandboxRun:
     """Kjører kildekoden til et tillegg i boksen. Gir rapport OG hendelser."""
     timeout = config.DEFAULT_TIMEOUT_S if timeout_s is None else float(timeout_s)
+
+    avvist = _static_reject(package_name, source, timeout)
+    if avvist is not None:
+        return avvist
 
     box = Path(tempfile.mkdtemp(prefix="lonewatch-boks-"))
     control = Path(tempfile.mkdtemp(prefix="lonewatch-styring-"))

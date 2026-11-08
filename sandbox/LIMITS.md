@@ -15,28 +15,68 @@ Et tillegg som kjører i samme prosess som sperrene sine, kan i prinsippet allti
 komme rundt dem. Det er ikke en feil vi har glemt å fikse. Det er en egenskap
 ved å gjøre det på denne måten.
 
-## Sperrene kan brytes fra innsiden (uløst)
+## Sperrene kan brytes fra innsiden (fortsatt uløst i prinsippet)
 
 Sperrene er vanlige Python-funksjoner, og en Python-funksjon bærer med seg
-globals-ordboken sin. Der ligger de ekte funksjonene vi tok vare på. To linjer
-er nok:
+globals-ordboken sin. Der lå de ekte funksjonene vi tok vare på. To linjer var
+nok:
 
 ```python
 ekte_open = open.__globals__["_REAL_BUILTINS_OPEN"]
-ekte_open("/etc/passwd").read()      # leser den ekte filen
+ekte_open("/etc/passwd").read()      # leste den ekte filen
 ```
 
-Vi har prøvd dette mot vår egen sandkasse, og det virker. Testen
-`test_sperrene_kan_ikke_omgaas_via_globals` står i `tests/test_sandbox.py` som
-`xfail` med denne begrunnelsen, slik at hullet er synlig i testkjøringen i
-stedet for å være glemt. Samme vei gir også tilgang til agnlisten og til
-hendelsesfilen, så et tillegg som bruker den kan både komme ut OG skrive falske
-hendelser inn i rapporten om seg selv.
+Vi prøvde dette mot vår egen sandkasse, og det virket - og rapporten sa
+`clean` mens det skjedde. Det siste var det verste: boksen så ingenting.
 
-Vi stengte den enkleste varianten (`sys.modules["__main__"]`), men det er en bom,
-ikke en vegg. Å flytte de ekte funksjonene inn i closures hjelper ikke:
-`__closure__` er like lesbar. Dette kan ikke lukkes så lenge tillegget kjører i
-samme Python-prosess.
+**Hva vi gjorde med det (runde 3).** Tre ting, og ingen av dem er ekte
+isolasjon:
+
+1. **En statisk sjekk før kjøring** (`sandbox/static_check.py`). Kilden leses
+   som et AST, og kjente rømningsmønstre avvises FØR noe kjøres: dunder-
+   attributter (`__globals__`, `__builtins__`, `__subclasses__`, `__class__`,
+   `__mro__`, `__code__`, `__closure__`, `__dict__`, rammer og sporinger),
+   `eval`, `exec`, `compile`, `__import__`, `getattr`/`setattr`/`delattr` med
+   et navn, en streng som nevner et sperret attributt, og skriving til et
+   attributt på en modul som holder en sperre (`builtins.open = ...`). Et
+   tillegg som avvises blir `blocked`, og det startes ingen delprosess.
+   `open` står MED VILJE på den tillatte listen: hele poenget med boksen er å
+   se et tillegg lese agnfilene.
+2. **Sperrene er lukninger, og globals-ordboken er tømt.** Hver sperre holder
+   de ekte funksjonene i sine egne celler. Etter at sperrene er satt opp byttes
+   alt farlig i harness-ets globale ordbok ut med **snarer**: objekter som
+   skriver ned at noen strakk seg etter dem (`guard_bypass`) og nekter. Et
+   tillegg som likevel finner veien til ordboken får altså ikke de ekte
+   funksjonene, og forsøket står i rapporten.
+3. **`clean` krever et bevis.** Etter at tillegget er ferdig sjekker harness-et
+   at sperrene fortsatt står der de ble satt (`builtins.open`,
+   `builtins.__import__`, `os.open`, `socket.socket`, `sys.meta_path`) og
+   skriver `guards_intact`. Mangler den hendelsen, sier rapporten `not_tested`
+   og ikke `clean`. Står en sperre ikke igjen, blir det `guard_tampered` og
+   `blocked`.
+
+**Hva dette IKKE er.** Det er en bom og en snare, ikke en vegg:
+
+- Den statiske sjekken avviser **mønstre vi kjenner**. En streng satt sammen
+  under kjøringen går gjennom. `operator.attrgetter("__glob" + "als__")` er
+  ikke avvist av sjekken - der er det snaren som fanger forsøket, og snaren
+  *ser* det, den *stopper* det ikke på noe dypere nivå enn at den nekter.
+  Base64, rot13, et navn lest fra en fil: samme sak.
+- `open.__closure__` er fortsatt en vei til de ekte funksjonene. Den er bare
+  avvist statisk, altså av punkt 1, som punkt over sier er omgåelig.
+- **Python-sandboxing i samme prosess kan ikke gjøres sikker.** Det er ikke en
+  mangel i koden vår; det er en egenskap ved språket. Alt vi har gjort her er å
+  flytte terskelen og å gjøre forsøkene synlige.
+
+**Hva en ekte løsning er.** Prosessisolasjon: en container med `seccomp` eller
+`landlock`, en gVisor/Firecracker-sandkasse, eller en etablert sandkasse som
+`nsjail`/`bubblewrap`. Vi har bevisst valgt å ikke bygge en ekte sandkasse i
+dette prosjektet - vi vil integrere en etablert en senere. Det som står her er
+simuleringen gjort tettere og ærligere, ikke en sandkasse som holder.
+
+Angrepene og grensene er kjørbare i
+`tests/attack2/test_attack_sandbox_escape.py`, inkludert testen som viser
+nøyaktig hvor den statiske sjekken slipper noe gjennom.
 
 ### Omveiene vi faktisk fant og stengte
 
@@ -122,6 +162,13 @@ hendelse er nok til `blocked`. Det gir noen rare utfall:
 - et tillegg som krasjer med en gang blir `not_tested`, ikke `clean`. Se neste
   avsnitt. "Clean" betyr "vi så etter og fant ingenting", og det skal bare stå
   når tillegget faktisk kjørte ferdig.
+- `clean` krever i tillegg at harness-et BEKREFTET at sperrene sto igjen
+  etterpå (`guards_intact`). Uten den bekreftelsen er svaret `not_tested`.
+  Regelen er: alt vi ikke kan bevise, sier vi ikke `clean` om.
+- et tillegg som avvises av den statiske sjekken blir `blocked` uten å ha blitt
+  kjørt. Det er et funn på KILDEN, ikke på handlingen - rapporten sier det
+  eksplisitt ("AVVIST FOER KJOERING"), slik at ingen tror vi så tillegget gjøre
+  noe.
 
 ## Et tillegg som krasjer blir `not_tested`, ikke `clean`
 
@@ -223,6 +270,21 @@ svetter.
   tillegg blir riktig blokkert og beskrevet riktig i `notes`, men overskriften
   på Etter-listen sier "sende ut" når det egentlig var "slippe inn".
   `SandboxReport` har ikke noe felt å skille dem på, og `contracts.py` er låst.
+- **Den statiske sjekken tar også harmløs kode.** `getattr(x, "navn")`,
+  `obj.__dict__` og `eval` er helt vanlig i ekte Python, og et tillegg som
+  bruker dem blir `blocked` selv om det ikke prøvde noe. Vi har valgt den
+  kostnaden med vilje: vi vil heller avvise et greit tillegg enn å si `clean`
+  om et vi ikke forstår. Rapporten sier eksplisitt at det var kilden og ikke
+  handlingen som ble avvist. De fem demotilleggene (også de tre som stjeler)
+  har rene kilder, nettopp fordi de skal stoppes på HANDLING - ellers mister vi
+  beviset for at nettsperren og agnfilene virker.
+- **Den statiske sjekken ser ikke en streng satt sammen under kjøringen.**
+  `"__glob" + "als__"` går gjennom. Da er det snaren i globals-ordboken som
+  fanger forsøket. Se "Sperrene kan brytes fra innsiden" over.
+- **Snarene er navngitt, ikke skjult.** De ligger under de samme navnene som
+  før. Vi gjør ikke noe forsøk på å skjule hvor de ligger: et tillegg som leser
+  ordboken vil se snarer. Det er greit - poenget er at forsøket blir SETT, ikke
+  at det blir umulig.
 - **Agnlisten er hardkodet.** Et tillegg som leser `~/.ssh/id_ed25519` i stedet
   for `id_rsa` treffer ikke et agn. Vi skriver det ned som vanlig fillesing, og
   rapporten blir `clean`.
