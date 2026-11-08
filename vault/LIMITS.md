@@ -172,3 +172,46 @@ punkt 1 og 9).
 - HMAC-SHA256-pseudonymer: samme ansatt gir samme kode, og koden kan ikke regnes tilbake
   uten nøkkelen.
 - Etter-listen bygges bare fra logglinjer, aldri av en AI-modell.
+- `vault/tamper_demo.py` angriper en KOPI av loggen og lar den samme verifiseringen
+  svare. Tre angrep oppdages, det fjerde gjør ærlig ikke det. Se punkt 12.
+
+## 12. Hva «Bryt loggen»-demoen viser, og hva den ikke viser
+`vault/tamper_demo.py` (`python -m vault.tamper_demo --attack {endre,slett,kutt,full}`)
+angriper en **kopi** av loggen og lar den eksisterende verifiseringen svare. Loggen og
+hale-ankeret kopieres til en midlertidig mappe, angrepet skjer der, og mappen slettes
+etterpå. Vi tar sha256 og filstørrelse av den ekte loggen og ankeret før og etter, og
+stopper med en feil hvis noe har flyttet seg. Modulen skriver aldri en ny, lettere
+sjekk - den kaller `Vault.verify_detail()`, den samme koden som kjøres ellers.
+
+**Dette viser den:**
+- `endre` - én linje midt i loggen dekrypteres, utfallet skrives om fra «rød» til
+  «tillatt», og linjen krypteres på nytt. Hash-kjeden peker ut nøyaktig den linjen.
+- `slett` - én linje midt i loggen fjernes. Neste linje står på feil plass, og kjeden
+  peker ut gapet.
+- `kutt` - de to siste linjene kuttes bort. Dette ser hash-kjeden **ikke**: det som står
+  igjen er fortsatt en perfekt kjede fra linje 0. Hale-ankeret fanger det.
+
+**Dette viser den også, og det er med vilje:**
+- `full` - angriperen har loggnøkkelen, regner hash-kjeden på nytt fra linjen han endret
+  og helt ut, og signerer et nytt hale-anker. Verifiseringen svarer at loggen er i orden,
+  og **det er riktig svar**: alt den kan se, stemmer. Loggen kan ikke oppdage dette alene.
+  Det er ikke en feil som venter på å bli rettet, det er punkt 1 i denne filen, utført.
+  Det eneste som fanger det, er siste hash skrevet ned **utenfor maskinen** - på papir, i
+  en annen maskin, i et objektlager med object lock, eller lest opp i et møte. Demoen
+  viser siste hash før og etter nettopp derfor: de er forskjellige, og forskjellen er
+  synlig med øyet hvis du hadde notert den første.
+
+**Dette viser den ikke:**
+- Ingenting om hvem som endret loggen. Punkt 4 står: alle som kan lese den kan skrive
+  gyldige linjer i den, og loggen kan ikke bevise avsender.
+- Ingenting om en slettet mappe eller en fjernet arkivfil. Angrepene forutsetter at det
+  finnes en logg å verifisere. Punkt 1 og 9 dekker det som er borte.
+- Ingenting om *når* noe skjedde. `full`-angrepet kan også skrive om `ts` uten at noe
+  sier fra - punkt 3.
+- Ingen sannsynlighet. At `endre` og `slett` oppdages betyr at de oppdages av
+  **verifiseringen**, ikke at noen faktisk kjører den. En logg ingen sjekker er en logg
+  ingen beskytter.
+
+Demoen feiler lukket: finnes ikke loggen, er den tom, er den for kort for angrepet, eller
+verifiserer den ikke **før** vi gjør noe, så stopper den med en feilmelding i stedet for
+å vise noe halvveis. Den tar heller ikke æren for et avvik den ikke selv laget.
