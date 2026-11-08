@@ -98,7 +98,8 @@ fra disk og peker på `seq` til første linje som er endret, uleselig eller på 
 siden av loggen ligger et hale-anker (`<logg>.head`) som er signert med HMAC-SHA256, og som
 fanger at de siste linjene er kuttet bort.
 
-«Bryt loggen» viser det, og viser også hva det ikke klarer.
+«Bryt loggen» viser det, og viser også hva det ikke klarer. Du finner den i Etter-fanen i appen, og
+på kommandolinjen:
 
 ```bash
 python -m vault.tamper_demo --attack alle
