@@ -1452,3 +1452,13 @@ body { font-family: var(--font-sans); }
   .app-table-wrap { max-height: 200px; }
   .app-after { max-height: 96px; }
 }
+
+/* Ikke si det samme to ganger.
+ * 1) Etter-fanen har sitt eget kort «Kjeden er hel» med samme tekst, så stripen
+ *    «Loggen stemmer ...» øverst skjules der.
+ * 2) «Kjeden stoppet her» er slutten på demofortellingen og hører til Oversikt.
+ *    Mens hendelsen spilles av (.live) står den på alle faner, så du kan gå til
+ *    Godkjenning og svare uten å miste klokka. */
+body[data-tab="after"] #verify-banner { display: none; }
+body:not([data-tab="overview"]) #story-band:not(.live) { display: none; }
+

@@ -2140,6 +2140,8 @@ const VIEW_HASH = {
 function showTab(tab) {
   if (!VIEW_HASH[tab]) tab = "overview";
   activeTab = tab;
+  /* CSS leser fanen herfra (se «Ikke si det samme to ganger» i style.css). */
+  document.body.dataset.tab = tab;
 
   document.querySelectorAll("#app-nav [data-tab]").forEach((b) =>
     b.classList.toggle("is-active", b.getAttribute("data-tab") === tab)
