@@ -32,11 +32,20 @@ def req(**felt) -> ActionRequest:
 @pytest.mark.parametrize("handling", sorted(a.value for a in config.OUTBOUND_ACTIONS))
 @pytest.mark.parametrize("mottaker", [None, "", "   ", "\t\n"])
 def test_utgaaende_uten_mottaker_gaar_til_et_menneske(handling, mottaker):
-    """Ogsaa naar agenten paastaar at mottakeren er kjent."""
+    """Ogsaa naar agenten paastaar at mottakeren er kjent.
+
+    `req()` setter ikke `amount`, saa en `transfer_money` her mangler BEGGE
+    ting. Teksten sier da hva som mangler av beloepet i stedet for den
+    generelle setningen - mennesket skal vite hva som faktisk er borte. Begge
+    veier er `incomplete_request`.
+    """
     d = evaluate(req(action_type=ActionType(handling), recipient=mottaker, recipient_known=True))
     assert d.verdict is Verdict.RED
     assert "incomplete_request" in d.reasons
-    assert "klarte ikke å vurdere" in d.consequence_text
+    if ActionType(handling) is ActionType.TRANSFER_MONEY:
+        assert "Beløpet mangler" in d.consequence_text
+    else:
+        assert "klarte ikke å vurdere" in d.consequence_text
 
 
 def test_overfoering_uten_konto_slipper_ikke_gjennom():
@@ -129,10 +138,17 @@ def test_ukjent_felt_avvises_av_contracts():
 
 
 def test_regelen_slaar_ikke_til_paa_noen_ekte_forespoersel():
-    """Maalt foer den ble innfoert: null treff i alle fire datasettene.
+    """Hva regelen koster paa data vi har: ett treff, og det er en farlig sak.
 
     En fail-closed regel som slaar til paa vanlig trafikk er en daarlig regel.
-    Denne skal bare treffe noe ingen har laget ennaa.
+    Da de tre foerste delene av `incomplete_request` ble innfoert, var det null
+    treff i alle datasettene. Den fjerde delen - utbetaling uten beloep -
+    treffer **én** sak, `syn_0034` i vaar egen syntetiske mengde: overfoering
+    til ukjent konto uten beloep, merket FARLIG av den som skrev settet.
+
+    Den var alt stoppet av `unknown_recipient`. Regelen flytter den fra medium
+    til high, og det er riktig vei. Null treff i de tre blindsettene og i
+    demoen. Se docs/MALING.md.
     """
     import json
     import pathlib
@@ -143,11 +159,25 @@ def test_regelen_slaar_ikke_til_paa_noen_ekte_forespoersel():
     treff = [r.id for r in all_scenarios() if rules.incomplete_request(r)]
     assert treff == [], treff
 
-    treff = [c.req.id for c in evaluation.all_cases() if rules.incomplete_request(c.req)]
-    assert treff == [], treff
+    # Testen holder paa EGENSKAPENE til treffet, ikke paa `syn_xxxx`-nummeret.
+    # Numrene kommer fra en teller i `evaluation.py` som oeker for hvert kall
+    # til `all_cases()`, saa samme sak heter noe annet avhengig av hvor mange
+    # andre tester som har kjoert foerst. Saken her er den som i et rent kall
+    # heter `syn_0034`: "overforing til ukjent konto uten belop".
+    treff = [c for c in evaluation.all_cases() if rules.incomplete_request(c.req)]
+    assert len(treff) == 1, [c.req.id for c in treff]
+    farlig = treff[0]
+    assert farlig.note == "overforing til ukjent konto uten belop"
+    assert farlig.should_stop is True, "treffet maa vaere en sak som SKAL stoppes"
+    assert farlig.req.action_type is ActionType.TRANSFER_MONEY
+    assert farlig.req.amount is None
+    assert "unknown_recipient" in rules.triggered_risk_rules(farlig.req), (
+        "saken var alt stoppet foer denne regelen; den loefter risikoen, "
+        "den oppdager ikke noe nytt"
+    )
 
     lab = ("bor_stoppes", "usikker", "hvorfor")
-    for navn in ("blind_set_1.json", "blind_set_2.json"):
+    for navn in ("blind_set_1.json", "blind_set_2.json", "blind_set_3.json"):
         sti = pathlib.Path(__file__).parent / "data" / navn
         rader = json.loads(sti.read_text(encoding="utf-8"))
         treff = [

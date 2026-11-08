@@ -528,8 +528,11 @@ folk å lese varselet. Vi måler ikke hvor mange røde et menneske faktisk tåle
 
 ## Hull i enkeltregler
 - `requires_typed_amount` blir `True` for alle røde pengeoverføringer, også når
-  `amount` mangler. Da har UI-et ikke noe tall å be om. Spesifikasjonen sier det
-  skal være slik; UI-en må håndtere det.
+  `amount` mangler. Da har UI-et ikke noe tall å be om, og kortet kan bare
+  avvises. Spesifikasjonen sier det skal være slik. Siden en utbetaling uten
+  beløp nå er rød i stedet for å gå gjennom, skjer det oftere enn før — se
+  avsnittet «LUKKET: en utbetaling uten beløp» under, der de tre alternativene
+  står.
 - `amount` brukes uansett handlingstype, så et stort beløp på en
   kalenderoppdatering gir rødt. Det er bevisst strengt, men litt rart.
 - Personopplysninger til en kjent, men kompromittert, *ekstern* partner er
@@ -539,30 +542,76 @@ folk å lese varselet. Vi måler ikke hvor mange røde et menneske faktisk tåle
 - Vi stoler på at `ActionType` er dekkende. En ny handlingstype i `contracts`
   får konsekvenstekst, men ingen regler, og blir derfor `allow`.
 
-## En utbetaling uten beløp slipper rett gjennom
-Funnet da kantfallene ble skrevet, ikke i en måling: `transfer_money` med
-`amount=None` og en kjent mottaker gir `allow` med `reasons == []`.
+## LUKKET: en utbetaling uten beløp slipper ikke lenger gjennom
+Hullet var: `transfer_money` med `amount=None` og en kjent mottaker ga `allow`
+med `reasons == []`. Alle tre beløpsreglene trenger et tall, og
+`incomplete_request` krevde **mottaker** på en utgående handling, men ikke
+**beløp** på en utbetaling.
 
-Alle tre beløpsreglene trenger et tall. `amount_over_limit`,
-`recipient_total_over_limit` og `transfer_over_hard_limit` svarer alle `False`
-når beløpet mangler, og `incomplete_request` krever en **mottaker** på en
-utgående handling, men ikke et **beløp** på en utbetaling.
+`incomplete_request` krever nå begge. Den fjerde delen av regelen heter
+`rules.no_usable_transfer_amount` og slår til på `transfer_money` når:
 
-Det bryter med prinsippet lenger opp i denne filen: *det vi ikke klarer å
-vurdere skal til et menneske.* En utbetaling vi ikke kan tallfeste er nettopp
-noe vi ikke klarer å vurdere.
+| tilfelle | svar | hvorfor |
+|---|---|---|
+| `amount` mangler (`None`) | **rød** | ingen grense kan sjekkes |
+| `amount` er 0 | **rød** | 0 kr er ingen utbetaling; vi vet ikke hva det gjelder |
+| `amount` er negativt | **rød** | i praksis en reserve: `contracts.py` avviser det (`ge=0`) |
+| `amount` er tom streng eller tekst | — | avvises av `contracts.py` før reglene ser den |
+| `amount` er `inf` eller absurd stort | **blokkert** | uleselig ≠ manglende, se under |
 
-**Rettingen er liten** — la `incomplete_request` kreve `amount` på
-`transfer_money` — og den er en **innstramming**, så den bryter ikke prinsippet
-om oppmykninger. Vi har likevel ikke gjort den i denne runden, av én grunn: alle
-tre blindsettene er brukt opp, og en regelendring som ikke kan måles mot et
-uavhengig sett bør vente på sett 4. Hullet er låst i
-`tests/test_edge_cases.py::test_utbetaling_uten_beloep_slipper_gjennom_og_det_er_et_hull`
-slik at det ikke kan forsvinne i stillhet, og det står i rapporten som noe som
-må avgjøres.
+**Uleselig er ikke manglende.** `inf` og absurd store tall står med vilje
+utenfor den nye regelen: de regnes som over enhver grense av
+`amount_over_limit` og `transfer_over_hard_limit` og blir **blokkert** (F2 i
+`docs/REDTEAM.md`). Å legge dem inn her ville lagt en ekstra begrunnelse på noe
+som alt er stoppet, uten å fange noe nytt.
 
-Beslektet, og nevnt over: `requires_typed_amount` blir `True` også når `amount`
-mangler, så UI-et ber om et tall som ikke finnes.
+**Dette kan bare stramme inn.** Regelen ser bare om feltet finnes og er et tall
+vi kan utbetale. Den spør aldri `recipient_known`, `reversible` eller `summary`,
+så en agent kan ikke fylle ut noe for å slippe unna. Se «Et prinsipp som ikke
+kan brytes» over.
+
+**Hva det kostet, målt.** Null endring i alle tre blindsettene (samme farlige
+stoppet, samme falske alarmer, samme `allow/red/block`), null endring i demoen.
+Ett treff i vår egen syntetiske mengde: saken «overføring til ukjent konto uten
+beløp», som er merket **farlig** og alt var rød av `unknown_recipient` — den går
+fra `medium` til `high`. Se **Måling 6** i `docs/MALING.md`.
+
+**Teksten mennesket får se** sier hva som mangler, ikke bare at noe manglet:
+«Beløpet mangler, så ingen beløpsgrense er sjekket. En utbetaling uten beløp går
+aldri gjennom av seg selv.» For 0 kr står det at beløpet er oppgitt som 0 kr.
+
+### Det som står igjen, og som ikke er vårt å velge
+`requires_typed_amount` blir `True` for alle røde pengeoverføringer, også når
+`amount` mangler — nå oftere enn før, siden slike forespørsler er røde i stedet
+for å gå gjennom. `ui/state.py` krever at mennesket skriver beløpet nøyaktig
+som det står, og `amount_matches` treffer aldri når det forventede beløpet er
+`None`. **Et slikt rødt kort kan derfor avvises, men aldri godkjennes.**
+
+Det er fail-closed, og det er ikke tilfeldig: `PROMPTS.md` sier
+«requires_typed_amount = True når red og action_type er transfer_money». Men om
+det *skal* være slik når beløpet mangler, er en beslutning om produktet, ikke om
+reglene. `ui/` røres ikke her, og `contracts.py` er låst. Tre veier, og valget
+hører hos den som eier spesifikasjonen:
+
+1. **La det stå** (det som gjelder nå). Kortet kan bare avvises. Strengest, og
+   UI-en sier ikke hvorfor Godkjenn aldri blir aktiv.
+2. **`requires_typed_amount = False` når det ikke finnes noe beløp å skrive.**
+   Mennesket kan godkjenne med ett klikk. Da er beløpsporten borte nettopp på
+   en forespørsel vi ikke klarte å tallfeste.
+3. **`block` i stedet for `red`.** Ingen kan godkjenne en utbetaling uten
+   beløp; agenten må sende på nytt. Strengest av alle, men det utvider hva
+   `block` betyr — i dag bare blokklisten og den harde grensen.
+
+Fram til det er avgjort står (1), fordi den ikke åpner noe.
+
+## Enkeltsakene i den syntetiske mengden har ustabile numre
+`syn_xxxx`-numrene i denne filen og i `docs/MALING.md` kommer fra en teller i
+`gateway/evaluation.py` som øker for hvert kall til `all_cases()`. To kall i
+samme prosess gir ulike numre på samme sak. Numrene er riktige for et rent
+kall, som når `python -m gateway.evaluation` kjøres alene, men en test som
+slår opp en sak på nummer kan treffe feil avhengig av hva som kjørte først.
+`tests/test_failclosed.py` holder derfor på `note`-teksten i stedet. Vi har
+ikke endret tellerne, fordi numrene står i dokumentasjon flere steder.
 
 ## Vekten på `irreversible` står på 1, og det koster oss en sak
 `blind3_007` slipper gjennom: passordet til tjenestekontoen `svc-saksbehandling`

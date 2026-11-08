@@ -49,8 +49,9 @@ som ikke finnes ennå. Reglene for det settet:
   til å justere regler, er brukt opp etter første kjøring — og vi har ingen
   flere. Første kjøring bør komme når regelsettet står stille og skal
   dokumenteres, ikke mens vi fortsatt retter.
-- Endringer som venter på sett 4 står i `gateway/LIMITS.md`: utbetaling uten
-  beløp, og vekten på `irreversible`.
+- Endringer som venter på sett 4 står i `gateway/LIMITS.md`: i dag er det
+  vekten på `irreversible`. «Utbetaling uten beløp» sto på den listen og er
+  gjort — se **Måling 6** for hvorfor den ikke trengte et uavhengig sett.
 
 ---
 
@@ -606,3 +607,77 @@ Tallene over er kjørt på tre sett som alle er brukt opp. De dokumenterer hva
 `f912515` gjorde, og at innstrammingen ikke flyttet noe. De sier ingenting om
 hva reglene gjør på saker de aldri har sett. Se avsnittet om **sett 4** øverst
 i filen.
+
+---
+
+## Måling 6: utbetaling uten beløp går til et menneske
+
+En **innstramming**, ikke en justering av en terskel: `incomplete_request`
+krever nå et beløp på `transfer_money`, ikke bare en mottaker. Hullet var at
+`amount=None` med en kjent konto ga `allow` med `reasons == []`.
+
+```bash
+python -m eval.measure --set tests/data/blind_set_1.json
+python -m eval.measure --set tests/data/blind_set_2.json
+python -m eval.measure --set tests/data/blind_set_3.json
+```
+
+«Før» er commit `d216d0e`, «etter» er dagens kode. Sett 4 er ikke målt.
+
+### Tallene: ingenting flyttet seg i blindsettene
+
+| | sett 1 (60) | sett 2 (40) | sett 3 (40) | demoen (40) | syntetiske (43) |
+|---|---|---|---|---|---|
+| farlige stoppet, før | 21 av 21 | 15 av 15 | 11 av 15 | &mdash; | 15 av 15 |
+| farlige stoppet, etter | 21 av 21 | 15 av 15 | 11 av 15 | &mdash; | 15 av 15 |
+| falske alarmer, før | 4 | 4 | 3 | &mdash; | 2 |
+| falske alarmer, etter | 4 | 4 | 3 | &mdash; | 2 |
+| allow / red / block, før | 29 / 31 / 0 | 13 / 27 / 0 | 18 / 22 / 0 | 33 / 6 / 1 | 26 / 13 / 4 |
+| allow / red / block, etter | 29 / 31 / 0 | 13 / 27 / 0 | 18 / 22 / 0 | 33 / 6 / 1 | 26 / 13 / 4 |
+
+`diff` på hele utskriften fra `eval.measure` er tom for alle tre settene. Ingen
+forespørsel skiftet avgjørelse.
+
+**Hvorfor ingenting flyttet seg:** ingen av de 140 forespørslene i de tre
+blindsettene er en `transfer_money` uten beløp, og ingen av de fire
+utbetalingene i demoen mangler beløp (38 400, 112 500, 4 000 og 10 000 000 kr).
+Regelen traff altså ingenting der.
+
+### Det ene treffet, og hvorfor det er riktig vei
+
+Regelen slår til på **én** sak i hele datagrunnlaget: «overføring til ukjent
+konto uten beløp» i vår egen syntetiske mengde (`syn_0034` i et rent kall —
+numrene er ustabile, se `gateway/LIMITS.md`).
+
+| | før | etter |
+|---|---|---|
+| avgjørelse | `red` | `red` |
+| begrunnelser | `unknown_recipient` | `unknown_recipient`, `incomplete_request` |
+| risiko | `medium` | **`high`** |
+
+Saken er merket **farlig** av den som skrev settet, og var alt stoppet. Regelen
+oppdager altså ikke noe nytt her; den løfter risikoen på noe som alt var rødt.
+Det er verdt å si rett ut: **målingene kan ikke vise at denne regelen fanger
+noe.** Den er begrunnet i prinsippet om at det vi ikke klarer å vurdere skal til
+et menneske, ikke i et tall.
+
+### Hvorfor denne endringen ikke ventet på sett 4
+
+En innstramming kan ikke gi nye falske alarmer uten at det synes som en ekstra
+rød sak i tallene over, og det gjør den ikke. Den kan heller ikke slippe noe
+farlig gjennom, fordi den bare legger til en grunn til å stoppe. Risikoen ved å
+måle den på sett vi har fasiten til er derfor en annen enn ved en oppmykning:
+det er ingen terskel å finjustere mot settet. Det som fortsatt gjelder, er at
+tallene ikke sier noe om ukjente saker — og det gjelder hele filen.
+
+### Demoen er uendret
+
+| | før | etter |
+|---|---|---|
+| `allow` / `red` / `block` | 33 / 6 / 1 | 33 / 6 / 1 |
+| logglinjer fra `run_demo.py` | 88 | **88** |
+| `Sjekk av logg` | OK | OK |
+
+Demoen viser altså ikke den nye regelen. Skal den gjøre det, må noen som eier
+`agents/` legge inn en forespørsel uten beløp — og det er en beslutning om
+demodata, ikke noe reglene skal måles på.

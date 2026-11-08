@@ -20,6 +20,10 @@ mildere, er et oppslag mot en liste Lonewatch eier
 Noen av testene her laaser et HULL, ikke en egenskap. De staar med et navn som
 sier det, slik at ingen tror hullet er en beslutning som er tatt. Se
 gateway/LIMITS.md.
+
+Ett av dem er siden lukket: en `transfer_money` uten beloep vi kan vurdere gaar
+naa til et menneske (`rules.no_usable_transfer_amount`). Testen heter ikke
+lenger `..._og_det_er_et_hull`, og del 4 har kantfallene rundt den.
 """
 
 from __future__ import annotations
@@ -308,31 +312,91 @@ def test_tillegg_trenger_ingen_mottaker():
     assert "incomplete_request" not in d.reasons
 
 
-def test_utbetaling_uten_beloep_slipper_gjennom_og_det_er_et_hull():
-    """LAASER ET HULL, ikke en beslutning.
+def test_utbetaling_uten_beloep_gaar_til_et_menneske():
+    """HULLET ER LUKKET. Testen het foer `..._slipper_gjennom_og_det_er_et_hull`.
 
     `amount=None` paa en `transfer_money` betyr at ingen beloepsregel kan si
     noe: `amount_over_limit`, `recipient_total_over_limit` og
-    `transfer_over_hard_limit` trenger alle et tall. Med en kjent mottaker blir
+    `transfer_over_hard_limit` trenger alle et tall. Med en kjent mottaker var
     svaret `allow` med `reasons == []`.
 
-    `incomplete_request` fanger en utgaaende handling uten MOTTAKER, men ikke en
-    utbetaling uten BELOEP. Det bryter med prinsippet om at det vi ikke klarer
-    aa vurdere skal til et menneske. Rettingen er aa la `incomplete_request`
-    kreve et beloep paa `transfer_money`, og den hoerer i en egen runde: alle
-    tre blindsettene er brukt opp, og neste regelendring boer maales mot sett 4.
-    Staar her saa hullet er talt opp og ikke kan bli borte i stillhet.
-    Se gateway/LIMITS.md.
+    `incomplete_request` krevde MOTTAKER paa en utgaaende handling, men ikke
+    BELOEP paa en utbetaling. Naa krever den begge. Regelen ser bare om feltet
+    finnes - den spoer ikke om noe agenten har fylt ut - saa den kan bare
+    stramme inn.
     """
     d = evaluate(betaling(amount=None))
+    assert d.verdict is Verdict.RED
+    assert "incomplete_request" in d.reasons
+    assert rules.no_usable_transfer_amount(betaling(amount=None)) is True
+
+
+def test_teksten_sier_at_det_er_beloepet_som_mangler():
+    """Mennesket skal vite HVA som manglet, ikke bare at noe manglet."""
+    d = evaluate(betaling(amount=None))
+    assert "Beløpet mangler" in d.consequence_text
+    assert "ingen beløpsgrense er sjekket" in d.consequence_text
+
+
+def test_utbetaling_paa_null_kroner_gaar_til_et_menneske():
+    """0 kr er lesbart, men det er ingen utbetaling.
+
+    Testen sa foer at `allow` var riktig her. Det var feil av samme grunn som
+    over: vi vet ikke hva forespoerselen gjelder, og da skal den ikke gaa av
+    seg selv.
+    """
+    d = evaluate(betaling(amount=0.0))
+    assert d.verdict is Verdict.RED
+    assert d.reasons == ["incomplete_request"]
+    assert "0 kr" in d.consequence_text
+
+
+@pytest.mark.parametrize("kjent", [True, False])
+@pytest.mark.parametrize("beloep", [None, 0.0, 0])
+def test_manglende_eller_tomt_beloep_stoppes_uansett_mottaker(kjent, beloep):
+    """Den viktigste av dem: en KJENT mottaker skal ikke hjelpe her.
+
+    Hullet var nettopp at `recipient_known=True` gjorde at ingen regel slo til.
+    """
+    d = evaluate(betaling(amount=beloep, recipient_known=kjent))
+    assert d.verdict is Verdict.RED
+    assert "incomplete_request" in d.reasons
+
+
+@pytest.mark.parametrize("ugyldig", ["", "   ", "abc", "ti tusen", -1, -0.01, float("nan")])
+def test_et_beloep_som_ikke_er_et_tall_kommer_aldri_til_reglene(ugyldig):
+    """`contracts.py` avviser tom streng, tekst, negative tall og nan.
+
+    Vi tester grensen utenfor vaar egen kode, slik at regelen ikke later som den
+    forsvarer noe `contracts` alt stopper. `no_usable_transfer_amount` daekker
+    negative beloep uansett, som reserve hvis `ge=0` en dag forsvinner.
+    """
+    with pytest.raises(Exception):
+        betaling(amount=ugyldig)
+
+
+@pytest.mark.parametrize("stort", [1e15, 1e300, float("inf")])
+def test_et_svaert_stort_beloep_regnes_som_over_grensen_ikke_som_manglende(stort):
+    """Uleselig er ikke det samme som manglende.
+
+    Et beloep vi ikke kan lese blir blokkert av `transfer_over_hard_limit`. Det
+    er et annet svar enn `incomplete_request`, og det skal det vaere: her har vi
+    et tall, det er bare for stort til aa vaere et beloep. Se F2 i
+    docs/REDTEAM.md.
+    """
+    req = betaling(amount=stort)
+    assert rules.no_usable_transfer_amount(req) is False
+    d = evaluate(req)
+    assert d.verdict is Verdict.BLOCK
+    assert "transfer_over_hard_limit" in d.reasons
+
+
+def test_et_manglende_beloep_paa_noe_som_ikke_er_en_utbetaling_betyr_ingenting():
+    """En e-post har ikke noe beloep, og det er helt normalt."""
+    d = evaluate(utlevering(contains_personal_data=False, amount=None))
     assert d.verdict is Verdict.ALLOW
     assert d.reasons == []
-
-
-def test_utbetaling_paa_null_kroner_slipper_gjennom():
-    """0 kr er lesbart og under enhver grense. Her er `allow` riktig."""
-    d = evaluate(betaling(amount=0.0))
-    assert d.verdict is Verdict.ALLOW
+    assert rules.no_usable_transfer_amount(utlevering(amount=None)) is False
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +411,8 @@ FARLIGE_KJERNER = {
     ),
     "uleselig beloep": lambda **b: betaling(amount=float("inf"), **b),
     "tillegg paa blokklisten": lambda **b: tillegg(package_name="free-pdf-toolz", **b),
+    "utbetaling uten beloep": lambda **b: betaling(amount=None, **b),
+    "utbetaling paa 0 kr": lambda **b: betaling(amount=0.0, **b),
     "ukjent handlingstype-daekning": lambda **b: betaling(recipient="", **b),
 }
 
