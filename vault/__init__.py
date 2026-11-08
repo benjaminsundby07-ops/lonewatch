@@ -11,6 +11,14 @@ Nøkler leses fra miljøvariabler og finnes ikke i koden:
     LONEWATCH_PSEUDONYM_KEY  HMAC-nøkkel for pseudonymer
     python -m vault.gen_key --both     # lager begge
 
+«Bryt loggen» ligger i vault.tamper_demo og importeres derfra, ikke herfra:
+    from vault.tamper_demo import run_attack
+    run_attack("endre" | "slett" | "kutt" | "full") -> TamperResult
+    python -m vault.tamper_demo --attack kutt
+Den angriper en KOPI; den ekte loggen roeres aldri. `full` blir ærlig IKKE
+oppdaget - se LIMITS punkt 12. Den er ikke re-eksportert her, fordi en pakke som
+importerer sin egen CLI-modul faar den kjoert to ganger av `python -m`.
+
 Ærlige begrensninger: se vault/LIMITS.md.
 """
 
