@@ -67,6 +67,13 @@ INTERNAL_DOMAINS: frozenset[str] = frozenset(
 
 # Mottakere som ikke er adresser i det hele tatt, men interne ressurser.
 # "kalender:drift-felles" er en delt kalender inne i huset.
+#
+# Prefikset teller BARE paa handlinger som ikke staar i OUTBOUND_ACTIONS.
+# Grunnen: et prefiks er ni tegn i et fritekstfelt agenten fyller ut selv, og
+# stiller ingen betingelse ut over seg selv - i motsetning til et domene, som
+# maa staa paa INTERNAL_DOMAINS. Gjaldt prefikset ogsaa utgaaende handlinger,
+# var `share_data` med persondata og `recipient="kalender:drift-felles"` en
+# gratis omvei rundt `personal_data_external`. Se gateway/LIMITS.md.
 INTERNAL_PREFIXES: tuple[str, ...] = ("kalender:",)
 
 # Handlinger som sender noe ut av huset. Bare disse kan ha en "mottaker" som betyr noe.

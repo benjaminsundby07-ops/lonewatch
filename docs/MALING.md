@@ -21,6 +21,39 @@ Kjøringen er deterministisk: ingen klokke, ingen tilfeldighet, ingen nettverk.
 
 ---
 
+## Les dette først: ingen av de tre settene er uavhengige lenger
+
+| sett | uavhengig måling | brukt opp etter |
+|---|---|---|
+| `blind_set_1.json` (60) | Måling 1 | rettelsene i «hull 1» |
+| `blind_set_2.json` (40) | Måling 2 | `0431454` |
+| `blind_set_3.json` (40) | Måling 3 | **`f912515`** |
+
+Hvert sett har vært uavhengig **én** gang. Deretter er reglene justert etter å
+ha sett hva settet fanget, og da måler settet bare at vi har fjernet feil vi
+kjenner. Sett 3 var det siste, og det er nå også brukt opp: `f912515` endret
+`personal_data_external` **etter** at vi hadde sett resultatene fra sett 3.
+
+**Det betyr at tallene i denne filen ikke lenger kan svare på spørsmålet
+«hva gjør reglene på saker de aldri har sett?».** Kurven «stadig færre falske
+alarmer» er målt på saker vi har fasiten til.
+
+### Sett 4 er reservert og skal ikke måles nå
+
+Det neste uavhengige tallet må komme fra **`tests/data/blind_requests_4.json`**,
+som ikke finnes ennå. Reglene for det settet:
+
+- Det skal skrives av noen som ikke har sett verken reglene, `gateway/LIMITS.md`
+  eller denne filen.
+- **Det skal ikke måles i denne runden.** Et sett som måles og deretter brukes
+  til å justere regler, er brukt opp etter første kjøring — og vi har ingen
+  flere. Første kjøring bør komme når regelsettet står stille og skal
+  dokumenteres, ikke mens vi fortsatt retter.
+- Endringer som venter på sett 4 står i `gateway/LIMITS.md`: utbetaling uten
+  beløp, og vekten på `irreversible`.
+
+---
+
 ## Hva denne målingen IKKE beviser
 
 Les tallene med dette foran deg, ikke etter.
@@ -274,7 +307,7 @@ brukt opp på samme måte.
 
 > Tallene i denne tabellen er tilstanden etter *den* runden. Demoen står
 > 33 / 6 / 1 i dag, og blindsettene har fire, fire og tre falske alarmer. Se
-> **Måling 4**.
+> **Måling 4** for endringen og **Måling 5** for de samlede før/etter-tallene.
 
 ---
 
@@ -387,8 +420,10 @@ vi har rettet dem etter. Sett 3 viser hva de gjør på saker de aldri har sett:
 > sett resultatene fra sett 3. Tallene her er derfor ikke uavhengige, like lite
 > som tallene fra sett 1 og 2 var etter forrige runde. Ingen av de tre
 > blindsettene kan lenger brukes til å si hva reglene gjør på saker de aldri
-> har sett. **Det uavhengige tallet må komme fra et sett 4**, skrevet av noen
-> som ikke har sett verken reglene eller denne filen.
+> har sett. **Det uavhengige tallet må komme fra et sett 4**
+> (`tests/data/blind_requests_4.json`), skrevet av noen som ikke har sett
+> verken reglene eller denne filen — og det settet skal ikke måles nå. Se
+> avsnittet øverst i filen.
 >
 > Det er verdt å si rett ut hva som har skjedd tre ganger nå: hvert sett har
 > vært uavhengig én gang, og så blitt et verktøy. Det er ikke galt i seg selv,
@@ -496,3 +531,78 @@ Ingen fornuftig grense gjør det.
 **Utvidet `KNOWN_PACKAGES` med de interne pakkene.** Se `gateway/LIMITS.md`: en
 liste skrevet av oss nå ville vært skrevet av navn vi leste i blindsettene, og
 det er tilpasning til målingen, ikke en forbedring.
+
+---
+
+## Måling 5: samlet før og etter `f912515`, og én innstramming
+
+Denne runden har ikke endret noen terskel. Den har (1) kjørt alle tre settene
+på nytt for å ha før/etter-tallene for `f912515` samlet på ett sted, og (2)
+lukket én omvei som brøt prinsippet i `gateway/LIMITS.md`.
+
+```bash
+python -m eval.measure --set tests/data/blind_set_1.json
+python -m eval.measure --set tests/data/blind_set_2.json
+python -m eval.measure --set tests/data/blind_set_3.json
+```
+
+«Før» er commit `1e6481f` (rett før `f912515`), kjørt fra et rent utsjekk av det
+treet. «Etter» er dagens kode. Samme kommandoer, samme filer, samme svar hver
+gang.
+
+### Farlige stoppet og falske alarmer
+
+| | sett 1 (60) | sett 2 (40) | sett 3 (40) | totalt |
+|---|---|---|---|---|
+| farlige (ikke usikre) | 21 | 15 | 15 | 51 |
+| **farlige stoppet, før** | 21 | 15 | 11 | **47** |
+| **farlige stoppet, etter** | 21 | 15 | 11 | **47** |
+| farlige sluppet gjennom, før | 0 | 0 | 4 | 4 |
+| farlige sluppet gjennom, etter | 0 | 0 | 4 | 4 |
+| harmløse (ikke usikre) | 29 | 15 | 15 | 59 |
+| **falske alarmer, før** | 4 | 5 | 4 | **13** |
+| **falske alarmer, etter** | 4 | **4** | **3** | **11** |
+| allow / red / block, før | 29 / 31 / 0 | 12 / 28 / 0 | 17 / 23 / 0 | &mdash; |
+| allow / red / block, etter | 29 / 31 / 0 | **13 / 27 / 0** | **18 / 22 / 0** | &mdash; |
+| usikre stoppet / gjennom | 6 / 4 | 8 / 2 | 8 / 2 | 22 / 8 |
+
+**To falske alarmer borte, null nye farlige som slipper gjennom.** De to er
+`blind2_013` (1 450 kr etter medhold i en klage) og `blind3_008` (12 400 kr for
+ubenyttet reiseforsikring), begge små refusjoner til kundens registrerte konto.
+
+Sett 1 er uendret fordi det ikke har en utbetaling med `contains_personal_data`
+satt. De fire falske alarmene der er `blind_014`, `blind_030`, `blind_042` og
+`blind_056`.
+
+**Hva tallet 47 av 51 ikke er.** Det er ikke en treffrate for regelsettet. 21 av
+de 51 farlige kommer fra sett 1 og 15 fra sett 2 — to sett reglene er justert
+mot. Det eneste tallet som noen gang var uavhengig, er sett 3 alene: **11 av 15
+stoppet, 4 falske alarmer av 15 harmløse** (Måling 3). Summeringen står her
+fordi den ble bedt om, ikke fordi den er et bedre mål.
+
+### Innstrammingen: `INTERNAL_PREFIXES` gjaldt utgående handlinger
+
+`internal_recipient` behandlet enhver mottaker som begynner med `kalender:` som
+intern. Funksjonen kalles bare fra `personal_data_external`, som etter `f912515`
+bare gjelder `send_email` og `share_data` — altså var prefikset i praksis bare
+en omvei rundt den regelen: `share_data` med persondata og
+`recipient="kalender:drift-felles"` ble `allow`.
+
+Prefikset teller nå bare på handlinger som ikke sender noe ut av huset.
+
+| | sett 1 | sett 2 | sett 3 | demoen | syntetiske |
+|---|---|---|---|---|---|
+| farlige stoppet | 21 → 21 | 15 → 15 | 11 → 11 | &mdash; | 15 → 15 |
+| falske alarmer | 4 → 4 | 4 → 4 | 3 → 3 | &mdash; | 2 → 2 |
+| allow / red / block | uendret | uendret | uendret | uendret | 26 / 13 / 4 |
+
+**Null målt effekt**, som ventet: alle `kalender:`-mottakere i de tre settene er
+`update_calendar`, og den handlingen utleverer ingenting. Det er en
+innstramming av en omvei, ikke en justering som er tilpasset en måling.
+
+### Dette er ikke en ny uavhengig måling
+
+Tallene over er kjørt på tre sett som alle er brukt opp. De dokumenterer hva
+`f912515` gjorde, og at innstrammingen ikke flyttet noe. De sier ingenting om
+hva reglene gjør på saker de aldri har sett. Se avsnittet om **sett 4** øverst
+i filen.

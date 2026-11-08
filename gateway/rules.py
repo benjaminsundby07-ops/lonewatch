@@ -99,13 +99,25 @@ def internal_recipient(req: ActionRequest) -> bool:
     ligger hos protonmail. En delstreng-sjekk ville sluppet begge rett inn.
 
     Mangler mottakeren, er svaret nei: vi gjetter aldri at noe er internt.
+
+    Prefikslisten (`kalender:`) teller BARE paa handlinger som ikke sender noe
+    ut av huset. Den sto foer for alle handlinger, og da var den en gratis
+    omvei: `share_data` med persondata og `recipient="kalender:drift-felles"`
+    ble `allow`, fordi det er nok aa skrive de ni tegnene i et fritekstfelt
+    agenten fyller ut selv. Et domene maa staa paa `INTERNAL_DOMAINS` for aa
+    telle; et prefiks stilte ingen slik betingelse. Null treff i de tre
+    blindsettene, i demoen og i den syntetiske mengden - alle `kalender:`-
+    mottakere der er `update_calendar`, og den utleverer ingenting.
+    Se "Et prinsipp som ikke kan brytes" i gateway/LIMITS.md.
     """
     recipient = (req.recipient or "").strip()
     if not recipient:
         return False
 
     lowered = recipient.lower()
-    if any(lowered.startswith(prefix) for prefix in config.INTERNAL_PREFIXES):
+    if req.action_type not in config.OUTBOUND_ACTIONS and any(
+        lowered.startswith(prefix) for prefix in config.INTERNAL_PREFIXES
+    ):
         return True
 
     host = _recipient_host(recipient)
