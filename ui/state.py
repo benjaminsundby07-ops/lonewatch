@@ -133,6 +133,32 @@ def _kort_hash(verdi: Any) -> str | None:
     return verdi[:12]
 
 
+# Demoen har TO klokker, og det er ikke en feil vi kan rette her i ui/:
+#
+#   simulert  agents/scenarios.py og agents/story.py har skrevet inn faste
+#             tidspunkter (09:xx og 12:00 norsk tid) slik at demoen forteller
+#             den samme historien hver gang. Avgjoerelsen arver tiden fra
+#             forespoerselen, saa decision- og trap-linjer er simulerte.
+#   sanntid   sandbox/report.py stempler rapporten med datetime.now(), og
+#             "Proev selv" gjoer det samme med juryens egne forespoersler.
+#             Det er ekte klokke paa maskinen som kjoerer.
+#
+# Blandes de i samme kolonne uten merking, ser radene ut til aa komme i feil
+# rekkefoelge. Loggen staar i rekkefoelgen tingene skjedde (seq), saa det er
+# bare tiden som ser rar ut - og da sier vi hvilken klokke tallet kommer fra.
+TID_SIMULERT = "simulert"
+TID_SANNTID = "sanntid"
+
+
+def _tidsbase_for_request(request_id: Any) -> str:
+    """Hvilken klokke stemplet en forespoersel (og avgjoerelsen den fikk)?
+
+    "Proev selv" lager `custom_0001` med `datetime.now()`. Alt annet kommer
+    fra demodataene i agents/ og har et oppdiktet tidspunkt.
+    """
+    return TID_SANNTID if str(request_id or "").startswith("custom_") else TID_SIMULERT
+
+
 class DemoState:
     """Alt nettsiden viser. En instans per kjørende app.
 
@@ -738,6 +764,7 @@ class DemoState:
                         "regler": p.get("reasons") or [],
                         "hash": _kort_hash(e.hash),
                         "request_id": p.get("request_id"),
+                        "tidsbase": _tidsbase_for_request(p.get("request_id")),
                     })
                 elif e.kind == "trap":
                     rows.append({
@@ -750,6 +777,9 @@ class DemoState:
                         "regler": [p.get("trap_id")] if p.get("trap_id") else [],
                         "hash": _kort_hash(e.hash),
                         "request_id": None,
+                        # Feller gaar bare av paa dokumenter demodataene eier,
+                        # og arver tiden fra forespoerselen som leste dem.
+                        "tidsbase": TID_SIMULERT,
                     })
                 elif e.kind == "sandbox":
                     rows.append({
@@ -762,15 +792,21 @@ class DemoState:
                         "regler": [],
                         "hash": _kort_hash(e.hash),
                         "request_id": None,
+                        # sandbox/report.py stempler med ekte klokke.
+                        "tidsbase": TID_SANNTID,
                     })
 
             rows.reverse()  # nyeste først, som i skissen
             stoppet = len([r for r in rows if r["utfall"] in ("block", "blocked", "trap")])
             menneske = len([r for r in rows if r["utfall"] == "red"])
+            vist = rows[:limit]
             return {
-                "rows": rows[:limit],
+                "rows": vist,
                 "counts": {"alle": len(rows), "stoppet": stoppet, "menneske": menneske},
                 "truncated": len(rows) > limit,
+                # Hvilke klokker som faktisk staar i tabellen. Er det bare én,
+                # trenger ikke tabellen en forklaring paa at det finnes to.
+                "tidsbaser": sorted({r["tidsbase"] for r in vist}),
             }
 
     def traps_overview(self) -> list[dict[str, Any]]:
@@ -911,6 +947,7 @@ class DemoState:
             # Juryens egne forespørsler, nyeste først. De ligger OGSÅ i listene
             # over: en egen forespørsel som blir rød, står i køen som alle andre.
             custom = [c for c in cards if c["source"] == "custom"]
+            linjer = len(self.vault.entries()) if self.vault else 0
             return {
                 "company": scenarios.COMPANY,
                 "waiting": list(reversed(waiting)),
@@ -928,9 +965,18 @@ class DemoState:
                 "before": self.before_list(),
                 "story": self.story_snapshot(),
                 "log": {
-                    "lines": len(self.vault.entries()) if self.vault else 0,
+                    "lines": linjer,
                     "error": self.vault_error,
                     "last_verify": self.verify_result,
+                    # Sjekken gjelder loggen slik den var da den ble kjoert.
+                    # Har loggen vokst etterpaa, er svaret ikke lenger et svar
+                    # om DENNE loggen - og "Loggen er tom." kunne bli staaende
+                    # ved siden av "Siste blokk #31". Da sier vi fra i stedet
+                    # for aa vise teksten.
+                    "verify_stale": (
+                        self.verify_result is not None
+                        and self.verify_result.get("lines") != linjer
+                    ),
                     # Hvor forrige logg ble lagt da demoen ble nullstilt. Ingenting slettes.
                     "archived": self.log_archived,
                     # Minimeres det vi logger? Vises i "Sjekk loggen", slik at

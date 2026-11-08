@@ -26,7 +26,7 @@ body { font-family: var(--font-sans); }
 
 .app-backdrop {
   min-height: 100vh;
-  padding: var(--space-5);
+  padding: var(--space-4);
 }
 
 /* Bruk hele bredden. Designet var tegnet for ~1180 px, men en projektor og en
@@ -36,13 +36,13 @@ body { font-family: var(--font-sans); }
 .app-shell {
   max-width: 1760px;
   margin: 0 auto;
-  min-height: calc(100vh - var(--space-5) * 2);
+  min-height: calc(100vh - var(--space-4) * 2);
   grid-template-columns: 196px 1fr;
 }
 
 .app-main {
-  padding: var(--space-5) var(--space-6) var(--space-6);
-  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5) var(--space-4);
+  gap: var(--space-3);
   align-content: start;
 }
 
@@ -133,7 +133,7 @@ body { font-family: var(--font-sans); }
 /* ---------- bannere ---------- */
 
 .app-banner {
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-2) var(--space-4);
   border-radius: var(--radius-lg);
   background: var(--panel);
   color: var(--ink-muted);
@@ -143,14 +143,19 @@ body { font-family: var(--font-sans); }
 }
 .app-banner.is-bad { color: var(--negative); }
 
+/* "Ny logg startet ..." bar en full filsti og brakk i to linjer. Stien staar
+   fortsatt der - den er bare klippet paa skjermen, med hele teksten i
+   verktoeytipset. Ingen logg forsvinner i det skjulte av den grunn. */
+#log-note { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 /* ---------- hendelsen ---------- */
 
 .app-story {
   background: var(--panel);
   border-radius: var(--radius-xl);
-  padding: var(--space-4) var(--space-5);
+  padding: var(--space-3) var(--space-5);
   display: grid;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 .app-story-head { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
 .app-story-head strong { font-size: 16px; font-weight: 600; }
@@ -510,9 +515,9 @@ body { font-family: var(--font-sans); }
   color: var(--ink-faint);
   font-size: 12px;
   line-height: 19px;
-  padding-top: var(--space-4);
+  padding-top: var(--space-3);
   border-top: 1px solid var(--line);
-  margin-top: var(--space-2);
+  margin-top: 0;
 }
 
 /* ---------- Oversikt: komprimert ---------- */
@@ -522,14 +527,33 @@ body { font-family: var(--font-sans); }
 #dashboard-root .lw-backdrop { background: none; padding: 0; }
 #dashboard-root .lw-shell { background: none; border-radius: 0; box-shadow: none; display: block; }
 #dashboard-root .lw-main { padding: 0; }
-.app-dash { display: grid; gap: var(--space-4); }
-.app-dash-top { display: grid; gap: var(--space-4); grid-template-columns: 380px minmax(0, 1fr); }
-.app-dash-bottom { display: grid; gap: var(--space-4); grid-template-columns: minmax(0, 1fr) 380px; align-items: start; }
-.app-dash .lw-panel { padding: var(--space-4) var(--space-5); }
+.app-dash { display: grid; gap: var(--space-3); }
+.app-dash-top { display: grid; gap: var(--space-3); grid-template-columns: 380px minmax(0, 1fr); }
+.app-dash-bottom { display: grid; gap: var(--space-3); grid-template-columns: minmax(0, 1fr) 380px; align-items: start; }
+.app-dash .lw-col { gap: var(--space-3); }
+.app-dash .lw-panel { padding: var(--space-3) var(--space-4); }
+.app-dash .lw-panel-head { margin-bottom: var(--space-2); }
+.app-dash .lw-stats { gap: var(--space-3); }
 .app-dash .lw-stat { padding: var(--space-3) var(--space-4); }
-.app-dash .lw-stat-value { font-size: 28px; line-height: 34px; }
-.app-dash .lw-spark { height: 46px; }
-.app-dash .lw-score { padding: var(--space-1) 0; }
+.app-dash .lw-stat-value { font-size: 26px; line-height: 32px; margin: var(--space-1) 0; }
+
+/* Hele Oversikt skal faa plass paa 1440x900 uten aa scrolle.
+   Det som tok plassen var luft, ikke innhold: en 88 px hoey kurve bak tre
+   tall, 32 px tomrom over "Sist sjekket", og en fremdriftsstripe med
+   20 px polstring. Ingen tall, ingen rader og ingen tekst er fjernet. */
+.app-dash .lw-stat-chart { height: 44px; margin-top: var(--space-2); }
+.app-dash .lw-progress-row { padding: var(--space-3) var(--space-4); gap: var(--space-3); }
+.app-dash .lw-pstat-icon { width: 28px; height: 28px; }
+.app-dash .lw-divider-v { height: 28px; }
+.app-dash .lw-score { padding: 0; }
+.app-dash .lw-score-target { margin-top: var(--space-4); }
+/* Selve ringen tegnes mindre fra app.js (StatusRing size: 96), som er det
+   eneste som virker - komponenten setter bredde og hoeyde selv. Her staar
+   bare tallet inni den. */
+.app-dash .lw-gauge-value { font-size: 22px; }
+.app-dash .lw-status-row { padding: var(--space-2) 0; }
+.app-dash .lw-table th { padding: 6px 12px; }
+.app-dash .lw-table td { padding: 7px 12px; }
 
 @media (max-width: 1240px) {
   .app-dash-top, .app-dash-bottom { grid-template-columns: minmax(0, 1fr); }
@@ -675,6 +699,20 @@ body { font-family: var(--font-sans); }
 }
 .app-table tbody tr:hover td { background: var(--card-top); }
 .app-log .app-num { font-family: ui-monospace, monospace; color: var(--ink-faint); }
+
+/* Tidskolonnen: klokkeslettet, og hvilken klokke det kom fra.
+   Demoen har to - oppdiktet tid fra agents/ og maskinens ekte klokke - og
+   merket er det eneste som gjoer et sprang i kolonnen lesbart. */
+.app-time { white-space: nowrap; }
+.app-time-clock { font-family: ui-monospace, monospace; color: var(--ink-muted); }
+.app-time-base {
+  display: inline-block; margin-left: 6px; padding: 0 5px;
+  border-radius: var(--radius-pill); border: 1px solid var(--line);
+  font-size: 10px; font-weight: 600; line-height: 14px;
+  letter-spacing: .02em; color: var(--ink-faint);
+  vertical-align: 1px;
+}
+.app-time-base.is-sanntid { border-color: var(--track); color: var(--ink-muted); background: var(--track); }
 .app-log .app-target { color: var(--ink); max-width: 260px; overflow-wrap: anywhere; }
 .app-hash { font-family: ui-monospace, monospace; font-size: 11.5px; color: var(--ink-faint); }
 .app-table tr.is-fired td { color: var(--ink); }

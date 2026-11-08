@@ -128,6 +128,7 @@ function scheduleStory(delayMs) {
     const s = out.story;
     if (s.done) {
       el("story-band").classList.remove("live");
+      await storyFerdig();
       return;
     }
     const gap = Math.max(0, (s.next_at_second - s.current_second)) * 1000 / STORY_SPEED;
@@ -144,7 +145,18 @@ async function storyNext() {
   stopStory();
   const out = await api("/api/story/step", {});
   apply(out.state);
-  if (out.story.done) el("story-band").classList.remove("live");
+  if (out.story.done) {
+    el("story-band").classList.remove("live");
+    await storyFerdig();
+  }
+}
+
+/* Hendelsen la elleve steg i loggen. Sjekken fra foer gjaldt loggen uten dem,
+ * saa den kjoeres paa nytt med en gang - ikke foerst naar noen trykker. */
+async function storyFerdig() {
+  await verifyQuietly();
+  if (activeTab === "after") await loadAfter();
+  else renderChainStrip();
 }
 
 /* ---------------- tegning ---------------- */
@@ -156,6 +168,27 @@ function apply(state) {
    * henter bare naar fanen faktisk er synlig - ingen grunn til aa regne ut
    * tall ingen ser. */
   if (activeTab === "overview") refreshOverview();
+  if (activeTab === "after") oppdaterEtter();
+}
+
+/* Etter staar aapen mens stroemmen gaar, og loggen vokser under foettene paa
+ * den. Da maa striper og tabell foelge med SAMMEN: en striper som sier «Siste
+ * blokk #48» over en tabell som stopper paa #41 er den samme feilen igjen, to
+ * tall fra to oejeblikk. `verify_stale` kommer fra ui/state.py og sier naar
+ * sjekken ikke lenger gjelder loggen slik den er. */
+let etterOppdateres = false;
+
+async function oppdaterEtter() {
+  if (activeTab !== "after" || etterOppdateres) return;
+  if (!latest || !latest.log || !latest.log.verify_stale) return;
+  etterOppdateres = true;
+  try {
+    await verifyQuietly();
+    await hentLogg();
+  } finally {
+    etterOppdateres = false;
+  }
+  renderChainStrip();
 }
 
 function render() {
@@ -180,6 +213,9 @@ function render() {
   note.classList.toggle("hidden", !archived);
   if (archived) {
     note.textContent = "Ny logg startet. Forrige logg ligger uendret i " + archived;
+    /* Linjen er klippet paa skjermen for aa spare hoeyde. Hele stien skal
+       fortsatt vaere tilgjengelig uten aa gaa i loggfilen. */
+    note.title = archived;
   }
 
   el("btn-story").disabled = latest.story.running;
@@ -816,7 +852,11 @@ function dashInnhold(h) {
               lc.checkedAt
                 ? ["Sist sjekket: ", h("b", { key: "b" }, klokke(lc.checkedAt))]
                 : "Ikke sjekket ennå")),
+          /* 96 i stedet for designsystemets 124. Ringen er den samme
+             komponenten med den samme geometrien - den er bare tegnet
+             mindre, slik at hele Oversikt faar plass paa 1440x900. */
           h(L.StatusRing, {
+            size: 96,
             status: lc.status, display: status(lc.status),
             label: t.logChain || "Loggkjede",
           }))),
@@ -1007,20 +1047,82 @@ function klokke(iso) {
   });
 }
 
-function renderChainStrip() {
-  const v = (latest && latest.log && latest.log.last_verify) || null;
-  const lines = (latest && latest.log && latest.log.lines) || null;
+function dagOgKlokke(iso) {
+  if (!iso) return "–";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "–";
+  return d.toLocaleString("nb-NO", {
+    day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+    second: "2-digit", timeZone: "Europe/Oslo",
+  });
+}
 
-  if (!v) {
+/* Tidskolonnen i Hendelser.
+ *
+ * Demoen har to klokker, og ui/ kan ikke slaa dem sammen uten aa dikte opp
+ * tall: demodataene i agents/ har faste, oppdiktede tidspunkter, mens
+ * sandkassen og «Prøv selv» stempler med maskinens ekte klokke. Satt rett
+ * under hverandre uten merking ser radene ut til aa komme i feil rekkefoelge.
+ *
+ * Rekkefoelgen i tabellen er og blir loggens egen (seq, nyeste foerst). Her
+ * sier vi bare hvilken klokke tallet kommer fra, slik at et sprang i
+ * kolonnen leses som to klokker og ikke som en feil. */
+const TIDSBASE = {
+  simulert: { merke: "sim", tittel: "Simulert tid fra demodataene i agents/" },
+  sanntid: { merke: "nå", tittel: "Ekte klokke på maskinen som kjører demoen" },
+};
+
+function tidsCelle(rad) {
+  const base = TIDSBASE[rad.tidsbase] || TIDSBASE.simulert;
+  return (
+    '<td class="app-time" title="' + esc(base.tittel) + ": " +
+    esc(dagOgKlokke(rad.ts)) + '">' +
+    '<span class="app-time-clock">' + esc(klokke(rad.ts)) + "</span>" +
+    '<span class="app-time-base is-' + esc(rad.tidsbase || "simulert") + '">' +
+    esc(base.merke) + "</span></td>"
+  );
+}
+
+/* Striper over Etter: staar loggen?
+ *
+ * Svaret gjelder loggen slik den var da sjekken ble kjoert. Vokser loggen
+ * etterpaa - og det gjoer den hele tiden mens stroemmen gaar - er teksten
+ * ikke lenger et svar om DENNE loggen. Det var slik «Loggen er tom.» kunne
+ * bli staaende ved siden av «Siste blokk #31»: teksten var fra sjekken rett
+ * etter en nullstilling, tallet var fra naa.
+ *
+ * `verify_stale` kommer fra ui/state.py og sammenligner antall linjer da
+ * sjekken ble kjoert med antall linjer naa. Er de ulike, viser vi ingen
+ * paastand om kjeden - vi sier at svaret er gammelt. */
+function renderChainStrip() {
+  const log = (latest && latest.log) || {};
+  const v = log.last_verify || null;
+  const lines = typeof log.lines === "number" ? log.lines : null;
+  const utdatert = Boolean(log.verify_stale);
+
+  if (!v || utdatert) {
+    el("chain-strip").className = "lw-panel app-strip";
     el("chain-strip").innerHTML =
       '<div class="app-strip-main"><span class="app-strip-dot"></span>' +
       '<div><div class="app-strip-title">Låst logg</div>' +
-      '<div class="app-strip-sub">Ikke sjekket ennå. Trykk «Sjekk loggen».</div></div></div>' +
+      '<div class="app-strip-sub">' +
+      (utdatert
+        ? "Loggen har fått flere linjer siden sist sjekk. Trykk «Sjekk loggen» " +
+          "for et svar som gjelder loggen slik den er nå."
+        : "Ikke sjekket ennå. Trykk «Sjekk loggen».") +
+      "</div></div></div>" +
+      (lines != null
+        ? '<dl class="app-strip-facts"><div><dt>Linjer nå</dt><dd>#' +
+          esc(String(lines)) + "</dd></div></dl>"
+        : "") +
       '<button class="app-limits" type="button" data-limits="loggen">Begrensninger</button>';
     return;
   }
 
   const ok = Boolean(v.ok);
+  /* Antallet kommer fra SJEKKEN, ikke fra oejeblikksbildet. Da kan tallet og
+   * teksten ved siden av det aldri komme fra to forskjellige logger. */
+  const sjekkede = typeof v.lines === "number" ? v.lines : lines;
   el("chain-strip").className = "lw-panel app-strip " + (ok ? "is-ok" : "is-bad");
   el("chain-strip").innerHTML =
     '<div class="app-strip-main"><span class="app-strip-dot"></span>' +
@@ -1029,7 +1131,8 @@ function renderChainStrip() {
     (ok ? "Kjeden er hel" : "Kjeden er brutt") + "</div>" +
     '<div class="app-strip-sub">' + esc(v.text || "") + "</div></div></div>" +
     '<dl class="app-strip-facts">' +
-    "<div><dt>Siste blokk</dt><dd>#" + (lines != null ? esc(String(lines)) : "–") + "</dd></div>" +
+    "<div><dt>Siste blokk</dt><dd>#" +
+    (sjekkede != null ? esc(String(sjekkede)) : "–") + "</dd></div>" +
     (v.head
       ? '<div><dt>Topphash</dt><dd><code class="app-hash">' + esc(v.head) + "</code></dd></div>"
       : "") +
@@ -1059,6 +1162,15 @@ function renderLogTable() {
     '<span class="app-filter-n">' + (tall[f.felt] != null ? tall[f.felt] : "–") + "</span></button>"
   ).join("");
 
+  /* Staar det to klokker i tabellen, maa leseren faa vite det. Staar det bare
+   * én, er forklaringen bare stoey. */
+  const baser = logData.log.tidsbaser || [];
+  el("log-sub").textContent = baser.length > 1
+    ? "Hver linje i den låste loggen, nyeste først etter blokknummer. " +
+      "«sim» er simulert tid fra demodataene, «nå» er ekte klokke — derfor " +
+      "hopper tidskolonnen."
+    : "Hver linje i den låste loggen, nyeste først.";
+
   let rader = logData.log.rows || [];
   if (logFilter === "stoppet") rader = rader.filter((r) => r.utfall === "block" || r.utfall === "blocked");
   if (logFilter === "menneske") rader = rader.filter((r) => r.utfall === "red");
@@ -1075,7 +1187,7 @@ function renderLogTable() {
     "</tr></thead><tbody>" +
     rader.map((r) =>
       '<tr class="is-' + esc(r.utfall) + '">' +
-      "<td>" + esc(klokke(r.ts)) + "</td>" +
+      tidsCelle(r) +
       '<td class="app-num">' + esc(String(r.seq)) + "</td>" +
       "<td>" + esc(r.agent || "–") + "</td>" +
       "<td>" + esc(r.kall || "–") + "</td>" +
@@ -1151,6 +1263,10 @@ const ROLLE_VIS = {
 };
 
 async function loadAfter() {
+  /* Fersk sjekk hver gang Etter aapnes. Striper over tabellen er det foerste
+   * et menneske leser her, og den skal gjelde loggen slik den er NAA - ikke
+   * slik den var sist noen trykket paa en knapp. */
+  await verifyQuietly();
   renderChainStrip();
   await hentLogg();
   renderLogTable();
@@ -1181,6 +1297,8 @@ async function verifyQuietly() {
     if (latest && latest.log) {
       latest.log.last_verify = r;
       latest.log.lines = r.lines;
+      /* Svaret gjelder akkurat de linjene det nettopp leste. */
+      latest.log.verify_stale = false;
     }
     if (activeTab === "overview") await refreshOverview();
     return r;
@@ -1200,6 +1318,7 @@ async function verify() {
   if (latest) {
     latest.log.last_verify = r;
     latest.log.lines = r.lines;
+    latest.log.verify_stale = false;
   }
   /* Ringen "Loggkjede" paa Oversikt staar som "Ikke sjekket ennaa" til noen
    * faktisk har sjekket. Naa har de det. */
