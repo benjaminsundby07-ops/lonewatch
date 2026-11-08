@@ -249,7 +249,7 @@ function buildNav() {
   /* Ikonene tegnes med designsystemets egen Icon-komponent, saa strek,
      tykkelse og stoerrelse er de samme som i dashbordet. */
   if (globalThis.Lonewatch && globalThis.Lonewatch.Icon && typeof ReactDOM !== "undefined") {
-    document.querySelectorAll("#app-nav [data-icon]").forEach((slot) => {
+    document.querySelectorAll("#app-nav [data-icon], .app-bell [data-icon]").forEach((slot) => {
       ReactDOM.createRoot(slot).render(
         React.createElement(globalThis.Lonewatch.Icon, {
           name: slot.getAttribute("data-icon"), size: 18,
@@ -257,6 +257,23 @@ function buildNav() {
       );
     });
   }
+}
+
+/* Bjella i topplinjen. Samme tall som menyvalget, men synlig uansett hvilken
+ * visning man staar i. */
+function syncBell() {
+  if (!latest) return;
+  const n = latest.waiting.length;
+  const boks = el("bell-count");
+  boks.classList.toggle("hidden", n === 0);
+  boks.textContent = n;
+  const knapp = el("btn-bell");
+  knapp.classList.toggle("is-alert", n > 0);
+  knapp.setAttribute(
+    "aria-label",
+    n === 0 ? "Ingenting venter paa et menneske"
+            : n + (n === 1 ? " varsel venter paa et menneske" : " varsler venter paa et menneske")
+  );
 }
 
 /* Teller paa menyvalget, saa man ser at noe venter uten aa gaa inn. */
@@ -274,6 +291,7 @@ function syncNavCounts() {
     if (n) e.textContent = n;
   });
   el("app-dot").classList.toggle("is-alert", latest.waiting.length > 0);
+  syncBell();
 }
 
 function chips(decision) {
@@ -324,6 +342,26 @@ function koeStatus(card) {
   return { klasse: "", merke: "", tekst: "" };
 }
 
+/* En tom liste er ikke en feil, men den er heller ikke et svar.
+ *
+ * «Ingenting ennå.» forteller deg at du ser riktig, men ikke hvorfor det er
+ * tomt eller hva du kan gjoere med det. Hver tomtilstand her sier begge deler,
+ * og tilbyr veien videre naar det finnes en.
+ */
+function tomtFelt(tittel, tekst, knapp, maal) {
+  return (
+    '<div class="app-empty-state">' +
+    '<p class="app-empty-title">' + esc(tittel) + "</p>" +
+    '<p class="app-empty-text">' + esc(tekst) + "</p>" +
+    (knapp
+      ? '<button type="button" class="lw-btn lw-btn-quiet app-mini" ' +
+        (maal === "story" ? 'data-empty-story="1"' : 'data-tab="' + esc(maal) + '"') +
+        ">" + esc(knapp) + "</button>"
+      : "") +
+    "</div>"
+  );
+}
+
 function renderQueue() {
   const liste = alleKort();
   const venter = (latest.waiting || []).length;
@@ -355,7 +393,10 @@ function renderQueue() {
           "</span></button>"
         );
       }).join("")
-    : '<p class="app-empty">Ingenting i køen ennå. Agentene jobber.</p>';
+    : tomtFelt("Ingenting i køen ennå",
+        "Agentene jobber, og alt de har bedt om så langt gikk rett gjennom. " +
+        "Kommer det noe et menneske må svare på, dukker det opp her.",
+        "Spill av hendelsen", "story");
 
   renderQueueDetail();
 }
@@ -420,7 +461,7 @@ function fellerBlokk() {
     '<section class="app-block">' +
     '<h3 class="app-block-h">Feller i dokumenter</h3>' +
     '<p class="app-block-sub">Plantet i demoens dokumenter. Her ser du om de har gått av.</p>' +
-    '<table class="lw-table app-table"><thead><tr>' +
+    '<div class="app-table-wrap"><table class="lw-table app-table"><thead><tr>' +
     "<th>Dokument</th><th>Type</th><th>Hva den ber om</th><th>Sist av</th>" +
     "</tr></thead><tbody>" +
     feller.map((f) =>
@@ -432,7 +473,7 @@ function fellerBlokk() {
         ? esc(klokke(f.sist.ts)) + " <span class=\"app-muted\">" + esc(f.sist.agent) + "</span>"
         : '<span class="app-muted">ikke gått av</span>') + "</td></tr>"
     ).join("") +
-    "</tbody></table></section>"
+    "</tbody></table></div></section>"
   );
 }
 
@@ -441,8 +482,10 @@ function renderQueueDetail() {
   const card = alleKort().find((c) => c.request.id === valgt);
   if (!card) {
     box.innerHTML =
-      '<section class="lw-panel app-detail-panel"><p class="app-empty">' +
-      "Velg noe i køen for å se hele saken." + "</p></section>";
+      '<section class="lw-panel app-detail-panel">' +
+      tomtFelt("Velg noe i køen",
+        "Her står hele saken: hvilke regler som slo inn, hva agenten " +
+        "faktisk ba om, og hva den gjorde rett før.") + "</section>";
     return;
   }
 
@@ -475,13 +518,13 @@ function renderQueueDetail() {
         'placeholder="0" value="' + esc(val) + '" data-amt="' + esc(r.id) + '">' +
         '<button class="lw-btn lw-btn-danger" data-approve="' + esc(r.id) + '"' +
         (ok ? "" : " disabled") + ">Godkjenn</button>" +
-        '<button class="lw-btn lw-btn-quiet" data-reject="' + esc(r.id) + '">Avvis</button>' +
+        '<button class="lw-btn lw-btn-danger-quiet" data-reject="' + esc(r.id) + '">Avvis</button>' +
         hint + "</div></div>";
     } else {
       gate =
         '<div class="app-gate"><div class="app-gate-row">' +
         '<button class="lw-btn lw-btn-danger" data-approve="' + esc(r.id) + '">Godkjenn</button>' +
-        '<button class="lw-btn lw-btn-quiet" data-reject="' + esc(r.id) + '">Avvis</button>' +
+        '<button class="lw-btn lw-btn-danger-quiet" data-reject="' + esc(r.id) + '">Avvis</button>' +
         (card.error ? '<span class="app-hint is-bad">' + esc(card.error) + "</span>" : "") +
         "</div></div>";
     }
@@ -561,7 +604,8 @@ function renderCalm(list, total) {
   const badge = el("calm-count");
   badge.textContent = total;
   if (!list.length) {
-    el("calm").innerHTML = '<p class="app-empty">Ingenting ennå.</p>';
+    el("calm").innerHTML = tomtFelt("Ingenting har gått gjennom ennå",
+      "Her havner forespørslene Lonewatch slipper videre uten å spørre noen.");
     return;
   }
   el("calm").innerHTML = list
@@ -629,7 +673,11 @@ function renderBefore(b) {
           "</span></button>"
         );
       }).join("")
-    : '<p class="app-empty">Ingen tillegg er forsøkt installert ennå.</p>';
+    : tomtFelt("Ingen tillegg er prøvd installert",
+        "Sandkassen kjører først når en agent ber om å installere noe. " +
+        "Du kan utløse det selv under «Prøv selv» med handlingen " +
+        "«Installerer tillegg».",
+        "Prøv selv", "custom");
 
   renderBeforeDetail(b, items);
 }
@@ -647,7 +695,9 @@ function renderBeforeDetail(b, items) {
   if (!i) {
     box.innerHTML =
       '<section class="lw-panel app-detail-panel">' + feil +
-      '<p class="app-empty">Velg et tillegg for å se hva boksen så.</p></section>';
+      tomtFelt("Velg et tillegg",
+        "Listen til venstre viser hvert tillegg sandkassen har kjørt. " +
+        "Trykk på ett for å se hva boksen skrev ned.") + "</section>";
     return;
   }
 
@@ -766,9 +816,19 @@ function venterKort(w, h) {
     h("p", { className: "app-waiting-who" }, linje),
     detalj ? h("p", { className: "app-waiting-amount" }, detalj) : null,
     h("p", { className: "app-waiting-title" }, w.consequence_text),
+    /* Hvorfor den er rød, med våre egne regelnavn. Står her fordi kortet
+       ellers ber deg om å ta stilling til noe uten å si hva som utløste det. */
+    w.reasons && w.reasons.length
+      ? h("ul", { className: "app-waiting-rules" }, w.reasons.map((r, i) =>
+          h("li", { key: i },
+            h("span", { className: "app-status-dot is-red" }),
+            RULE_TEXT[r] || r)))
+      : null,
     h("button", {
       type: "button",
-      className: "lw-btn lw-btn-danger app-waiting-cta",
+      /* Lavendel: knappen navigerer, den godkjenner ingenting. Rødt er
+         forbeholdt knappen som faktisk avgjør saken. */
+      className: "lw-btn lw-btn-primary app-waiting-cta",
       onClick: function () { valgt = w.request_id; showTab("queue"); },
     }, "Se og godkjenn"));
 }
@@ -834,15 +894,7 @@ function dashInnhold(h) {
           onClick: function () { showTab("queue"); },
         }, "Se køen", h("span", { className: "lw-link-dot" },
           h(L.Icon, { name: "arrowRight", size: 11, strokeWidth: 2.6 }))),
-      }, h(L.AgentTable, {
-        lang: "no",
-        columns: t.cols || ["Agent", "Handlinger", "Røde", "Blokkert", "Sluppet gjennom"],
-        rows: (d.agents || []).map(function (ag) {
-          return Object.assign({}, ag, {
-            name: (ag.name && (ag.name.no || ag.name.en)) || ag.id,
-          });
-        }),
-      })),
+      }, agentTabell(d.agents || [], t.cols, h)),
       h("div", { className: "lw-col" },
         h(L.Panel, null, h("div", { className: "lw-score" },
           h("div", null,
@@ -872,6 +924,57 @@ function dashInnhold(h) {
   ];
 }
 
+/* Agenttabellen tegnes her i stedet for med `AgentTable`.
+ *
+ * `AgentTable` skriver fem rene tall. Et tall sier hvor mange, men ikke hvor
+ * mye det haster: «2» i kolonnen Røde ser ut som «2» i kolonnen Handlinger.
+ * Pillene gir de tre utfallene hver sin farge, og prikken foran navnet sier om
+ * agenten har noe som venter paa et menneske akkurat naa.
+ *
+ * Null vises som en strek, ikke som en pille. En tom pille ville trukket
+ * oppmerksomhet mot det som IKKE skjedde. */
+function agentTabell(rader, kolonner, h) {
+  const kols = kolonner || ["Agent", "Handlinger", "Røde", "Blokkert", "Sluppet gjennom"];
+
+  if (!rader.length) {
+    return h("div", { className: "app-empty-state" },
+      h("p", { className: "app-empty-title" }, "Ingen agenter har gjort noe ennå"),
+      h("p", { className: "app-empty-text" },
+        "Den rolige strømmen slipper gjennom én forespørsel hvert par sekund. " +
+        "Vil du se alt på én gang, trykk «Spill av hendelsen» i topplinjen."));
+  }
+
+  /* Hvilke agenter har noe som venter? Fra kortene, ikke fra en egen teller. */
+  const venter = new Set(
+    ((latest && latest.waiting) || []).map((c) => c.request.agent_id)
+  );
+
+  const pille = (verdi, slag) => {
+    if (typeof verdi !== "number") return h("span", { className: "app-muted" }, "–");
+    if (verdi === 0) return h("span", { className: "app-muted" }, "–");
+    return h("span", { className: "app-pill is-" + slag }, dashNum(verdi));
+  };
+
+  return h("table", { className: "lw-table app-agents" },
+    h("thead", null, h("tr", null, kols.map((c, i) =>
+      h("th", { key: i, scope: "col" }, c)))),
+    h("tbody", null, rader.map((ag, i) => {
+      const navn = (ag.name && (ag.name.no || ag.name.en)) || ag.id;
+      const har = venter.has(ag.id);
+      return h("tr", { key: ag.id || i, className: har ? "is-waiting" : "" },
+        h("td", null, h("span", { className: "app-agent-cell" },
+          h("span", {
+            className: "app-status-dot " + (har ? "is-red" : "is-calm"),
+            title: har ? "Har noe som venter på et menneske" : "Ingenting venter",
+          }),
+          navn)),
+        h("td", null, dashNum(ag.actions)),
+        h("td", null, pille(ag.red, "red")),
+        h("td", null, pille(ag.blocked, "blocked")),
+        h("td", null, pille(ag.allowed, "allow")));
+    })));
+}
+
 function drawDashboard() {
   if (!dashboardReady() || !dashboardData) return;
   if (!dashboardRoot) {
@@ -879,6 +982,8 @@ function drawDashboard() {
   }
   const h = React.createElement;
   dashboardRoot.render(h("div", { className: "app-dash" }, dashInnhold(h)));
+  /* React har ikke skrevet til DOM ennaa naar render() returnerer. */
+  requestAnimationFrame(animerTall);
 }
 
 async function refreshOverview() {
@@ -1006,7 +1111,9 @@ function renderCustom(list) {
   el("custom-count").textContent = list.length;
   if (!list.length) {
     el("custom-list").innerHTML =
-      '<p class="app-empty">Ingen ennå. Fyll ut skjemaet ved siden av.</p>';
+      tomtFelt("Du har ikke sendt noe ennå",
+        "Fyll ut skjemaet ved siden av. Forespørselen din går gjennom " +
+        "nøyaktig samme vei som de 40 i demoen, og havner i den samme loggen.");
     return;
   }
   el("custom-list").innerHTML = list
@@ -1212,7 +1319,9 @@ const BOLK_KLASSE = { 0: "is-0", 1: "is-1", 2: "is-2" };
 function renderAfterTasks(view) {
   if (!view || !view.bolker.length) {
     el("after-list").innerHTML =
-      '<p class="app-empty">Ingenting å følge opp. Ingen røde eller stoppede forespørsler ennå.</p>';
+      tomtFelt("Ingenting å følge opp",
+        "Oppfølging bygges fra logglinjene. Den fylles når noe blir stoppet, " +
+        "når en felle går av, eller når et menneske har svart på et rødt varsel.");
     return;
   }
   el("after-note").textContent =
@@ -1387,6 +1496,11 @@ document.addEventListener("click", async (ev) => {
     return;
   }
 
+  if (t.getAttribute("data-empty-story")) {
+    storyPlay();
+    return;
+  }
+
   const lim = t.getAttribute("data-limits");
   if (lim) {
     visLimits(lim);
@@ -1396,6 +1510,70 @@ document.addEventListener("click", async (ev) => {
   const tab = t.closest ? t.closest("[data-tab]") : null;
   if (tab) showTab(tab.getAttribute("data-tab"));
 });
+
+/* ---------------- bevegelse ----------------
+ *
+ * Alt som beveger seg spoer her foerst. Den som har bedt operativsystemet om
+ * mindre bevegelse, skal faa sluttilstanden med en gang - ikke en kortere
+ * animasjon. Vi leser innstillingen hver gang, slik at den virker uten at
+ * siden lastes paa nytt.
+ */
+function roligBevegelse() {
+  try {
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch (e) {
+    return false;
+  }
+}
+
+/* Tall som teller opp fra forrige verdi til den nye.
+ *
+ * Fra FORRIGE verdi, ikke fra null: naar stroemmen gaar og 39 blir 40, skal
+ * tallet flytte seg ett hakk - ikke rulle gjennom hele skalaen paa nytt hvert
+ * annet sekund. Foerste gang er forrige verdi null, og da teller den opp. */
+const tellTilstand = new WeakMap();
+
+function tellOpp(node, til) {
+  if (typeof til !== "number" || !isFinite(til)) {
+    node.textContent = "–";
+    tellTilstand.delete(node);
+    return;
+  }
+  const fra = tellTilstand.get(node);
+  tellTilstand.set(node, til);
+
+  if (fra === til) return;
+  if (roligBevegelse() || fra === undefined && til === 0) {
+    node.textContent = dashNum(til);
+    return;
+  }
+
+  const start = typeof fra === "number" ? fra : 0;
+  const t0 = performance.now();
+  const lengde = Math.min(900, 220 + Math.abs(til - start) * 18);
+
+  function steg(naa) {
+    const p = Math.min(1, (naa - t0) / lengde);
+    // Mykt ut: raskt i starten, roer seg mot slutten.
+    const e = 1 - Math.pow(1 - p, 3);
+    node.textContent = dashNum(Math.round(start + (til - start) * e));
+    if (p < 1) requestAnimationFrame(steg);
+    else node.textContent = dashNum(til);
+  }
+  requestAnimationFrame(steg);
+}
+
+/* Tallene i Agentaktivitet tegnes av designsystemets StatCard, som setter
+ * teksten selv. Vi lar den gjoere det, og teller opp etterpaa - da er
+ * sluttverdien alltid den React skrev, ogsaa hvis animasjonen avbrytes. */
+function animerTall() {
+  if (!dashboardData) return;
+  const n = dashboardData.counts || {};
+  const verdier = [n.evaluated, n.red, n.blocked];
+  document.querySelectorAll("#dashboard-root .lw-stat-value").forEach((node, i) => {
+    tellOpp(node, typeof verdier[i] === "number" ? verdier[i] : null);
+  });
+}
 
 const VIEW_SUB = {
   overview: "Nordlys Forsikring · simulering",
@@ -1488,6 +1666,36 @@ document.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape") lukkLimits();
 });
 
+/* ---------------- presentasjonsmodus ----------------
+ *
+ * Appen vises paa projektor. Da er 13 px broedtekst uleselig fra fjerde rad,
+ * og fotnoter, begrensningslenker og raa IDer er stoey ingen i salen kan gjoere
+ * noe med.
+ *
+ * Modusen SKJULER bare - den endrer ingen tall og slaar ingenting av.
+ * Beloepsporten, reglene og loggen er de samme. Det som forsvinner er tekst
+ * som bare gir mening naar man sitter foran skjermen selv.
+ */
+const PRESENT_NOKKEL = "lonewatch:presentasjon";
+
+function settPresentasjon(paa) {
+  document.querySelector(".lw").classList.toggle("is-present", paa);
+  const knapp = el("btn-present");
+  knapp.setAttribute("aria-pressed", paa ? "true" : "false");
+  knapp.classList.toggle("is-on", paa);
+  try {
+    localStorage.setItem(PRESENT_NOKKEL, paa ? "1" : "0");
+  } catch (e) {
+    /* Privat vindu eller blokkert lagring: modusen virker, den huskes bare ikke. */
+  }
+}
+
+el("btn-present").addEventListener("click", () => {
+  settPresentasjon(el("btn-present").getAttribute("aria-pressed") !== "true");
+});
+
+el("btn-bell").addEventListener("click", () => showTab("queue"));
+
 el("custom-form").addEventListener("submit", sendCustom);
 el("c-action").addEventListener("change", syncCustomFields);
 el("btn-verify").addEventListener("click", verify);
@@ -1528,6 +1736,11 @@ window.addEventListener("hashchange", () => {
 
 (async () => {
   buildNav();
+  try {
+    if (localStorage.getItem(PRESENT_NOKKEL) === "1") settPresentasjon(true);
+  } catch (e) {
+    /* ingen lagring tilgjengelig - start i vanlig modus */
+  }
   apply(await api("/api/state"));
   showTab(tabFraAdressen());
   /* Sjekk loggen med én gang siden aapnes, saa ringen viser OK og de tolv

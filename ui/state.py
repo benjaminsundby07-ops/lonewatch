@@ -912,6 +912,10 @@ class DemoState:
                 "risk": dec.get("risk"),
                 "consequence_text": dec.get("consequence_text"),
                 "requires_typed_amount": dec.get("requires_typed_amount", False),
+                # Hvilke regler som gjorde den rød. Samme liste Godkjenning
+                # viser - kortet skal kunne svare på «hvorfor» uten at man
+                # må klikke seg videre for å finne ut av det.
+                "reasons": list(dec.get("reasons") or []),
                 "waiting_total": len(venter),
             }
 

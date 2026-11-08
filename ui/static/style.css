@@ -838,3 +838,285 @@ body { font-family: var(--font-sans); }
    seg nederst i stedet for at nedre halvdel blir tom. */
 .app-waiting { display: flex; flex-direction: column; align-content: stretch; }
 .app-waiting .app-waiting-cta { align-self: flex-start; margin-top: auto; }
+
+/* ===========================================================================
+   DESIGNRUNDE
+   ---------------------------------------------------------------------------
+   Mocken er lettere enn det vi hadde: tynnere vekter, større tall, mer luft
+   mellom etikett og verdi, og en svak glød som gir kortene dybde uten å legge
+   noe foran teksten.
+
+   Regelen gjennom hele blokka: glød legges BAK innholdet (skygge og svak
+   topplys), aldri som gjennomsiktighet på tekst. Kontrasten på --ink mot
+   --card står urørt.
+   ======================================================================== */
+
+/* ---------- lettere typografi ---------- */
+
+.lw, .app-main { -webkit-font-smoothing: antialiased; }
+
+.app-top-id h1 {
+  font-size: 23px;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+}
+.app-sub { font-weight: 400; letter-spacing: 0; }
+
+.app-dash .lw-panel-title {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+}
+.app-dash .lw-stat-title,
+.app-dash .lw-pstat-label {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink-muted);
+  letter-spacing: 0;
+}
+/* Tallet er det kortet handler om. Stort og lett, slik mocken har det -
+   vekt 300 bærer en 34 px-tekst fint, og den slutter å rope. */
+.app-dash .lw-stat-value {
+  font-size: 34px;
+  line-height: 40px;
+  font-weight: 300;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  margin: var(--space-2) 0 var(--space-1);
+}
+.app-dash .lw-stat-row { font-size: 11.5px; font-weight: 400; }
+.app-dash .lw-pstat-value {
+  font-size: 15px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.app-dash .lw-table th {
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.app-dash .lw-table td { font-size: 13px; font-weight: 400; }
+.app-dash .lw-table td:first-child { font-weight: 500; }
+.app-dash .lw-gauge-value { font-weight: 300; letter-spacing: -0.02em; }
+
+/* ---------- glød og dybde ---------- */
+
+/* Et svakt lys langs overkanten, som om panelet fanger lys ovenfra. Det er
+   det samme trikset mocken bruker: ingen ramme, bare en lysere topp. */
+.app-dash .lw-panel,
+.app-detail-panel,
+.app-panel-list,
+.app-strip {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, .038), rgba(255, 255, 255, 0) 96px);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .045) inset, 0 10px 30px rgba(0, 0, 0, .28);
+}
+.app-dash .lw-stat {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, .045), rgba(255, 255, 255, 0) 70px);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .05) inset;
+  transition: box-shadow .2s ease, transform .2s ease;
+}
+@media (hover: hover) {
+  .app-dash .lw-stat:hover {
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .08) inset, 0 8px 24px rgba(0, 0, 0, .34);
+    transform: translateY(-1px);
+  }
+}
+
+/* Det aktive menyvalget lyser lavendel. Lavendel er «vanlig handling» i hele
+   appen, og navigasjon er den vanligste av dem. */
+.app-nav .lw-nav-item.is-active {
+  box-shadow: 0 0 0 1px rgba(196, 210, 245, .18) inset, 0 0 22px rgba(157, 178, 234, .14);
+}
+.app-item.is-open {
+  box-shadow: 0 0 0 1px rgba(196, 210, 245, .14) inset, 0 6px 18px rgba(0, 0, 0, .3);
+}
+
+/* ---------- bjella ---------- */
+
+.app-bell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--icon-tile);
+  color: var(--nav-icon);
+  cursor: pointer;
+  transition: color .2s ease, box-shadow .2s ease;
+}
+.app-bell:hover { color: var(--ink); }
+.app-bell.is-alert { color: var(--negative); box-shadow: 0 0 0 1px rgba(240, 145, 141, .3) inset; }
+.app-bell-count {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  background: var(--negative);
+  color: #231010;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+}
+
+/* ---------- piller og statusprikker ---------- */
+
+.app-pill {
+  display: inline-block;
+  min-width: 26px;
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.app-pill.is-red { background: rgba(240, 145, 141, .16); color: var(--negative); }
+.app-pill.is-blocked { background: var(--example-bg); color: var(--example-ink); }
+.app-pill.is-allow { background: rgba(159, 224, 155, .12); color: var(--positive); }
+
+.app-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--ink-faint);
+}
+.app-status-dot.is-calm { background: var(--positive); box-shadow: 0 0 0 3px rgba(159, 224, 155, .1); }
+.app-status-dot.is-red { background: var(--negative); box-shadow: 0 0 0 3px rgba(240, 145, 141, .14); }
+.app-agent-cell { display: inline-flex; align-items: center; gap: var(--space-2); }
+.app-agents tr.is-waiting td:first-child { color: var(--ink); }
+
+/* ---------- rolig puls på «Venter på deg» ---------- */
+
+@keyframes app-puls {
+  0%, 100% { box-shadow: 0 1px 0 rgba(255,255,255,.045) inset, 0 10px 30px rgba(0,0,0,.28), 0 0 0 0 rgba(240,145,141,.22); }
+  50%      { box-shadow: 0 1px 0 rgba(255,255,255,.045) inset, 0 10px 30px rgba(0,0,0,.28), 0 0 26px 2px rgba(240,145,141,.22); }
+}
+.app-waiting:not(.is-calm):not(.is-unknown) { animation: app-puls 3.6s ease-in-out infinite; }
+.app-waiting:not(.is-calm):not(.is-unknown) .app-waiting-head { letter-spacing: .07em; }
+
+@keyframes app-dot-puls {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(240,145,141,.14); }
+  50%      { box-shadow: 0 0 0 7px rgba(240,145,141,.05); }
+}
+.app-dot.is-alert { animation: app-dot-puls 3.6s ease-in-out infinite; }
+
+/* Den som har bedt om mindre bevegelse, skal ikke ha noen. Tallene faller
+   tilbake til sluttverdien i JS; her slås flatene av. */
+@media (prefers-reduced-motion: reduce) {
+  .app-waiting, .app-dot.is-alert { animation: none !important; }
+  .app-dash .lw-stat, .app-bell, .lw-btn { transition: none !important; }
+  @media (hover: hover) { .app-dash .lw-stat:hover { transform: none; } }
+}
+
+/* ---------- tomtilstander ---------- */
+
+.app-empty-state {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+  padding: var(--space-5) var(--space-4);
+}
+.app-empty-title { margin: 0; font-size: 14.5px; font-weight: 600; color: var(--ink); }
+.app-empty-text {
+  margin: 0;
+  max-width: 54ch;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--ink-muted);
+}
+.app-empty-state .lw-btn { margin-top: var(--space-2); }
+
+/* ---------- knappefarger ----------
+   Lavendel er standard. Rødt bærer bare to ting: å stoppe noe, og å godkjenne
+   en rød sak. «Avvis» hører til det røde paret, men er den TRYGGE handlingen -
+   den skal ikke konkurrere med Godkjenn om blikket, så den står som omriss. */
+.lw-btn-danger-quiet {
+  background: transparent;
+  color: var(--negative);
+  box-shadow: 0 0 0 1px rgba(240, 145, 141, .35) inset;
+}
+.lw-btn-danger-quiet:hover { background: rgba(240, 145, 141, .1); }
+
+/* ---------- presentasjonsmodus ----------
+   Skjuler bare. Ingen tall endres, ingen funksjon slås av. */
+.is-present .app-dash .lw-stat-value { font-size: 44px; line-height: 50px; }
+.is-present .app-dash .lw-stat-title { font-size: 14px; }
+.is-present .app-dash .lw-panel-title { font-size: 18px; }
+.is-present .app-top-id h1 { font-size: 30px; }
+.is-present .app-dash .lw-table td { font-size: 15px; }
+.is-present .app-dash .lw-table th { font-size: 12px; }
+.is-present .app-dash .lw-pstat-label { font-size: 14px; }
+.is-present .app-dash .lw-pstat-value { font-size: 18px; }
+.is-present .app-waiting-who { font-size: 22px; }
+.is-present .app-waiting-title { font-size: 17px; line-height: 25px; }
+.is-present .app-detail-title { font-size: 24px; line-height: 32px; }
+.is-present .app-item-mid { font-size: 15.5px; }
+.is-present .app-task-text, .is-present .app-rule-text { font-size: 15px; line-height: 23px; }
+.is-present .app-pill { font-size: 13px; }
+
+/* Støyen: fotnoter, begrensningslenker, rå IDer og felter bare utvikleren
+   bryr seg om. Alt dette står fortsatt i appen når modusen slås av. */
+.is-present .app-footer,
+.is-present .app-limits,
+.is-present .app-raw,
+.is-present .app-sub,
+.is-present .app-foot-note,
+.is-present .app-hash,
+.is-present .app-json,
+.is-present .app-block-sub,
+.is-present .app-suggest { display: none; }
+.is-present #btn-present { color: var(--accent); box-shadow: 0 0 0 1px rgba(196,210,245,.3) inset; }
+.is-present .app-log td:last-child, .is-present .app-log th:last-child { display: none; }
+
+/* Kurvene ble klippet: toppene og markørsirklene nådde taket i en 44 px høy
+   boks. Plassen fantes - Oversikt sluttet 190 px over skjermkanten - så den
+   gis tilbake her i stedet for å la en måling se ut som en flat topp. */
+.app-dash { gap: var(--space-4); }
+.app-dash .lw-col { gap: var(--space-4); }
+.app-dash-top, .app-dash-bottom { gap: var(--space-4); }
+.app-dash .lw-panel { padding: var(--space-4) var(--space-5); }
+.app-dash .lw-stat-chart { height: 70px; margin-top: var(--space-3); }
+.app-dash .lw-stats { gap: var(--space-4); }
+.app-dash .lw-table th { padding: 7px 12px; }
+.app-dash .lw-table td { padding: 9px 12px; }
+.app-dash .lw-progress-row { padding: var(--space-4) var(--space-5); }
+.app-dash .lw-pstat-icon { width: 32px; height: 32px; }
+
+/* Reglene i «Venter på deg». Samme prikk som i agenttabellen, så rødt
+   betyr det samme to steder på samme skjerm. */
+.app-waiting-rules {
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-2);
+}
+.app-waiting-rules li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+/* Her sto et forsøk på å strekke den nederste raden slik at Oversikt fylte
+   hele 1080. Det flyttet bare tomrommet inn i panelene: «Sandkasse» ble en
+   høy, nesten tom boks med to linjer nederst. Et panel som er høyere enn det
+   har noe å si i, ser ut som noe mangler.
+
+   Oversikt slutter der innholdet slutter. Mocken fyller skjermen fordi den
+   har mål, snitt og en trendkolonne vi ikke har tall for - og vi finner dem
+   ikke på for å fylle plass. */
+
+/* «Til menneske 7» brøt over to linjer og gjorde filterknappene ulike høye. */
+.app-filter-btn { white-space: nowrap; }

@@ -38,8 +38,17 @@
         <span class="app-sub">Nordlys Forsikring <span class="app-sep">&middot;</span> simulering</span>
       </div>
       <div class="app-actions">
+        <!-- Bjellen er ikke pynt: den er det eneste som foelger deg paa tvers
+             av alle fem visningene og sier at noen venter paa et svar. -->
+        <button id="btn-bell" class="app-bell" type="button"
+                aria-label="Varsler som venter paa et menneske">
+          <span class="app-bell-icon" data-icon="bell" aria-hidden="true"></span>
+          <span id="bell-count" class="app-bell-count hidden" aria-hidden="true"></span>
+        </button>
         <button id="btn-story" class="lw-btn lw-btn-primary" type="button">Spill av hendelsen</button>
         <button id="btn-verify" class="lw-btn lw-btn-quiet" type="button">Sjekk loggen</button>
+        <button id="btn-present" class="lw-btn lw-btn-ghost" type="button"
+                aria-pressed="false" title="Stoerre tekst, mindre stoey">Presentasjon</button>
         <button id="btn-reset" class="lw-btn lw-btn-ghost" type="button">Nullstill</button>
       </div>
     </header>
