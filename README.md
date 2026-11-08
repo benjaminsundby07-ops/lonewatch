@@ -1,482 +1,375 @@
 # Lonewatch
 
-Lonewatch er en mellomstasjon mellom en bedrifts AI-agenter og verktøyene de bruker: alt en agent vil
-gjøre, går først gjennom `gateway.evaluate()`, som svarer `allow`, `red` (et menneske må se på det) eller
-`block`. Alt som skjer skrives til en kryptert, hash-kjedet logg, slik at ingen linje kan endres i det
-skjulte uten at `verify()` sier fra.
+**Summary in English.** Lonewatch is a control station between a company's AI agents and the
+tools they use. Every action an agent wants to take is judged before it happens, and the answer
+is `allow`, `red` (a human must look at it) or `block`. Everything is written to an encrypted,
+hash-chained log, so no line can be changed unseen. The whole project is a simulation. No real
+company, no real money, no real malware. One single connection is real, and section 5 says which.
 
-**Alt i dette prosjektet er en simulering.** Se [Simulering, ikke virkelighet](#simulering-ikke-virkelighet).
+Resten av denne filen er på norsk.
 
-## Problemet
+---
 
-En AI-agent handler på innhold et menneske ikke har lest. Et dokument har to lag: det en person ser, og
-det agenten faktisk leser inn. I `agents/traps.py` ligger fire oppdiktede dokumenter der det andre laget
-er usynlig for mennesker — hvit tekst på hvit bakgrunn, skriftstørrelse 1, nullbredde-tegn eller et felt
-i metadata — og ber agenten bytte kontonummer på en faktura, sende kundelisten ut av huset, installere et
-tillegg fra en ukjent kilde eller videresende en personalmappe.
+## 1. Hva Lonewatch er
 
-Da hjelper det ikke å spørre agenten hva den holder på med. Agentens egen forklaring (`ActionRequest.summary`)
-er nettopp det et dokument kan ha skrevet for den. I demodataene heter den farligste forespørselen
-*«Betaler samleoppgjør for takseringsoppdrag, haster før forfall»* — en setning som høres riktig ut, på en
-overføring av 10 000 000 kr til en konto ingen har sett før.
+Lonewatch er en kontrollstasjon som står mellom en bedrifts AI-agenter og verktøyene deres, og
+vurderer hver handling før den skjer.
 
-Lonewatch leser derfor aldri `summary`. Avgjørelsen tas av deterministiske regler på de strukturerte feltene
-i forespørselen: beløp, mottaker, om mottakeren er kjent, om handlingen kan angres, om det er
-personopplysninger, hvilket tillegg det er. Samme forespørsel gir samme svar hver gang, og ingen
-AI-modell er involvert i å bestemme `allow`/`red`/`block`.
+Det er laget for mellomstore bedrifter med omtrent 50 til 250 ansatte, som ikke har eget
+sikkerhetsteam, og som setter AI-agenter til å jobbe med penger, e-post, dokumenter og tillegg.
+De har agenter i drift, men ingen som følger med på hva agentene faktisk gjør.
 
-Det andre problemet er at et varsel som lyser rødt hele tiden blir slått av. Derfor er demodataene med vilje
-skjeve: 40 forespørsler, 32 går gjennom uten å forstyrre noen. Hvor godt tersklene er valgt, er en åpen
-sak — se [Hva Lonewatch IKKE gjør](#hva-lonewatch-ikke-gjør).
+Flyten er `agent -> ActionRequest -> gateway.evaluate() -> Decision`. Et `allow` går gjennom.
+Et `red` legges i en kø og venter på et menneske. Et `block` avvises, og ingen kan godkjenne det.
+Alt som skjer havner i loggen.
 
-## Før / Under / Etter
+## 2. Problemet
+
+En agent som behandler fakturaer leser et dokument. I dokumentet ligger en instruksjon et
+menneske ikke ser, og den ber agenten bytte kontonummer og betale til en ny konto. Agenten gjør
+som den blir bedt om, fordi den ikke kan skille en instruksjon fra innholdet den skal behandle.
+
+Dokumentet finnes i demoen. `agents/traps.py` har fire oppdiktede dokumenter der det andre laget
+er usynlig for mennesker, enten som hvit tekst på hvit bakgrunn, skriftstørrelse 1 px,
+nullbredde-tegn eller et felt i metadata. Fakturaen `doc_invoice_8841` ber agenten bruke kontoen
+`NO93 8601 1117 947` og ikke varsle noen.
+
+Det hjelper ikke å spørre agenten hva den holder på med. Agentens egen forklaring er nettopp det
+et dokument kan ha skrevet for den. I demodataene heter den farligste forespørselen «Betaler
+samleoppgjør for takseringsoppdrag, haster før forfall», og den gjelder en overføring på
+10 000 000 kr til en konto ingen har sett før.
+
+Dette er et nytt problem som vokser. Det er ikke stort i dag. Det blir større for hver agent en
+bedrift gir tilgang til penger, e-post og dokumenter.
+
+## 3. Hvordan det virker
 
 Tre steg, og bare det som faktisk er bygget.
 
-### Før — `sandbox/`
+### Før: tillegget prøves i en lukket boks (SIMULERT)
 
-Skal et tillegg installeres, kjøres det i en lukket boks *før* mellomstasjonen bestemmer seg. Tillegget
-kjøres i en egen Python-delprosess (`python -I`) med et miljø bygget fra null: `socket` er byttet ut med
-noe som skriver ned adressen og sier nei, `open` avviser lesing og skriving utenfor boksen, og `HOME` peker
-på en falsk hjemmemappe med ni oppdiktede filer som sier «FALSK DEMOFIL» i første linje. Fem av dem er agn
-(falsk ssh-nøkkel, miljøfil, lommebok, nettleserdata, skynøkkel): blir en av dem lest, skrives det ned.
+Skal et tillegg installeres, kjøres det i `sandbox/` før kontrollstasjonen bestemmer seg.
+Tillegget kjøres i en egen Python-delprosess med et miljø bygget fra null. `socket` er byttet ut
+med noe som skriver ned adressen og sier nei. `open` avviser lesing og skriving utenfor boksen.
+`HOME` peker på en falsk hjemmemappe med ni oppdiktede filer. Fem av dem er agn, og blir ett av
+dem lest, blir det skrevet ned.
 
-Resultatet er en `SandboxReport` med `clean`, `blocked` eller `not_tested`, avgjort av en fast regel på
-hva tillegget *gjorde*. `not_tested` betyr at tillegget aldri kom i gang — det krasjet, eller mangler
-`run()` — og den skal aldri leses som en klarering.
+Resultatet er en `SandboxReport` med `clean`, `blocked` eller `not_tested`, avgjort av en fast
+regel på hva tillegget gjorde. Tidsgrensen er 6 sekunder. `not_tested` betyr at tillegget aldri
+kom i gang, og skal aldri leses som en klarering.
 
-Én enkelt hendelse er nok til `blocked`: et forsøk på å koble seg ut eller slå opp et navn, en
-agnfil lest, en fil utenfor boksen, et program startet, en sperret modul importert, en port åpnet for å ta
-imot innkommende trafikk — eller en kjøring som ikke ble ferdig innen 6 sekunder. Rapporten går med inn
-i `evaluate()`, der regelen `sandbox_blocked` gir `block`.
+Sandkassen kjører bare filer som alt ligger i `sandbox/packages/`. Et pakkenavn fra en
+forespørsel fører aldri til at noe lastes ned. Dette er ikke ekte isolasjon, se seksjon 8.
 
-Sandkassen kjører bare filer som ligger i `sandbox/packages/` fra før. Et pakkenavn fra en forespørsel
-fører aldri til at noe lastes ned eller startes; et navn som ikke finnes der gir «ikke testet».
+### Under: reglene stopper det farlige, og et menneske må skrive beløpet
 
-### Oversikt — `ui/overview.py` og `ui/static/dashboard/`
-
-Forsiden er et dashbord: handlinger vurdert, røde varsler, blokkert, en rad per agent, status på
-loggkjeden og sandkassen. **Alle tall regnes fra loggen og tilstanden** i `/api/overview` — ingen
-er skrevet inn. Mangler et tall, står det «–»; det finnes ingen oppdiktede prosenter, mål eller
-snitt, og kurvene i kortene er ekte forløp (vurderte, røde og blokkerte per tidsbøtte), ikke pynt.
-
-Designet kom fra `design-handoff/`. Filene dashbordet trenger for å kjøre ligger i
-`ui/static/dashboard/`; resten av mappen er referanse. React 18.3.1 og skriften ligger lokalt i
-`ui/static/vendor/` og `ui/static/dashboard/fonts/`, så **hele appen virker uten internett**.
-
-### Godkjenning — `gateway/` og `ui/`
-
-Åtte risikoregler gir poeng (`gateway/config.py`): `amount_over_limit` (2),
+Åtte risikoregler gir poeng. Reglene står i `gateway/rules.py` og vektene i `gateway/config.py`.
+`amount_over_limit` (2),
 `recipient_total_over_limit` (2), `unknown_recipient` (2), `personal_data_external` (3),
-`new_package` (2), `destructive_change` (2), `incomplete_request` (2), `irreversible` (1).
-`personal_data_external` gjelder `send_email` og `share_data`, ikke pengeoverføringer: på en
-utbetaling sier `contains_personal_data` bare at posten gjelder en person, og navn og konto må stå
-der for at pengene skal finne fram. Beløpsreglene holder utbetalingene i tømme.
-`destructive_change` fanger at noe slettes eller overskrives på en handling som ellers er
-harmløs — en «lesing» som ikke kan angres er ikke bare lesing.
-`incomplete_request` er fail-closed: alt reglene ikke klarer å vurdere går til et menneske
-i stedet for gjennom. 0–1 poeng er `low` → `allow`,
-2–3 er `medium`, 4+ er `high`; alt som ikke er `low` blir `red`. To blokkregler stopper noe helt, og ingen
-kan godkjenne det: `package_on_blocklist` og `transfer_over_hard_limit`. I tillegg `sandbox_blocked` fra
-Før-steget.
+`new_package` (2), `destructive_change` (2), `incomplete_request` (2) og `irreversible` (1).
+0 til 1 poeng er `low` og gir `allow`, 2 til 3 er `medium`, 4 og over er `high`. Alt som ikke er
+`low` blir `red`. To regler blokkerer helt, `package_on_blocklist` og
+`transfer_over_hard_limit`, og i tillegg `sandbox_blocked` fra Før-steget. Grensene er 50 000 kr
+(rødt fra og med) og 50 000 000 kr (blokk over). Tallene står i `gateway/config.py` fordi en
+bedrift må kunne sette sine egne.
 
-Grensene er 50 000 kr (inklusiv — rødt fra og med dette beløpet) og 50 000 000 kr (eksklusiv — blokk over
-dette). Tallene er satt for å få en god demo, ikke ut fra en risikoanalyse, og de hører hjemme i
-`gateway/config.py` nettopp fordi en bedrift må kunne sette sine egne.
+**Reglene er deterministiske.** Samme forespørsel gir samme svar hver gang. Ingen AI-modell er
+involvert i å bestemme `allow`, `red` eller `block`, og ingen i å skrive varselteksten.
 
-Til hver avgjørelse lages en `consequence_text` på norsk av maler og felt — aldri av en AI-modell, aldri av
-`summary`: «Overfører 10 000 000 kr til ukjent konto. Kan ikke angres.» For røde pengeoverføringer settes
-`requires_typed_amount`, og i UI må mennesket skrive beløpet selv før Godkjenn blir aktiv. Kommer en
-godkjenning inn med feil tall likevel, avviser `/api/respond` den med «Beløpet stemmer ikke. Skriv det
-nøyaktig som det står.»
+**Agentens egen forklaring brukes aldri.** `ActionRequest.summary` leses ikke av noen regel.
+Den vises i kortet, slik at et menneske kan se hva agenten sa, men den kan ikke flytte en
+avgjørelse. Hadde den kunnet det, ville et dokument kunnet skrive sin egen godkjenning.
 
-Det skrevne tallet tolkes som et *beløp*, ikke som en siffersekvens: mellomrom og punktum er tusenskille og
-må gruppere riktig, komma er desimalskille, og sammenligningen skjer i hele øre. `100000,00` er derfor
-hundre tusen kroner og blir avvist mot 10 000 000 — det ble tidligere godtatt, fordi regelen kastet alle
-tegn som ikke var siffer. Nettleseren og tjeneren bruker samme regel (`ui/amount.py` og
-`ui/static/amount.js`), og en test kjører de samme tilfellene gjennom begge så de ikke kan bli uenige.
+Varselteksten lages av maler og felt i `gateway/consequence.py`, på vanlig norsk. «Overfører
+10 000 000 kr til ukjent konto. Kan ikke angres.» For røde pengeoverføringer settes
+`requires_typed_amount`, og da må mennesket skrive beløpet selv før Godkjenn blir aktiv. Feil
+tall avvises av tjeneren også. Tallet tolkes som et beløp og ikke som en siffersekvens, så
+`100000,00` er hundre tusen kroner og blir avvist mot ti millioner.
 
-### Prøv selv — `ui/state.py`
+Godkjenningen krever en egen menneskenøkkel (`LONEWATCH_HUMAN_KEY`, et HTTP-hode mot
+`/api/respond`). Agentens egen nøkkel duger ikke, og er menneskenøkkelen ikke satt, kan
+ingenting godkjennes.
 
-De 40 forespørslene er skrevet på forhånd. Avgjørelsene er det ikke. Fanen
-**Prøv selv** lar hvem som helst skrive sin egen forespørsel — handling, beløp,
-mottaker, pakkenavn og et fritt «Agenten sier»-felt — og den går gjennom
-`DemoState._handle()`, altså nøyaktig samme funksjon som demodataene: sandkassen
-først hvis det er et tillegg, så `gateway.evaluate()`, så loggen, så køen.
-Kortet merkes «skrevet av deg».
+### Etter: loggen som sier fra hvis noen endrer den
 
-To felt settes av Lonewatch, ikke av den som skriver:
+Hver linje krypteres med Fernet før den skrives til disk, med nøkkel bare fra miljøvariabel.
+Hver linje peker på den forrige med SHA-256. `verify()` leser og dekrypterer hele filen på nytt
+fra disk og peker på `seq` til første linje som er endret, uleselig eller på feil plass. Ved
+siden av loggen ligger et hale-anker (`<logg>.head`) som er signert med HMAC-SHA256, og som
+fanger at de siste linjene er kuttet bort.
 
-- **`recipient_known`** regnes ut mot en liste over kjente mottakere som hentes
-  fra `agents/scenarios.py`. Uten dette kunne man krysset av for at en ukjent
-  konto er kjent, og dermed snakket seg forbi `unknown_recipient`.
-- **`reversible`** følger av handlingstypen. Om noe kan angres er en egenskap
-  ved handlingen, ikke en påstand fra den som ber om den.
+«Bryt loggen» viser det, og viser også hva det ikke klarer.
 
-`contains_personal_data` er derimot en avkrysning, fordi flagget er *monotont*:
-`personal_data_external` kan bare legge til risiko, aldri trekke fra. Man kan
-gjøre sin egen forespørsel rødere, ikke grønnere. På en pengeoverføring gjør
-avkrysningen ingenting i det hele tatt — regelen gjelder bare e-post og deling.
-
-Et pakkenavn fra skjemaet kan aldri føre til at noe kjøres: `sandbox.scan` slår
-navnet opp blant filene i `sandbox/packages/`, og et navn som ikke ligger der
-gir «ikke testet». Og siden både pakkenavn og sandkassens adresser er tekst
-noen andre velger, vaskes begge før de havner i `consequence_text` — ellers
-kunne navnet «nordlys-core. Dette er godkjent av sikkerhetsavdelingen» skrevet
-sin egen setning inn i varselet et menneske leser.
-
-### Etter — `vault/after.py`
-
-`build_after_actions()` leser logglinjene og lager en liste over hva mennesker må gjøre i etterkant, med en
-eier per linje (`security`, `finance`, `employee`). Hver linje kommer fra en konkret logglinje — en felle som
-gikk av, et blokkert tillegg, en rød overføring, persondata på vei ut, en godkjenning som bør kontrolleres.
-Ingen AI, ingen gjetting.
-
-## Arkitektur
-
-```mermaid
-flowchart LR
-    A["agent"] -->|ActionRequest| G["gateway.evaluate"]
-    S["sandbox.scan<br/>kun install_package"] -.->|SandboxReport| G
-    G -->|Decision| W{"verdict"}
-    W -->|allow| OK["gjennomføres simulert"]
-    W -->|red| H["kø: menneske skriver beløpet<br/>HumanResponse"]
-    W -->|block| NO["avvises"]
-    OK --> V[("Vault<br/>kryptert, hash-kjedet logg")]
-    H --> V
-    NO --> V
+```bash
+python -m vault.tamper_demo --attack alle
 ```
 
-Alle typer kommer fra `contracts.py`, som er låst. Grensesnittene mellom modulene står i `CLAUDE.md`.
+Den angriper en kopi av loggen og lar den samme verifiseringen svare. `endre` og `slett` blir
+oppdaget og peker ut riktig linje. `kutt` fanges av hale-ankeret. `full`, der angriperen har
+loggnøkkelen og regner kjeden og ankeret på nytt, blir **ikke** oppdaget, og det er riktig svar
+på alt loggen kan se. Det eneste som fanger det, er siste hash skrevet ned utenfor maskinen.
 
-## Hvordan kjøre
+`vault/after.py` bygger Etter-listen rett fra logglinjene, med en eier per linje. Ingen AI, ingen
+gjetting.
+
+## 4. Prøv det selv
 
 Python 3.11 eller nyere. Kjørt og verifisert på macOS med Python 3.11.9.
+
+### Oppsett
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Inne i et aktivert venv er `python` og `python3` samme interpreter.
-
-### 1. Lag nøkler
-
-Loggen åpnes ikke uten nøkkel, og det finnes ingen stille standardnøkkel. Nøklene leses fra
-miljøvariabler og ligger aldri i koden.
+Nøklene leses fra miljøvariabler og ligger aldri i koden. Det finnes ingen stille standardnøkkel.
 
 ```bash
 export LONEWATCH_LOG_KEY=$(python -m vault.gen_key)
 export LONEWATCH_PSEUDONYM_KEY=$(python -m vault.gen_key --pseudonym)
+export LONEWATCH_HUMAN_KEY=$(python -m vault.gen_key --human)
 ```
 
-`python -m vault.gen_key --both` skriver begge linjene ferdige til å lime inn. Mangler de, stopper kjøringen
-med `VaultKeyError` og en melding om hvordan du lager nøkkelen.
+`python -m vault.gen_key --both` skriver alle tre linjene ferdige til å lime inn. Loggfilen
+havner i `lonewatch_log.jsonl` i prosjektmappen og kan flyttes med `LONEWATCH_LOG_PATH`.
 
-Loggfilen havner i `lonewatch_log.jsonl` i prosjektmappen (gitignorert). Den kan flyttes med
-`LONEWATCH_LOG_PATH`.
+### Nettsiden
 
-Demoen minimerer det den logger. Sett `LONEWATCH_REDACT=0` hvis du vil se den samme loggen med
-full payload — nyttig når noen spør hva som faktisk blir lagret.
+```bash
+python -m ui
+```
 
-### 2. Hele flyten i terminalen
+Åpne <http://127.0.0.1:8000>. Fanene er Oversikt, Før, Godkjenning, Etter og Prøv selv.
+Gå til Godkjenning og lim menneskenøkkelen inn i feltet øverst, ellers finnes ikke
+Godkjenn-knappen. Verdien står i terminalen din (`echo "$LONEWATCH_HUMAN_KEY"`). Vert og port kan
+styres med `LONEWATCH_HOST` og `LONEWATCH_PORT`. Demofortellingen på rundt to minutter står i
+[docs/DEMO.md](docs/DEMO.md).
+
+### Hele flyten i terminalen
 
 ```bash
 python run_demo.py
 ```
 
-Spiller de 40 demoforespørslene gjennom mellomstasjonen og skriver avgjørelse, regler og konsekvenstekst for
-hver. Med nøklene satt gir den 33 `allow`, 6 `red` og 1 `block`, og til slutt «Sjekk av logg: OK, ingen
-linjer er endret.» pluss de tolv første tegnene av siste hash. På en fersk logg blir det 88 linjer
-(40 forespørsler, 40 avgjørelser, 6 menneskesvar,
-2 sandkasserapporter); loggen bare vokser, så kjører du på nytt mot samme fil, blir den lengre.
+Spiller de 40 demoforespørslene gjennom kontrollstasjonen og skriver avgjørelse, regler og
+konsekvenstekst for hver. Med nøklene satt gir den 33 `allow`, 6 `red` og 1 `block`, 88
+logglinjer på en fersk logg, og til slutt «Sjekk av logg: OK, ingen linjer er endret.» pluss de
+tolv første tegnene av siste hash. Menneskesvaret er hardkodet til avvis her, så beløpsporten
+kan ikke vises i terminalen.
 
-Tallene var 32/7/1 og 89 linjer til `personal_data_external` sluttet å gjelde pengeoverføringer.
-`req_0021` — egenandelsrefusjon på 4 000 kr til kundens registrerte konto — er nå `allow`, og da
-forsvinner også menneskesvaret den utløste. Hvorfor står i `gateway/LIMITS.md`.
-
-Det røde menneskesvaret er midlertidig hardkodet til *avvis* i terminaldemoen. Skal du svare selv, bruk
-nettsiden.
-
-### 3. Nettsiden
-
-```bash
-python3 -m ui
-```
-
-Åpne <http://127.0.0.1:8000>. Fanene er **Oversikt** (forsiden), **Før**, **Godkjenning**, **Etter**
-og **Prøv selv**. Verts- og portnavn kan styres med `LONEWATCH_HOST` og `LONEWATCH_PORT`.
-Se [docs/DEMO.md](docs/DEMO.md) for en demo på rundt to minutter, og
-[docs/PERSONVERN.md](docs/PERSONVERN.md) for hva loggen faktisk inneholder om folk.
-
-Bare én Lonewatch kan holde samme loggfil om gangen. Starter du en til, sier den fra og stopper uten å røre
-loggen; sett `LONEWATCH_LOG_PATH` til en annen fil hvis du vil kjøre to.
-
-### 4. Måling mot et uavhengig sett
-
-```bash
-python -m eval.measure
-```
-
-Kjører forespørsler skrevet av noen som ikke hadde sett reglene, med deres egen fasit, og skriver treff,
-bom og falske alarmer. Det finnes tre sett (`tests/data/blind_set_{1,2,3}.json`).
-
-**Det ærlige tallet er sett 3**, det eneste som ikke er brukt til å rette reglene etterpå:
-**11 av 15 farlige stoppet, 4 falske alarmer av 15 harmløse.** De fire som slapp gjennom er farlige
-på grunn av *innholdet* — et delt passord, en uverifisert påloggingslenke, navnet på en varsler, en
-skriftlig aksept av et forlik på 900 000 kr — og det ser ikke feltbaserte regler. Resultatet, og
-viktigere hva det *ikke* beviser, står i [docs/MALING.md](docs/MALING.md).
-
-### 5. Testene
-
-```bash
-pytest -q
-```
-
-651 tester går gjennom, og én er `xfail`: `test_sperrene_kan_ikke_omgaas_via_globals` i
-`tests/test_sandbox.py`. Den står som forventet feil med vilje, fordi hullet den beskriver ikke er lukket —
-se neste seksjon. Testene lager egne nøkler og skriver til en midlertidig mappe, så de krever ingen
-miljøvariabler og rører ikke loggen din.
-
-### 6. Ekte agent gjennom MCP (eget eksperiment)
-
-```bash
-python -m agent_gateway.oppsett     # lager nøkler og .mcp.json, én gang
-source .lonewatch-agent-env
-python -m ui                        # la den stå
-claude                              # i et annet vindu, fra samme mappe
-```
-
-Kobler en ekte Claude Code-agent til Lonewatch over MCP. Agenten får fire oppdiktede verktøy, og hvert
-verktøykall går gjennom den ekte `gateway.evaluate()`, den ekte låste loggen og det ekte røde varselet.
-Ingen API-nøkkel trengs. Oppskriften steg for steg står i
-[docs/EKTE_AGENT.md](docs/EKTE_AGENT.md).
-
-**Det store hullet, sagt med én gang:** Claude Codes egne verktøy (Bash, filer) går *utenom* Lonewatch.
-Dette er beskyttelse for kall som går via våre MCP-verktøy, og bare dem. Hele listen står i
-`agent_gateway/LIMITS.md`.
-
-Virker ikke agenten som den skal, finnes reserven — samme flyt, samme kode, manusstyrt, uten agent,
-uten oppsett og uten nett:
+### Den skriptede agentdemoen
 
 ```bash
 python -m agent_gateway.scripted_demo
 ```
 
-### Nyttige ekstra kommandoer
+Seks slag gjennom samme kode som den ekte agenten bruker, med samme regler og samme logg. Den
+trenger ingen nøkler, ingen app som kjører og ingen nett, og skriver loggen sin i en midlertidig
+mappe.
+
+### Den ekte agenten
 
 ```bash
-python -m gateway.evaluation                            # måling mot den syntetiske testmengden
-python -m sandbox                                       # kjører demotilleggene i boksen
-python -m sandbox nordlys-mail-connector-patch          # ett enkelt tillegg
+python -m agent_gateway.oppsett     # lager nøkler, .lonewatch-agent-env og .mcp.json, én gang
+source .lonewatch-agent-env
+python -m ui                        # la den stå
+claude                              # i et annet vindu, fra samme mappe
 ```
 
-## Hva Lonewatch IKKE gjør
+Kobler en ekte Claude Code-agent til Lonewatch over MCP. Agenten får fire oppdiktede verktøy, og
+hvert verktøykall går gjennom den ekte `gateway.evaluate()`, den ekte loggen og det ekte røde
+varselet. Ingen API-nøkkel trengs. Oppskriften steg for steg står i
+[docs/EKTE_AGENT.md](docs/EKTE_AGENT.md).
 
-Dette er en hackathon-simulering. De tre `LIMITS.md`-filene er den fulle listen; her er sammendraget,
-upyntet.
+Det store forbeholdet står i seksjon 8. Claude Codes egne verktøy går utenom Lonewatch.
 
-### Sandkassen er ikke isolasjon (`sandbox/LIMITS.md`)
+### Flere kommandoer
 
-Sperrene er funksjoner vi har byttet ut i den samme Python-prosessen som tillegget kjører i. Det er ikke en
-container, ikke en virtuell maskin, ikke `seccomp`. Et tillegg som kjører i samme prosess som sperrene sine,
-kan komme rundt dem: `open.__globals__["_REAL_BUILTINS_OPEN"]` gir den ekte funksjonen tilbake. Vi har prøvd
-det mot vår egen sandkasse, og det virker — derfor står det som `xfail` i testkjøringen i stedet for å være
-glemt. Samme vei gir også tilgang til agnlisten og hendelsesfilen, så et tillegg kan skrive falske hendelser
-inn i rapporten om seg selv. Dette kan ikke lukkes så lenge tillegget kjører i samme Python-prosess.
+```bash
+pytest -q                                      # hele testsuiten
+python -m eval.measure                         # måling mot et blindsett
+python -m gateway.evaluation                   # måling mot vår egen syntetiske mengde
+python -m sandbox                              # kjører demotilleggene i boksen
+python -m sandbox nordlys-mail-connector-patch # ett enkelt tillegg
+python -m executor.mailcatcher --dir maildrop --port 8025   # lokal postfanger
+python -m executor                             # fire forespørsler gjennom utføreren
+```
 
-Fem andre omveier virket første gang vi prøvde dem, og nummer fem fikk en ekte tilkobling ut mens vi trodde
-nettverket var sperret: `ctypes.CDLL(None).socket()`, `posix.open`, `_io.FileIO`, `_io.open` og
-`del sys.modules["_socket"]`. Alle er stengt nå. At vi fant fem på første forsøk er det sterkeste argumentet
-for at det finnes flere vi ikke har funnet.
+## 5. Hva som er ekte og hva som er simulert
 
-Et tillegg ser dessuten med en gang at miljøet er falskt: hjemmemappen heter `lonewatch-boks-*`, filene sier
-«FALSK DEMOFIL», `import ctypes` feiler, og `getaddrinfo` svarer aldri. Et tillegg skrevet for å unngå
-sandkasser oppfører seg pent hos oss og stjeler først på en ekte maskin. Da sier rapporten `clean`, og vi
-tar feil. Vi har ingen forsvar mot det.
+| Del | Status i demoen |
+|---|---|
+| Penger og overføringer | **Simulert.** Ingen betaling utføres, ingen bank er involvert |
+| Selskapet Nordlys Forsikring, kunder, poliser, kontonumre, leverandører | **Simulert.** Alt er oppdiktet |
+| Tillegg og «skadevare» | **Simulert.** Ufarlige etterligninger i `sandbox/packages/`. De leser demofiler sandkassen selv lager, og prøver adresser som slutter på `.invalid` |
+| Sandkassen | **Simulert isolasjon.** Sperrene er funksjoner i samme Python-prosess som tillegget |
+| Dokumentfellene | **Simulert.** Skjult tekst i oppdiktede dokumenter. Lonewatch leser den aldri som en instruksjon |
+| Personopplysningene | **Simulert.** Ingen av dem gjelder en virkelig person |
+| AI i avgjørelsene | **Finnes ikke.** `allow`, `red`, `block`, risiko og varseltekst lages av deterministiske regler |
+| Reglene, loggen, hash-kjeden, hale-ankeret, pseudonymene, beløpsporten, menneskenøkkelen | **Ekte kode.** Samme kode i demo og i test |
+| `send_email` | **Én ekte kobling.** Med `LONEWATCH_EXECUTOR=smtp` sendes e-posten over SMTP. Standardverten er `127.0.0.1:8025`, altså den lokale postfangeren, og sending til noe annet enn loopback krever `LONEWATCH_SMTP_ALLOW_REMOTE=1` satt med vilje |
 
-Vi ser bare ett kort øyeblikk: én kjøring, noen sekunder, `run()` kalt én gang. Et tillegg som er pent de
-første 100 gangene, venter til en bestemt dato, eller gjør noe først ved installasjon, går gjennom. Vi
-skanner én gang per pakkenavn per prosess, så to forespørsler om samme tillegg deler ett resultat og én
-logglinje. Vi leser aldri koden i tillegget. `clean` betyr «vi så ingenting», ikke «dette er trygt» — et
-tillegg som krasjer med én gang, eller som mangler `run()`, blir `not_tested` — ikke `clean`. Vi
-gjør det ikke til `blocked`, fordi en vanlig bug og et ondsinnet tillegg ville sett like ut; «vi vet
-ikke» er et ærligere svar enn «nei». Hullet som gjenstår er at et tillegg kan krasje med vilje.
-Motsatt kan et tillegg som
-trenger nettverket for å gjøre jobben sin aldri bli `clean`; det finnes ingen tillatelsesliste.
+Alt annet enn `send_email` går gjennom samme kontroll og gjør så ingenting. Ingen test i
+prosjektet peker ut mot internett. Hele regnskapet for utføreren står i
+[docs/UTFORER.md](docs/UTFORER.md).
 
-Demoen er snillere mot oss enn virkeligheten: tillegget fella ber om, har vi tilfeldigvis liggende, fordi
-vi har skrevet begge deler selv. For et ekte, ukjent tillegg er svaret «ikke testet», og da står
-`new_package`-regelen alene — akkurat som før sandkassen fantes.
+## 6. Testing og måling
 
-### Reglene ser bare på feltene i forespørselen (`gateway/LIMITS.md`)
+```bash
+pytest -q
+```
 
-`recipient_known`, `reversible` og `contains_personal_data` kommer fra den som lager forespørselen.
-Mellomstasjonen har ingen kontoliste, ingen leverandørregister og ingen skanner for personopplysninger.
-Setter en agent `recipient_known=True` på en ukjent konto, slipper den gjennom. Tilliten ligger ett hakk før
-oss, og det er det største hullet.
+{{TESTS}}
 
-Hukommelsen er én regel. `recipient_total_over_limit` summerer overføringer til **samme mottaker** innenfor
-24 timer (regnet fra forespørselens `ts`, ikke fra klokken) og blir rød når summen når beløpsgrensen — det
-lukker hullet der 100 betalinger på 49 999 kr gikk rett gjennom. Men beløp spredt over **mange** mottakere
-summeres ikke, historikken ligger i minnet og nullstilles ved omstart, og vi ser fortsatt ikke en agent som
-plutselig gjør tusen ganger mer enn vanlig, eller kjeden «les dokument med felle» → «overfør penger».
-`source_doc_id` logges, men brukes ikke i noen regel: en felle i et dokument påvirker ikke avgjørelsen.
+Testene lager egne nøkler og skriver til en midlertidig mappe, så de krever ingen miljøvariabler
+og rører ikke loggen din. Noen tester er merket `xfail` med vilje, fordi hullet de beskriver
+ikke er lukket. Da står hullet synlig i testkjøringen i stedet for å være glemt.
 
-Vi leser aldri innholdet. En e-post til en kjent mottaker kan inneholde hele kundebasen og blir fortsatt
-`allow`. Tillegg vurderes bare på navn — et farlig tillegg som heter `nordlys-core` slipper rett gjennom, og
-vi sjekker verken versjon eller utgiver.
+Falske alarmer er målt, ikke anslått. En alarm som lyser for ofte blir slått av, så tallet
+betyr noe.
 
-Sandkasserapporten tas for god fisk. `evaluate()` tar imot en ferdig `SandboxReport` og stoler på den.
-Rapporten er ikke signert, så den som kan kalle `evaluate()` kan finne opp en `clean`-rapport. Vi sjekker én
-ting: at rapporten gjelder samme pakkenavn som forespørselen. Det beviser at rapporten handler om riktig
-tillegg, ikke at den er ekte.
+{{FALSE_ALARMS}}
 
-Enkelthull vi kjenner: `requires_typed_amount` blir `True` også når `amount` mangler, og da har UI-et ikke
-noe tall å be om. `amount` brukes uansett handlingstype, så et stort beløp på en kalenderoppdatering gir
-rødt. Personopplysninger til en mottaker på Nordlys' eget domene gir aldri utslag; alt annet regnes som ut
-av huset. Men reglene teller ikke: én bekreftelse til én kunde og en masseutsending til 8400 veier likt, og
-å sende en kunde kundens egne opplysninger blir derfor rødt. En ny handlingstype i `contracts` får
-konsekvenstekst, men ingen regler, og blir derfor `allow`.
+Målingen er gjort mot blindsett, altså forespørsler skrevet av noen som ikke hadde sett reglene,
+med sin egen fasit på hva som burde stoppes. Settene ligger i `tests/data/` og kjøres med
+`python -m eval.measure --set <fil>`.
 
-Målingen beviser lite. `python -m gateway.evaluation` viser 15 av 15 farlige fanget og 2 falske alarmer av
-43 syntetiske forespørsler, men samme person skrev både reglene og testmengden. Den uavhengige målingen i
-[docs/MALING.md](docs/MALING.md) er ærligere, men reglene er nå justert ut fra det settet, så den er ikke
-uavhengig lenger heller. Den måler at koden gjør det
-vi mente, ikke at vi mente det riktige. Et angrep ingen av oss har tenkt på, står ikke i listen og blir
-derfor heller ikke målt. I samme testmengde er 11 av 43 røde; i et ekte selskap med tusenvis av
-forespørsler per dag må tersklene opp, ellers slutter folk å lese varselet, og vi måler ikke hvor mange
-røde et menneske faktisk tåler.
+**Blindsett 1, 2 og 3 er ikke uavhengige lenger.** Hvert sett var uavhengig én gang. Etterpå ble
+reglene justert ut fra hva settet fanget, og da måler settet bare at vi har fjernet feil vi
+kjenner. Tallene fra dem kan ikke svare på hva reglene gjør på saker de aldri har sett.
 
-### Loggen er ekte kryptert, men ikke et revisjonssikkert arkiv (`vault/LIMITS.md`)
+**Sett 4 er målt én gang, med reglene slik de står nå.** {{SET4}}
 
-Hash-kjeden oppdager at en linje er endret eller fjernet fra midten. Kutting av de *siste* linjene fanges
-av et signert hale-anker ved siden av loggen (`<logg>.head`), som husker hvor lang loggen var. Men den som
-har både loggen, ankeret og nøkkelen kan skrive om begge, og hele mappen kan slettes. Det finnes ingen kopi noe
-annet sted, ingen ekstern vitne-tjeneste og ingen «append only» på filsystemet. Den som har skrivetilgang og
-nøkkelen, kan lage en ny, kortere, helt gyldig logg.
+Hele målingen, med før- og ettertall, hva vi valgte å ikke rette og hvorfor, står i
+[docs/MALING.md](docs/MALING.md). `python -m gateway.evaluation` måler i tillegg mot en syntetisk
+mengde på 43 forespørsler, men den er skrevet av samme person som skrev reglene, så den måler at
+koden gjør det vi mente og ikke at vi mente det riktige.
 
-Nøkkelen i en miljøvariabel er bedre enn hardkoding, men hvem som helst med samme bruker på maskinen kan
-lese prosessens miljø, det finnes ingen rotasjon, og den som har nøkkelen kan lese alt. Fernet gir
-konfidensialitet og integritet med én delt nøkkel, men ingen signatur: loggen kan ikke bevise *hvem* som
-skrev en linje. `ts` er klokka på maskinen som skrev linjen, og den kan settes bakover — rekkefølgen er
-sikret, tidspunktet er en påstand.
+## 7. Angrepstesting
 
-Pseudonymene er 4 hex-tegn, altså 65 536 muligheter. Nok til at loggen ikke inneholder navn, men i et
-selskap med mange ansatte får to før eller senere samme kode. `reveal()` krever `role == "admin"`, men
-rollen er bare en streng den som kaller oppgir selv; det er ingen innlogging bak.
+Vi lot en «etisk hacker» bryte Lonewatch i to runder. Jobben var å finne hull i koden slik den
+sto, ikke å vise at den holdt. Hvert angrep er en kjørbar test i `tests/attack/` og
+`tests/attack2/`. Holder forsvaret, består testen. Finnes det et hull, er testen merket
+`xfail(strict=True)` med en begrunnelse. Lukkes hullet senere, feiler testen, og da må
+dokumentasjonen oppdateres i samme slengen. Et hull skal ikke kunne bli borte i stillhet.
 
-Nettappen tar en fillås (`flock` på en egen `<logg>.lock`) og nekter å starte hvis en annen Lonewatch
-holder loggen — den rører da ingen fil. Men låsen er frivillig: `Vault` selv tar den ikke, så `run_demo.py`
-og alt annet som lager en `Vault` direkte kan fortsatt skrive samtidig, overskrive hverandres `seq` og
-knekke kjeden. `flock` er heller ikke pålitelig over nettverksdisker, og uten `fcntl` (Windows) finnes
-låsen ikke. Det finnes ingen transaksjon.
+Begge rundene er skrevet ned åpent, med hva som slipper gjennom og hva som ville lukket det, i
+[docs/ANGREP.md](docs/ANGREP.md) og [docs/ANGREP2.md](docs/ANGREP2.md). En tidligere runde står i
+[docs/REDTEAM.md](docs/REDTEAM.md).
 
-Hele nettappen er uautentisert, og det gjelder også `POST /api/reset`, som arkiverer loggen og starter en
-ny. Appen binder bare `127.0.0.1` som standard, og nullstilling er synlig — ingenting slettes, og UI viser
-hvor den gamle loggen ble lagt — men en uautentisert «start ny logg» er et problem i seg selv.
+Dette er noe av det som er lukket. Godkjenning krever nå en egen menneskenøkkel, og agentens nøkkel
+avvises. Betenkningstiden måles av tjeneren i stedet for å oppgis av klienten. Pseudonymet følger
+nøkkelen som godkjente. Beløpstolkningen godtar ikke lenger `100000,00` som ti millioner.
+Mottakerfeltet kan ikke lenger skrive sin egen setning inn i varselet mennesket leser.
+Kontonumre normaliseres, så fire stavinger av samme konto er én mottaker. Tidsvinduet kan ikke
+omgås ved å tilbakedatere en betaling. `evaluate()` svarer `block` i stedet for å kaste på noe
+den ikke klarer å lese.
 
-Demoen logger med dataminimering på (`LONEWATCH_REDACT`, av med `=0`): agentens frie tekst
-(`summary`) kastes, mottakeren maskeres til siste fire tegn, konsekvensteksten kastes fordi den
-skriver ut mottakeren i klartekst, og en `allow`-avgjørelse krympes til id, risiko og verdikt.
-Men **beløpet, `agent_id`, `source_doc_id` og pakkenavnet blir stående**, og fellenes tekst og
-sandkassens notat maskeres ikke. Siste fire sifre pluss beløp pluss tidspunkt peker ofte på én
-transaksjon: dette er minimering, ikke anonymisering. Prisen er at loggen ikke lenger husker den
-eksakte setningen mennesket ble vist. `Vault()` selv har minimering av som standard.
+Dette er noe av det som står åpent. De tre feltene agenten fyller ut selv (`recipient_known`,
+`contains_personal_data`, `reversible`) kan brukes til å snakke seg forbi regler. Et tillegg kan
+bryte ut av sandkassen via `open.__globals__` og rapporten sier likevel `clean`. Flere
+skriveruter i appen er uautentiserte, blant andre `/api/reset`, `/api/custom` og
+`/api/feed/step`. `/api/state` viser full mottaker, agentens frie tekst og de interne regelnavnene
+i klartekst, altså nettopp det loggen minimerer bort. Beløp spredt over mange mottakere summeres
+ikke.
 
-En hash-kjedet logg som bare vokser, kan heller ikke rette seg etter et krav om sletting av
-persondata uten å knekke kjeden — en reell personvernkonflikt denne versjonen ikke løser. «Nullstill» i UI
-gir den gamle loggfilen et nytt navn og starter på linje 0; ingenting slettes, og UI viser hvor den gamle
-ble lagt, men den nye kjeden har ingen peker tilbake, så rekkefølgen *mellom* to logger er ikke sikret.
+{{HULL_STATUS}}
 
-### Det som ER ekte
+## 8. Ærlige begrensninger
 
-Fernet-kryptering per linje med nøkkel kun fra miljøvariabel. Hash-kjede fra `contracts.make_log_entry` /
-`verify_chain`, verifisert ved å lese og dekryptere filen på nytt fra disk, der `verify()` peker på `seq` til
-første linje som er endret, uleselig eller på feil plass. Et HMAC-signert hale-anker fanger kutting av de
-siste linjene, og «Sjekk loggen» viser de tolv første tegnene av siste hash, slik at den kan noteres utenfor
-maskinen. HMAC-SHA256-pseudonymer som ikke kan regnes
-tilbake uten nøkkelen. Etter-listen bygget bare fra logglinjer. Og sandkassen er en god detektor for et
-tillegg som ikke prøver å skjule seg — men det er en detektor, ikke en vegg.
+Dette er en hackathon-simulering. Listen under er hentet fra `LIMITS.md`-filene, og de er den
+fulle versjonen. Det er `gateway/LIMITS.md`, `vault/LIMITS.md`, `sandbox/LIMITS.md`,
+`ui/LIMITS.md`, `agent_gateway/LIMITS.md` og `executor/LIMITS.md`.
 
-## Simulering, ikke virkelighet
+- **Sandkassen er simulert, ikke isolasjon.** Sperrene er funksjoner vi har byttet ut i den samme
+  Python-prosessen som tillegget kjører i. Det er ikke en container, ikke en virtuell maskin og
+  ikke `seccomp`. `open.__globals__["_REAL_BUILTINS_OPEN"]` gir den ekte funksjonen tilbake. Vi
+  prøvde det mot vår egen sandkasse, og det virker. Fem andre omveier virket første gang vi
+  prøvde dem, og alle er stengt nå. At vi fant fem på første forsøk er det sterkeste argumentet
+  for at det finnes flere vi ikke har funnet. Et tillegg ser dessuten med en gang at miljøet er
+  falskt, og kan oppføre seg pent hos oss og stjele først på en ekte maskin.
+- **Reglene leser ikke innholdet i tekst.** En e-post til en kjent mottaker kan inneholde hele
+  kundebasen og blir fortsatt `allow`. I blindsett 3 slapp fire farlige saker gjennom
+  nettopp fordi det farlige sto i innholdet, blant annet et tjenestekontopassord og en skriftlig
+  aksept av et forlik på 900 000 kr. Det er en konsekvens av at vi aldri leser innhold og aldri
+  bruker `summary`, begge deler med vilje.
+- **Reglene stoler på feltene de får.** `recipient_known`, `reversible` og
+  `contains_personal_data` kommer fra den som lager forespørselen. Setter en agent
+  `recipient_known=True` på en ukjent konto, slipper den gjennom. Det er det største hullet, og
+  tilliten ligger ett hakk før oss.
+- **Agenten kan gå utenom hvis den har egne verktøy.** Claude Code har Bash, filtilgang og
+  nettverk, og ingen av dem går gjennom Lonewatch. Ber du agenten overføre penger og den velger
+  Lonewatch-verktøyet, ser du hele flyten. Skriver den i stedet et skript og kjører det med Bash,
+  ser du ingenting. En MCP-tjener legger til en vei, den fjerner ingen. **Produksjonsversjonen må
+  tvinge all trafikk gjennom Lonewatch med et nettverkslag, og det laget er ikke bygget.** Demoen
+  forutsetter at agenten frivillig bruker verktøyene, og det er en forutsetning, ikke en
+  sikkerhetsmekanisme.
+- **Menneskenøkkelen ligger på maskinen.** Den står i miljøet til terminalen som kjører appen og i
+  `.lonewatch-agent-env` på disken. En agent med Bash kan lese begge, og da kan den godkjenne sitt
+  eget røde kort mens loggen sier at et menneske gjorde det. En test gjør nøyaktig det en slik
+  agent ville gjort, og den skal bestå. Det som ville lukket det, er noe som ikke finnes på
+  maskinen i det hele tatt, en egen enhet eller konto slik BankID er.
+- **Ingen ekte brukere har testet produktet.** Ingen i målgruppen har brukt det, og vi måler ikke
+  hvor mange røde varsler et menneske faktisk tåler før det slutter å lese dem.
+- **Ingen roller og ingen innlogging per person.** Hele nettappen er uautentisert. `reveal()` på
+  pseudonymtabellen krever `role == "admin"`, men rollen er bare en streng den som kaller oppgir
+  selv. Deler to mennesker én menneskenøkkel, kan loggen ikke skille dem.
+- **Loggen er ekte kryptert, men ikke et revisjonssikkert arkiv.** Den som har både loggen,
+  hale-ankeret og nøkkelen kan skrive om begge, og hele mappen kan slettes. Det finnes ingen kopi
+  et annet sted og ingen ekstern vitne-tjeneste. Nøkkelen i en miljøvariabel kan leses av hvem som
+  helst med samme bruker på maskinen, og det finnes ingen rotasjon. En logg som bare vokser kan
+  heller ikke rette seg etter et krav om sletting av persondata uten å knekke kjeden. Hva loggen
+  faktisk inneholder om folk står i [docs/PERSONVERN.md](docs/PERSONVERN.md).
+- **Dataminimering er ikke anonymisering.** Agentens frie tekst kastes og mottakeren maskeres til
+  siste fire tegn, men beløpet, agent-id, dokument-id og pakkenavn blir stående. Siste fire sifre
+  pluss beløp pluss tidspunkt peker ofte på én transaksjon.
+- **Grensene er valgt for hånd.** 50 000 kr og 50 000 000 kr er satt for å få en god demo, ikke ut
+  fra en risikoanalyse. Vektene i regelsettet er valgt på samme måte.
 
-- **Nordlys Forsikring finnes ikke.** Selskapet, kundene, polisene, kontonumrene, leverandørene og
-  dokumentene er oppdiktet for demoen.
-- **Ingen ekte penger.** Alle beløp er tall i en simulering. Ingen betaling utføres, og ingen bank er
-  involvert.
-- **Ingen ekte skadekode.** «Skadevaren» i demoen er ufarlige etterligninger i `sandbox/packages/`. De leser
-  de oppdiktede demofilene sandkassen selv lager, og prøver å koble seg til adresser som slutter på
-  `.invalid` — et toppdomene som er reservert for nettopp dette og ikke kan slås opp. Sandkassen svarer nei,
-  og ingenting forlater maskinen.
-- **Ingen nettverk, ingen API-nøkkel.** Ingen del av prosjektet ringer ut. Ingen test peker ut på internett,
-  nettopp fordi en test som gjorde det, ville sendt ekte trafikk hvis en sperre falt ut.
-- **Ingen personopplysninger.** Ingen av «persondataene» i demoen gjelder en virkelig person.
-- **Ingen AI i avgjørelsene.** `allow`/`red`/`block`, risikonivå og konsekvenstekst lages av
-  deterministiske regler. `ActionRequest.summary` brukes aldri som grunnlag for risiko.
-- **Fellene er bare tekst.** En «felle» er skjult tekst i et oppdiktet dokument. Lonewatch leser den aldri
-  som en instruksjon, bare registrerer at den gikk av.
+## 9. Hva som kommer videre
 
-## Mappestruktur
+**Ingenting i denne seksjonen er bygget.** Det er listen over hva som måtte til for at Lonewatch
+skulle vært et produkt.
+
+- **Nettverkslag eller proxy** som tvinger all agenttrafikk gjennom Lonewatch, slik at det ikke
+  finnes en annen vei. Det er en innpakning av kjøremiljøet til agenten, ikke en MCP-tjener.
+- **En etablert sandkasse** i stedet for vår egen. Ekte isolasjon i operativsystemet, uten
+  nettverkskort, og flere kjøringer over tid. Vi bør integrere noe som finnes, ikke bygge det
+  selv.
+- **Kontoregister og innholdsklassifisering.** Et oppslag mot bank og leverandørsystem, slik at
+  «kjent mottaker» er et svar fra et register og ikke en påstand i et felt. Og en klassifisering
+  som kan se at innholdet er en hemmelighet eller en forpliktelse, som er det de fire farlige
+  sakene i blindsett 3 trengte.
+- **Innlogging og roller.** Autentisering foran alt som skriver eller nullstiller, én identitet
+  per person, og en godkjenning som krever noe som ikke ligger på maskinen.
+
+## 10. Bygget under
+
+Oslo Sprint Hackathon, 6. til 8. november 2026, BI Startup Village. Alt er bygget under
+hackathonet, solo av Benjamin Sundby.
+
+## 11. Hvordan prosjektet er organisert
 
 ```
-lonewatch/
-├── contracts.py          Felles typer. LÅST: ActionRequest, Decision, HumanResponse,
-│                         TrapEvent, SandboxReport, AfterAction, LogEntry + hash-kjeden
-├── run_demo.py           Hele flyten én gang gjennom, i terminalen
-├── agent_gateway/        MCP-broen mot en ekte Claude Code-agent + manusstyrt reserve
-├── requirements.txt      pydantic, pytest, cryptography, fastapi, uvicorn
-├── pytest.ini
-├── CLAUDE.md             Spilleregler, mappeeierskap og grensesnitt
-├── PROMPTS.md            Promptene prosjektet ble bygget med
-├── README.md
-├── design-handoff/       Designsystemet som referanse (ikke kjørt av appen)
-├── docs/
-│   ├── DEMO.md           Demofortelling på rundt to minutter
-│   ├── MALING.md         Måling mot et uavhengig blindsett, før og etter
-│   ├── PERSONVERN.md     Hva loggen faktisk inneholder om folk
-│   └── REDTEAM.md        Angrepstest med reproduserte funn
-├── eval/
-│   └── measure.py        python -m eval.measure
-├── agents/               Simulerte agenter og demodata
-│   ├── scenarios.py      40 forespørsler fra fem agenter, 36 harmløse
-│   ├── story.py          Hovedscenarioet: 11 steg over 90 sekunder
-│   └── traps.py          Dokumenter med usynlig felle + TrapEvent
-├── gateway/              Mellomstasjonen
-│   ├── __init__.py       evaluate(req, sandbox_report=None) -> Decision
-│   ├── rules.py          Én funksjon per regel, navnet havner i Decision.reasons
-│   ├── money.py          Beløp i hele øre: samme tall til vurdering og visning
-│   ├── config.py         Grenser, lister og vekter
-│   ├── consequence.py    Norsk klartekst fra maler, aldri fra AI eller summary
-│   ├── evaluation.py     Måling mot en syntetisk testmengde på 43
-│   └── LIMITS.md         Hull i regelsettet
-├── vault/                Den låste loggen
-│   ├── store.py          Vault.append / verify / verify_detail, Fernet per linje,
-│   │                     archive_log, acquire_log_lock (én Lonewatch om gangen)
-│   ├── anchor.py         Hale-anker: <logg>.head, HMAC-signert
-│   ├── crypto.py         Nøkler fra miljøvariabler, ingen standardnøkkel
-│   ├── identity.py       pseudonymize / register_employee / reveal
-│   ├── redaction.py      Dataminimering (på i demoen, LONEWATCH_REDACT)
-│   ├── after.py          Etter-listen, bygget kun fra logglinjer
-│   ├── gen_key.py        python -m vault.gen_key
-│   └── LIMITS.md         Hull i loggen
-├── sandbox/              Den lukkede boksen
-│   ├── runner.py         Setter opp boksen, starter delprosessen, scan / scan_cached
-│   ├── harness.py        Koden som kjører inne i delprosessen, med sperrene
-│   ├── fake_home.py      Falsk hjemmemappe med oppdiktede filer og agn
-│   ├── report.py         Hendelser -> SandboxReport (clean / blocked / not_tested)
-│   ├── config.py         Tidsgrense, grenser, demotillegg
-│   ├── packages/         Demotilleggene, ufarlige etterligninger
-│   └── LIMITS.md         Hvorfor dette ikke er isolasjon
-├── ui/                   Nettsiden
-│   ├── app.py            FastAPI: /api/state, /api/feed/step, /api/respond,
-│   │                     /api/custom, /api/overview, /api/verify, /api/after,
-│   │                     /api/story/*, /api/reset
-│   ├── overview.py       Tallene til dashbordet, regnet fra loggen
-│   ├── state.py          Tilstanden bak siden. Ingen regler her
-│   ├── amount.py         Hvordan et skrevet beløp tolkes (fasiten)
-│   └── static/           index.html, app.js, amount.js, style.css,
-│                         dashboard/ (design-handoff + skrift), vendor/ (React, MIT)
-├── examples/             Eksempler på JSON for hver type i contracts
-└── tests/                556 tester + 1 xfail. test_contracts.py røres ikke
+contracts.py        Felles typer, låst. ActionRequest, Decision, HumanResponse,
+                    TrapEvent, SandboxReport, AfterAction, LogEntry og hash-kjeden
+gateway/            Kontrollstasjonen. Regler, risikopoeng, grenser, norsk konsekvenstekst
+vault/              Den låste loggen. Fernet per linje, hash-kjede, hale-anker,
+                    pseudonymer, Etter-listen, «Bryt loggen»
+sandbox/            Den lukkede boksen. Kjører et tillegg i en delprosess og skriver ned
+                    hva det gjorde. Demotilleggene ligger i sandbox/packages/
+agents/             Simulerte agenter, de 40 demoforespørslene, hovedscenarioet og
+                    dokumentene med skjult tekst
+agent_gateway/      MCP-broen mot en ekte Claude Code-agent, og den skriptede reserven
+executor/           Det eneste som rører omverdenen. send_email over SMTP, resten simulert.
+                    Inneholder også den lokale postfangeren
+ui/                 Nettsiden. Oversikt, godkjenningskø med beløpsport og menneskenøkkel,
+                    Før, Etter og Prøv selv
+eval/               Måling mot blindsettene
+docs/               DEMO, MALING, ANGREP, ANGREP2, REDTEAM, EKTE_AGENT, UTFORER, PERSONVERN
+tests/              Testsuiten, inkludert angrepstestene i attack/ og attack2/
 ```
+
+Alle typer importeres fra `contracts.py`. Grensesnittene mellom modulene står i
+[CLAUDE.md](CLAUDE.md), og promptene prosjektet ble bygget med står i [PROMPTS.md](PROMPTS.md).
