@@ -17,8 +17,8 @@ maa denne filen oppdateres i samme slengen. **Et hull skal ikke kunne bli borte 
 stillhet.**
 
 ```bash
-pytest tests/attack2/     # 125 passed, 9 xfailed (etter runde tre)
-pytest -q                 # 1438 passed, 43 xfailed (hele suiten)
+pytest tests/attack2/     # 152 passed, 7 xfailed, 1 feil (miljøavhengig, se H28 i ANGREP.md) (samlet4)
+pytest -q                 # 1578 passed, 25 xfailed, 1 xpassed, 1 feil (samlet4)
 ```
 
 **Oppdatert etter runde tre.** Fem av hullene under er lukket (A1, A10, A11,
@@ -48,7 +48,7 @@ internett: oppdiktede adresser bruker `.example`/`.invalid` eller RFC 5737-nette
 | 3 | **vault: redigering/minimering** | **DELVIS** | Summary og full mottaker fjernes. Men `what_happened` og sandkassens `notes` maskeres aldri, og mottakeren maskeres bare til siste fire tegn (LIMITS#7). |
 | 4 | **vault: kjede + hale-anker** | **DELVIS** | Endring midt i, kuttet hale med anker, halv linje: alt fanges. Men full utsletting (logg+anker) ser tom ut, og med noekkelen kan alt skrives om eller byttes (LIMITS#1/12). |
 | 5 | **vault: fil-laasing** | **DELVIS** | Flock stopper to apper. Men Vault selv tar ingen laas: to Vault-objekter mot samme fil knekker kjeden (LIMITS#6). verify() ser det, men hindrer det ikke. |
-| 6 | **sandbox: r0emning** | **DELVIS** | Noekler laekker ikke inn, import av vault/gateway er sperret, naive filskriv stoppes, nettet er sperret, tidsgrensen virker. Men `open.__globals__` bryter ut og leser filer utenfor boksen - og rapporten sier `clean`. |
+| 6 | **sandbox: r0emning** | **DELVIS** (klart bedre, ikke lukket) | De to konkrete angrepene (`open.__globals__` og aa forfalske hendelsesfilen) stoppes: en statisk sjekk avviser kjente moenstre foer kjoering, sperrene ligger i lukninger, og globals er byttet ut med snarer som skriver `guard_bypass`. Rapporten sier bare `clean` naar sperrene bevisst staar igjen (`guards_intact`), ellers `not_tested`/`blocked`. Men Python i samme prosess kan ikke sikres: en rommingsmetode vi ikke har tenkt paa gir fortsatt `clean`. Ekte isolasjon er ikke bygget (`sandbox/LIMITS.md`). |
 | 7 | **kapploep** | **HOLDER** | RLock serialiserer respond() og submit. Et kort faar noeyaktig ett utfall, samtidige submits faar unike id-er, kjeden forblir hel. |
 | 8 | **last / tjenestenekt** | **LUKKET** (runde 3) | Feltgrenser og dyp JSON haandteres uten krasj. Og naa: 64 KB kroppsgrense (413), 200 aktive kort, 30 kall per minutt per agentnoekkel (429). Endepunktet er dessuten ikke uautentisert lenger. |
 | 9 | **de oevrige rutene** | **LUKKET for skriverutene** (runde 3) | Lese-ruter endrer ikke loggen og laekker ingen noekkel. /api/reset arkiverer (sletter ikke) OG krever naa menneskenoekkelen - sammen med /api/custom, /api/feed/step, /api/story/* og den nye /api/tamper. Igjen: /api/trail er ikke delt i to nivaaer. |
@@ -159,8 +159,8 @@ utenfor maskinen.
 | id | Omraade | Alvor | Kilde | Hva slipper gjennom | Fiks |
 |---|---|---|---|---|---|
 | A1 | state-lekkasje | **hoey** | **Ny** | **LUKKET (runde 3).** Var: /api/state viste full mottaker, full summary og regelnavn i klartekst, uautentisert | Gjort: to nivaaer, allowliste uten noekkel, samme maskering som loggen |
-| A2 | sandbox | **kritisk**\* | Dok. | `open.__globals__` leser fil utenfor boksen; rapporten sier `clean` | Ekte OS-isolasjon |
-| A3 | sandbox | **hoey**\* | Dok. | Samme vei naar hendelsesfilen: tillegget forfalsker sin egen rapport | Samme |
+| A2 | sandbox | **kritisk**\* | Lukket for dette angrepet | `open.__globals__` leser fil utenfor boksen; rapporten sa `clean`. Naa: statisk sjekk avviser moensteret, og snare i globals skriver `guard_bypass` -> `blocked` | Ekte OS-isolasjon for resten |
+| A3 | sandbox | **hoey**\* | Lukket | Tillegget forfalsket sin egen rapport via `_events`. Naa ligger hendelsesskriveren i en lukning; navnet peker paa en snare | Samme |
 | A4 | kjeding | **kritisk** | Dok. (H14+H6) | Loegn + staving: 147 000 kr til én konto, 3x allow | Normaliser + kontoregister |
 | A5 | kjeding | **hoey** | Dok. (H14+H7) | Loegn + tilbakedatert ts: 245 000 kr, 5x allow | Summer paa mottakstid |
 | A6 | vault-kjede | **hoey** | Dok. (LIMITS#1) | Slett logg+anker -> «Loggen er tom» | Anker utenfor maskinen |

@@ -13,8 +13,11 @@ borte i stillhet.** Det er nøyaktig det som har skjedd nå: sju hull er lukket 
 tabellene under er skrevet om. Testene for dem står nå som vanlige tester.
 
 ```bash
-pytest tests/attack/     # 212 passed, 33 xfailed
-pytest -q                # 1364 passed, 47 xfailed (hele suiten)
+pytest tests/attack/     # 248 passed, 18 xfailed
+pytest -q                # 1578 passed, 25 xfailed, 1 xpassed (hele suiten, samlet4)
+# Pluss 1 feil som er miljøavhengig, ikke en regresjon: tests/attack2/test_attack_dos.py::
+# test_deeply_nested_json_does_not_crash gir RecursionError på Python 3.13 med nyeste FastAPI,
+# også på samlet3. På Python 3.11 består den. Ikke undersøkt videre; se H28.
 ```
 
 > **Runde 2 (menneskenøkkelen og utføreren) og hullene i `gateway/`.** H1, H2 og H3
@@ -258,9 +261,9 @@ beviser det.
 | H8 | 3 | lav (bevisst) | ja | **HULL** | Vinduet er 24 timer. 49 000 kr hver 25. time er 490 000 kr på to uker. Krever flere vinduer eller et tak per periode — en ny regel med egen falsk-alarm-kostnad, ikke målt |
 | H9 | 3 | middels | ja | **HULL** | Summen er bare per mottaker. 10 × 49 000 kr til 10 kontoer er `allow`. Sum per agent-id er en ny regel, ikke målt |
 | H10 | 3 | middels | ja | **HULL** | `history` har standardverdi `None`. Å gjøre den påkrevd endrer grensesnittet og tvinger endringer i `ui/`, `agent_gateway/` og `run_demo.py` |
-| H11 | 5 | **høy** | ja | **HULL** | Ingen skanner for skjult tekst. Hører til `agents/` (fellene) |
-| H12 | 5 | middels | ja | **HULL** | `found_markers()` leter etter fire faste strenger. Hører til `agents/` |
-| H13 | 5 | lav | ja | **HULL** | Bare metadata-nøkkelen `x-lw-instruction` gjenkjennes. Hører til `agents/` |
+| H11 | 5 | **høy** | ja | **LUKKET** (runde 4) | `agents/doc_scan.py` skanner innholdet, ikke `doc_id`. Et nytt dokument med skjult instruksjon gir felle, logglinje og varsel. Gjelder demoen og historien; for en ekte agent er veien inn ikke bygget ennå (`source_doc_id` kommer ikke fra `lonewatch_read_document`, se `agent_gateway/LIMITS.md` punkt 13). Fellen stopper heller ikke noe, den gir en logglinje og et varsel |
+| H12 | 5 | middels | ja | **LUKKET** (runde 4) | 15 skjulemekanismer gjenkjennes på mekanisme, ikke på fire faste strenger (HTML-kommentar, `display:none`, `opacity:0`, `font-size:0`, hvit-på-hvit i fem skrivemåter, nullbredde-tegn, snudd leseretning, utenfor skjermen, `hidden`, skjult tekstlag m.fl.). Skanneren sier HVILKEN mekanisme. Blindsoner: tekst i bilder, kodede strenger, ukjente språk (`agents/LIMITS.md`) |
+| H13 | 5 | lav | ja | **LUKKET** (runde 4) | Alle metadata-verdier leses, uansett nøkkelnavn (`subject`, `producer`, `keywords`, `comment`, `author` er testet) |
 | H14 | 6 | **kritisk** | nei (LIMITS) | **HULL** | `recipient_known=True` på en ukjent konto kjøper hele båndet 0–49 999,99 kr. Krever et kontoregister Lonewatch eier — ikke noe `gateway/` kan finne på selv |
 | H15 | 6 | **kritisk** | nei (LIMITS) | **HULL** | `contains_personal_data=False` kjøper 3 poeng. Krever en klassifisering av innholdet |
 | H16 | 6 | høy | ja | **HULL** (smalere) | Samme løgn er nåbar fra «Prøv selv»-skjemaet. `/api/custom` krever nå menneskenøkkelen, så den som lyver må ha nøkkelen — men løgnen virker fortsatt, fordi den hviler på de tre bryterne i H14/H15/H17. Skjemaet regner selv ut `recipient_known` og `reversible`; `contains_personal_data` kan fortsatt benektes, og det krever en innholdsklassifisering `ui/` ikke har |
@@ -272,6 +275,7 @@ beviser det.
 | H22 | 6 | **høy** | ja | **LUKKET** (to ganger) | Prefikset teller bare på handlinger som ikke sender noe ut av huset (falske-alarmer-økten), OG det som følger prefikset må nå matche `INTERNAL_RESOURCE_PATTERN` — ingen `@`, ingen punktum-domene, ingen `//` |
 | H23 | 7 | lav | ja | **LUKKET** | `evaluate()` svarer `block` med `reasons=["unjudgeable_request"]` på alt den ikke kan lese. Fail-closed er nå en egenskap ved svaret. Den ene feilen som fortsatt kastes er `SandboxReportMismatch`, med vilje |
 | H24 | 7 | lav | ja | **DELVIS LUKKET** | «Sandkassen ble aldri spurt» og «fikk ikke testet» er nå to ulike setninger. Men gateway kan fortsatt ikke VITE at kalleren glemte sandkassen: det krever at rapporten er påkrevd for `install_package`, en avtale med `sandbox/` |
+| H28 | — | lav | ja | **ÅPENT** (miljøavhengig) | Dypt nøstet JSON gir `RecursionError` i `fastapi.encoders.jsonable_encoder` på Python 3.13 med nyeste FastAPI (test: `tests/attack2/test_attack_dos.py::test_deeply_nested_json_does_not_crash`). Består på Python 3.11. Ikke undersøkt om det gir en 500-feil eller verre. Feiler likt på samlet3 |
 
 ### Nye hull i runde 2
 
@@ -474,7 +478,7 @@ tre angrepsfilene for angrep 3, 6 og 7. Alt under står igjen, med eier:
 | H8 | Vinduet er 24 timer; tålmodighet virker | `gateway/`, men en ny regel (flere vinduer eller tak per periode) med egen falsk-alarm-kostnad. Ikke målt |
 | H9 | Summen er bare per mottaker, ikke per agent | `gateway/`, samme sak: ny regel, ikke målt |
 | H10 | `history` er frivillig | Grensesnittet mellom `gateway/` og kallerne. Å gjøre den påkrevd tvinger endringer i `ui/`, `agent_gateway/` og `run_demo.py` |
-| H11, H12, H13 | Ingen skanner for skjult tekst; fellene er en kulisse | `agents/` |
+| ~~H11, H12, H13~~ | ~~Ingen skanner for skjult tekst; fellene er en kulisse~~ — LUKKET i runde 4 (`agents/doc_scan.py`). Restgap: en ekte agent sender ikke `source_doc_id`, så fellene virker bare i demoen og historien | `agents/` (gjort), `agent_gateway/`+`ui/` for den ekte veien |
 | H14, H15, H17, H18, H19 | De tre bryterne agenten setter selv | Krever et kontoregister, en innholdsklassifisering og en handlingstype utledet av verktøykallet. Ingen av dem finnes i prosjektet, og ingen av dem kan `gateway/` finne på alene. Ærlig dokumentert i `gateway/LIMITS.md` |
 | H24 (resten) | Gateway kan ikke VITE at sandkassen aldri ble spurt | Grensesnittet mellom `gateway/` og `sandbox/`: rapporten måtte være påkrevd for `install_package` |
 | — | Tidsstempel satt jevnt FRAMOVER omgår vinduet | Et krav til kallerne: send inn mottakstiden. Beskrevet med alternativer i `gateway/LIMITS.md`, «Tidsvinduet hviler til slutt på at noen forteller oss hva klokken er» |
