@@ -17,13 +17,22 @@ maa denne filen oppdateres i samme slengen. **Et hull skal ikke kunne bli borte 
 stillhet.**
 
 ```bash
-pytest tests/attack2/     # 51 passed, 13 xfailed (etter sammenslaaing med herd-gw og herd-ui)
-pytest -q                 # 1364 passed, 47 xfailed (hele suiten)
+pytest tests/attack2/     # 125 passed, 9 xfailed (etter runde tre)
+pytest -q                 # 1438 passed, 43 xfailed (hele suiten)
 ```
 
+**Oppdatert etter runde tre.** Fem av hullene under er lukket (A1, A10, A11,
+A12 og H27 fra `docs/ANGREP.md`), og to nye angrepsfiler er lagt til:
+`test_attack_tamper_route.py` (den nye «Bryt loggen»-ruten) og
+`test_attack_executor_gate.py` (kan noe bli utfoert uten en beskyttet rute?).
+Testene som var `xfail(strict=True)` paa de lukkede hullene er naa vanlige
+tester - de passerte med XPASS, og et hull som blir borte skal ikke bli borte i
+stillhet, heller ikke naar det blir borte fordi noen fikset det.
+
 Alt kjoerte lokalt mot simuleringen, paa `127.0.0.1` med ferske engangsnoekler og
-loggfil i tmp (`tests/conftest.py` + en ekstra sperre i
-`tests/attack2/conftest.py` som nekter aa kjoere hvis loggstien ikke er tmp).
+loggfil i tmp (`tests/conftest.py` + en ekstra sperre, autouse-fiksturen
+`refuse_to_touch_real_log` i `tests/attack2/attack_lib2.py`, som nekter aa kjoere
+hvis loggstien ikke er tmp).
 Ingen noekkel staar i noen test eller i denne filen. Ingen sonde peker ut mot
 internett: oppdiktede adresser bruker `.example`/`.invalid` eller RFC 5737-nettet
 `192.0.2.0/24`. Alle servere angrepene starter blir stoppet igjen.
@@ -41,23 +50,27 @@ internett: oppdiktede adresser bruker `.example`/`.invalid` eller RFC 5737-nette
 | 5 | **vault: fil-laasing** | **DELVIS** | Flock stopper to apper. Men Vault selv tar ingen laas: to Vault-objekter mot samme fil knekker kjeden (LIMITS#6). verify() ser det, men hindrer det ikke. |
 | 6 | **sandbox: r0emning** | **DELVIS** | Noekler laekker ikke inn, import av vault/gateway er sperret, naive filskriv stoppes, nettet er sperret, tidsgrensen virker. Men `open.__globals__` bryter ut og leser filer utenfor boksen - og rapporten sier `clean`. |
 | 7 | **kapploep** | **HOLDER** | RLock serialiserer respond() og submit. Et kort faar noeyaktig ett utfall, samtidige submits faar unike id-er, kjeden forblir hel. |
-| 8 | **last / tjenestenekt** | **DELVIS** | Feltgrenser og dyp JSON haandteres uten krasj. Men ingen grense paa kroppsstoerrelse og ingen grense paa antall kort, mot et uautentisert endepunkt. |
-| 9 | **de oevrige rutene** | **DELVIS** | Lese-ruter endrer ikke loggen og laekker ingen noekkel. /api/reset arkiverer (sletter ikke) - men er uautentisert (H4/LIMITS#10). |
+| 8 | **last / tjenestenekt** | **LUKKET** (runde 3) | Feltgrenser og dyp JSON haandteres uten krasj. Og naa: 64 KB kroppsgrense (413), 200 aktive kort, 30 kall per minutt per agentnoekkel (429). Endepunktet er dessuten ikke uautentisert lenger. |
+| 9 | **de oevrige rutene** | **LUKKET for skriverutene** (runde 3) | Lese-ruter endrer ikke loggen og laekker ingen noekkel. /api/reset arkiverer (sletter ikke) OG krever naa menneskenoekkelen - sammen med /api/custom, /api/feed/step, /api/story/* og den nye /api/tamper. Igjen: /api/trail er ikke delt i to nivaaer. |
 | 10 | **kjeding ende-til-ende** | **LUKKET for staving og tilbakedatering** (herd-gw: H6, H7) | Rundet av runde 2 mot koden FOER rettelsene: H14 + H6 og H14 + H7 flyttet >100 000 kr til én konto uten ett roedt kort. Etter sammenslaaingen stoppes begge. H14 (loegn om `recipient_known`) og H9 (mange kontoer) staar igjen. |
-| 11 | **informasjonslekkasje** | **HULL (nytt)** | /api/state er uautentisert og viser full mottaker, full summary og de interne regelnavnene i klartekst - akkurat det loggen minimerer bort. |
+| 11 | **informasjonslekkasje** | **LUKKET** (runde 3) | Var: /api/state uautentisert med full mottaker, full summary og interne regelnavn. Naa to nivaaer - uten noekkel en allowliste med tellere, status, risiko og en mottaker maskert med samme funksjon loggen bruker. |
 
-**15 hull ved runden, 13 aapne etter sammenslaaingen** (13 `xfail(strict=True)`; kjedehullene H6/H7 er lukket av `herd-gw`). Tre er helt nye (staar ikke i
-`docs/ANGREP.md` og ikke i noen `LIMITS.md`): ingen kroppsgrense, ingen
-kortgrense, og at `/api/state` laekker raa persondata og regelnavn. Resten er
-forbehold prosjektet selv har skrevet ned i `vault/LIMITS.md` og
-`sandbox/LIMITS.md` - her er de maalt og gjort kjoerbare for foerste gang, eller
-satt sammen til et angrep ende-til-ende.
+**15 hull ved runden. 9 aapne etter runde tre.** Kjedehullene H6/H7 ble lukket av
+`herd-gw`; A1, A10, A11 og A12 er lukket av runde tre. De tre som var HELT nye i
+runde to (ingen kroppsgrense, ingen kortgrense, og at `/api/state` laekket raa
+persondata og regelnavn) er alle tre lukket. Det som staar igjen er
+`sandbox/`-utbruddet (A2/A3), de to kjedehullene som hviler paa bryterne agenten
+setter selv (A4/A5), de tre vault-hullene som krever et anker eller en noekkel
+utenfor maskinen (A6/A7/A8), laasen (A9) og de tre smaa
+minimerings-/pseudonymhullene (A13/A14/A15) - altsaa forbehold prosjektet selv
+har skrevet ned i `vault/LIMITS.md` og `sandbox/LIMITS.md`, pluss ett i
+`gateway/LIMITS.md`. Ingen av dem ligger i `ui/`.
 
 ---
 
 ## De fem alvorligste
 
-### 1. `/api/state` laekker raa persondata og regelnavn (nytt)
+### 1. `/api/state` laekker raa persondata og regelnavn (nytt) - **LUKKET i runde tre**
 `tests/attack2/test_attack_infoleak.py`
 
 Loggen er omhyggelig minimert: full mottaker maskeres, agentens frie `summary`
@@ -69,6 +82,24 @@ agenten), og `decision.reasons` med de interne regelnavnene
 personopplysningene loggen gjemmer, og en oppskrift paa hvilke regler som slo
 til. **Saa lett aa utnytte som ett `GET /api/state`.**
 **Fiks:** autentiser, eller send ut det samme minimerte synet som loggen.
+
+**Gjort i runde tre, og det ble det andre.** Ruten har naa to nivaaer. Uten
+menneskenoekkelen bygges svaret av `ui.state.minimized_snapshot()`, en
+ALLOWLISTE: tellere, status, risiko, utfall, og en mottaker maskert med
+`vault.redaction.mask_recipient` - noeyaktig funksjonen loggen bruker, saa den
+laaste siden kan per konstruksjon ikke vise mer av en konto enn loggen gjoer.
+`summary`, `decision.reasons`, konsekvensteksten, sandkasserapportene, notisene
+og arkivstien er ikke med. Med noekkelen: alt, som foer.
+
+Hvorfor allowliste og ikke «fjern de tre feltene»: et nytt felt i `snapshot()`
+skal som standard IKKE naa en uinnlogget leser. Glemmer noen aa legge det til i
+listen, mangler det paa den laaste siden - en synlig feil. Med en denyliste ville
+det lekket i stillhet, og det er samme feil om igjen.
+
+Hvorfor to nivaaer og ikke 403: et `/api/state` som nekter, gjoer nettsiden tom
+foer noen har logget inn - og da ser ingen at det ER en mellomstasjon her. Hele
+begrunnelsen staar i `ui/LIMITS.md` punkt 10, med hva den IKKE loeser
+(nivaaet foelger noekkelen, ikke en person; `/api/trail` er ikke delt).
 
 ### 2. Sandkassen bryter ut via `open.__globals__` og sier likevel «clean»
 `tests/attack2/test_attack_sandbox_escape.py`
@@ -96,7 +127,7 @@ eller agentens verktoeylag, ikke HTTP-skjemaet (der regnes `recipient_known` ut)
 **Fiks:** normaliser bort alt som ikke er bokstav/siffer, summer paa mottakstid,
 og slaa mottakeren opp i et kontoregister i stedet for aa tro paa feltet.
 
-### 4. Full utsletting av loggen ser ut som en tom logg
+### 4. Full utsletting av loggen ser ut som en tom logg (staar igjen)
 `tests/attack2/test_attack_vault_chain_anchor.py`
 
 Hale-ankeret fanger en kuttet hale - men bare saa lenge ankeret staar. Sletter
@@ -127,7 +158,7 @@ utenfor maskinen.
 
 | id | Omraade | Alvor | Kilde | Hva slipper gjennom | Fiks |
 |---|---|---|---|---|---|
-| A1 | state-lekkasje | **hoey** | **Ny** | /api/state viser full mottaker, full summary og regelnavn i klartekst, uautentisert | Autentiser, eller send ut det minimerte synet |
+| A1 | state-lekkasje | **hoey** | **Ny** | **LUKKET (runde 3).** Var: /api/state viste full mottaker, full summary og regelnavn i klartekst, uautentisert | Gjort: to nivaaer, allowliste uten noekkel, samme maskering som loggen |
 | A2 | sandbox | **kritisk**\* | Dok. | `open.__globals__` leser fil utenfor boksen; rapporten sier `clean` | Ekte OS-isolasjon |
 | A3 | sandbox | **hoey**\* | Dok. | Samme vei naar hendelsesfilen: tillegget forfalsker sin egen rapport | Samme |
 | A4 | kjeding | **kritisk** | Dok. (H14+H6) | Loegn + staving: 147 000 kr til én konto, 3x allow | Normaliser + kontoregister |
@@ -136,12 +167,17 @@ utenfor maskinen.
 | A7 | vault-kjede | **kritisk**\*\* | Dok. (LIMITS#1/12) | Med noekkelen: skriv om hale + signer nytt anker | To noekler, eksternt anker |
 | A8 | vault-kjede | **kritisk**\*\* | Dok. (LIMITS#1/12) | Med noekkelen: bytt inn en HELT annen gyldig kjede | Samme |
 | A9 | vault-laas | middels | Dok. (LIMITS#6) | To Vault paa samme fil knekker kjeden (verify ser det, hindrer det ikke) | Transaksjon / Vault tar laasen selv |
-| A10 | last | middels | **Ny** | Ingen grense paa kroppsstoerrelse; MB-store kropper bufres og aksepteres | Max-body-size foran appen |
-| A11 | last | middels | **Ny** | Ingen grense paa antall kort; uautentisert /api/custom fyller minne og logg | Tak paa aktive kort + rate |
-| A12 | reset | middels | Dok. (H4/LIMITS#10) | /api/reset er uautentisert; spoler historien og toemmer koeen | Innlogging foran skrivende ruter |
+| A10 | last | middels | **Ny** | **LUKKET (runde 3).** Var: ingen grense paa kroppsstoerrelse; MB-store kropper bufres og aksepteres | Gjort: 64 KB (`MAX_BODY_BYTES`), ren ASGI-middleware som ogsaa teller byte naar `Content-Length` mangler eller juger |
+| A11 | last | middels | **Ny** | **LUKKET (runde 3).** Var: ingen grense paa antall kort; uautentisert /api/custom fylte minne og logg | Gjort: 200 aktive kort (`MAX_CARDS`, nekter - kaster aldri et gammelt kort), 30/min per agentnoekkel, og /api/custom krever noekkelen |
+| A12 | reset | middels | Dok. (H4/LIMITS#10) | **LUKKET (runde 3).** Var: /api/reset uautentisert; spolte historien og toemte koeen | Gjort: menneskenoekkelen foran alle skrivende ruter. Agentnoekkelen avvises paa alle |
 | A13 | minimering | lav | Dok. (LIMITS#7) | Fellens `what_happened` maskeres aldri; kan baere e-post/konto i klartekst | Vask fri tekst / maskér moenstre |
 | A14 | minimering | lav | Dok. (LIMITS#7) | Sandkassens `notes` har adressen i klartekst selv om `destinations` er maskert | Samme |
 | A15 | pseudonym | lav | Dok. (LIMITS#5) | 4 hex = 16 bit: to ansatte faar samme kode (kollisjon) | Flere tegn / entydig tabell |
+
+**Etter runde tre:** A1, A10, A11 og A12 er lukket. **9 staar igjen**: A2, A3
+(sandkassen), A4, A5 (kjeding paa bryterne agenten setter selv), A6, A7, A8
+(vault-kjeden, krever et anker eller en noekkel utenfor maskinen), A9 (laasen) og
+A13, A14, A15 (minimering og pseudonymkollisjoner). Ingen av dem ligger i `ui/`.
 
 \* Alvor gjelder en ekte sandkasse. I denne demoen sier `sandbox/LIMITS.md` hoeyt
 at dette ikke er isolasjon, saa det er et ærlig forbehold, ikke en skjult feil.
@@ -202,11 +238,28 @@ Like viktig som funnene. Alt under er **uproevd denne runden** - ikke «trygt».
   noekkel-/loopback-porten paa `/api/agent/*`. `agent_gateway/`-tjeneren selv,
   MCP-verktoeyene og `executor/` er uproevd.
 - **Ekte nettleser.** Alt over HTTP ble gjort fra skript. A1 (state-lekkasjen) er
-  lest fra JSON-svaret, ikke observert i en fane.
+  lest fra JSON-svaret, ikke observert i en fane. *Runde tre maalte til gjengjeld
+  siden i Chromium (Playwright) paa 1440x900 og 1920x1080, baade laast og
+  opplaast: ingen vannrett rulling, null forespoersler ut av maskinen, ingen
+  konsollfeil. Det er ikke det samme som et angrep fra en fane.*
 - **Dype kjoeringer av kroppsgrensen (A10).** Jeg sendte 3 MB i prosess; jeg
   proevde ikke gigabyte over socket, og maalte ikke naar appen faktisk faller.
+  *Runde tre satte grensen og maalte den baade med `Content-Length` og med
+  `Transfer-Encoding: chunked` over en ekte socket - men fortsatt ikke
+  gigabyte, og fortsatt ikke hvor appen knekker.*
 - **`vault.tamper_demo` og `vault.after`.** Jeg angrep kjeden rett, ikke
-  demo-verktoeyene rundt den.
+  demo-verktoeyene rundt den. *Runde tre angrep `/api/tamper`-ruten
+  (`tests/attack2/test_attack_tamper_route.py`): kroppen kan ikke peke demoen
+  paa en annen fil eller sende inn sin egen noekkel, den ekte loggen staar
+  uendret etter alle fire angrepene, og svaret laekker ingen noekkel. `vault.after`
+  er fortsatt uproevd.*
+- **Fartsgrense paa menneskerutene.** Runde tre satte en fartsgrense paa
+  `/api/agent/submit`, ikke paa `/api/respond` eller de andre menneskerutene.
+  Det finnes ingen forsoeksgrense der, og et mislykket forsoek logges ikke.
+- **`GET /api/trail/{id}`.** Den er IKKE delt i to nivaaer som `/api/state`: den
+  svarer fra minnet uten menneskenoekkel. Den gir «hva samme agent gjorde rett
+  foer» for en id man alt kjenner, og den gaar gjennom samme `_public()`-kort -
+  men den er ikke minimert, og den ble ikke angrepet paa nytt i runde tre.
 - **Om A2-utbruddet kan re-aapne nettet.** Via `__globals__` naar man ogsaa
   `_REAL_IMPORT`; jeg bekreftet fil-lesing og hendelse-forfalskning, men bygget
   ikke en full nettverks-reaktivering (den ville kunne sende ekte trafikk hvis

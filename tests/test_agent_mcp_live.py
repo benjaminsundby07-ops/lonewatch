@@ -88,8 +88,17 @@ def _post(base: str, path: str, body: dict | None = None, human_key: str | None 
         return {"_status": exc.code, "detail": exc.read()[:300].decode("utf-8", "replace")}
 
 
-def _get(base: str, path: str) -> dict:
-    with urllib.request.urlopen(base + path, timeout=5) as res:
+def _get(base: str, path: str, human_key: str | None = HUMAN_KEY) -> dict:
+    """GET, med menneskenoekkelen paa som standard.
+
+    `/api/state` har to nivaaer etter runde tre: uten noekkel gir den et
+    minimert syn (maskert mottaker, ingen summary, ingen regelnavn, ingen
+    notiser - A1 i docs/ANGREP2.md). Testene her maaler paa hele tilstanden,
+    altsaa slik et innlogget menneske ser den.
+    """
+    headers = {} if human_key is None else {HUMAN_KEY_HEADER: human_key}
+    req = urllib.request.Request(base + path, headers=headers, method="GET")
+    with urllib.request.urlopen(req, timeout=5) as res:
         return json.loads(res.read() or b"{}")
 
 

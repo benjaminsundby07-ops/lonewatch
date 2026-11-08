@@ -81,6 +81,30 @@ MAX_SUMMARY_CHARS = 200
 MAX_RECIPIENT_CHARS = 120
 MAX_PACKAGE_CHARS = 64
 
+# Hvor mange kort appen holder i det hele tatt.
+#
+# Hvert kort ligger i minnet OG gir 1-3 krypterte, fsync-ede logglinjer. Uten
+# et tak kan den som naar porten fylle baade minnet og loggen (A11 i
+# docs/ANGREP2.md), og - verre - fylle godkjenningskoeen saa mennesket maa lete
+# gjennom hundre kort for aa finne det ene som betyr noe (H27 i docs/ANGREP.md).
+#
+# 200 er valgt av demoen, ikke av magefoelelsen:
+#   - hele strommen er 40 kort (agents/scenarios.all_scenarios())
+#   - hendelsen er 4 kort til (agents/story.story_requests())
+#   = 44 kort for en full demo fra start til slutt.
+# 200 gir altsaa plass til demoen PLUSS 156 egne forespoersler fra "Prøv selv"
+# og den ekte agenten i samme kjoering. Det er langt mer enn noen rekker aa
+# skrive i en demo, og langt mindre enn noe som merkes: 200 kort er under 600
+# logglinjer, og `verify()` leser og dekrypterer dem paa under et sekund.
+#
+# Taket gjelder de SKREVNE veiene (`submit_custom`, og dermed `submit_agent`).
+# Stroemmen og hendelsen er bundet av demodataene og kan ikke vokse.
+#
+# Naar taket er naadd, nekter vi. Vi kaster ALDRI et gammelt kort for aa gi
+# plass til et nytt: et kort som forsvinner fra koeen er noeyaktig det et
+# angrep vil ha.
+MAX_CARDS = 200
+
 # Kan handlingen angres? Utledet fra HANDLINGEN, ikke fra det brukeren påstår.
 # Samme grunn som for recipient_known: om noe kan angres er en egenskap ved
 # handlingen, ikke noe den som ber om den skal få bestemme. Verdiene følger
@@ -144,6 +168,131 @@ PRIVATE_CARD_KEYS = frozenset({"approval", "queued_monotonic"})
 # godkjent». Nettsiden trenger det ikke, og et avtrykk som ligger i et
 # JSON-svar er et avtrykk alle har.
 PRIVATE_EXECUTION_KEYS = frozenset({"fingerprint"})
+
+
+# -- det en LÅST side får se --------------------------------------------
+#
+# `/api/state` viste til naa hele `snapshot()` til hvem som helst som naadde
+# porten: full mottaker, agentens frie `summary` og de interne regelnavnene i
+# `decision.reasons`. Loggen maskerer akkurat de feltene (`vault/redaction.py`),
+# saa den som leste HTTP-flaten fikk MER enn den som leste loggen. Det er A1 i
+# docs/ANGREP2.md.
+#
+# Valget: ett endepunkt, to nivaaer - ikke 403 paa `/api/state`.
+#
+#   Hvorfor ikke bare autentisere ruten: da kan nettsiden ikke tegne noe som
+#   helst foer noen har skrevet inn noekkelen. Oversikt, tellerne og koelisten
+#   ville vaert tomme, og den som aapner siden ville ikke se at det ER en
+#   mellomstasjon her. Demoen begynner med at juryen SER koeen og deretter
+#   laaser opp for aa svare.
+#
+#   Hvorfor ikke bare fjerne de tre feltene for alle: mennesket som har laast
+#   opp SKAL se hele mottakeren og regelnavnene - det er hele poenget med at et
+#   menneske vurderer saken. Konsekvensteksten navngir mottakeren med vilje.
+#
+# Saa: uten noekkel gaar snapshotet gjennom `minimized_snapshot()`, som bygger
+# et NYTT svar av en ALLOWLISTE. Ikke en denyliste: et nytt felt i `snapshot()`
+# skal som standard IKKE naa en uinnlogget leser. Glemmer noen aa legge det til
+# her, mangler det paa den laaste siden - det er en synlig feil. Med en
+# denyliste ville det lekket i stillhet, og det er samme feil om igjen.
+#
+# Mottakeren maskeres med `vault.redaction.mask_recipient` - NOEYAKTIG samme
+# funksjon loggen bruker. Da kan den laaste siden per konstruksjon ikke vise
+# mer av en mottaker enn loggen gjoer.
+
+# Feltene en laast side faar av en `request`. `summary` staar ikke her, og skal
+# ikke staa her: det er agentens frie tekst, og den kan baere persondata et
+# dokument skrev for agenten.
+CLOSED_REQUEST_KEYS = ("id", "ts", "action_type", "amount")
+
+# Feltene en laast side faar av en `decision`. `reasons` staar ikke her
+# (regelnavnene er en oppskrift paa hva som maa endres for aa slippe gjennom),
+# og `consequence_text` staar ikke her (den skriver ut mottakeren i klartekst -
+# samme grunn som `vault/redaction.py` kaster den).
+CLOSED_DECISION_KEYS = ("verdict", "risk", "requires_typed_amount")
+
+# Feltene en laast side faar av selve kortet.
+CLOSED_CARD_KEYS = ("status", "source", "action_label")
+
+# Feltene en laast side faar av `log`-blokken. `archived` staar ikke her: det
+# er en absolutt filsti paa maskinen, og den har ingenting aa gjoere i et
+# uinnlogget svar.
+CLOSED_LOG_KEYS = ("lines", "error", "last_verify", "verify_stale", "redacted")
+
+# Feltene en laast side faar av `story`-blokken: nok til aa tegne baandet og
+# fremdriften, ingenting av det hendelsen SIER.
+CLOSED_STORY_KEYS = (
+    "story_id",
+    "title",
+    "subtitle",
+    "duration_seconds",
+    "total_steps",
+    "index",
+    "running",
+    "done",
+    "next_at_second",
+    "current_second",
+)
+
+
+def _mask(value: Any) -> Any:
+    """Samme maskering som loggen. Feiler vault-importen, viser vi INGENTING."""
+    if value is None:
+        return None
+    try:
+        from vault.redaction import mask_recipient
+    except Exception:  # pragma: no cover - vault finnes i dette prosjektet
+        # Fail closed: kan vi ikke maskere, sender vi ikke mottakeren.
+        return "****"
+    return mask_recipient(value)
+
+
+def _closed_card(card: dict[str, Any]) -> dict[str, Any]:
+    """Ett kort slik en uinnlogget leser faar se det."""
+    req = card.get("request") or {}
+    dec = card.get("decision") or {}
+    return {
+        **{k: card[k] for k in CLOSED_CARD_KEYS if k in card},
+        "request": {
+            **{k: req[k] for k in CLOSED_REQUEST_KEYS if k in req},
+            "recipient": _mask(req.get("recipient")),
+        },
+        "decision": {k: dec[k] for k in CLOSED_DECISION_KEYS if k in dec},
+    }
+
+
+def minimized_snapshot(full: dict[str, Any]) -> dict[str, Any]:
+    """Snapshotet slik en side UTEN menneskenoekkelen faar det.
+
+    Bygget av en allowliste over `full`, aldri ved aa slette felt fra den.
+    """
+    story = full.get("story") or {}
+    log = full.get("log") or {}
+    kort = lambda navn: [_closed_card(c) for c in (full.get(navn) or [])]  # noqa: E731
+    return {
+        "locked": True,
+        "company": full.get("company"),
+        # Kortene, minimert. Tellerne staar ved siden av, slik at en laast side
+        # kan si "3 venter" uten aa vise hva de tre inneholder.
+        "waiting": kort("waiting"),
+        "blocked": kort("blocked"),
+        "answered": kort("answered"),
+        "calm": kort("calm"),
+        "calm_total": full.get("calm_total", 0),
+        "waiting_count": len(full.get("waiting") or []),
+        "blocked_count": len(full.get("blocked") or []),
+        "answered_count": len(full.get("answered") or []),
+        # Tom med vilje. `notices` er fri tekst, `custom` er en delmengde av
+        # kortene over, og `before` er sandkasserapportene - der staar
+        # adressene i `notes` i klartekst (A14 i docs/ANGREP2.md).
+        "notices": [],
+        "custom": [],
+        "before": {"scanned": [], "untested": [], "blocked": 0, "clean": 0,
+                   "not_tested": 0, "error": None, "locked": True},
+        "feed": full.get("feed") or {},
+        "story": {k: story[k] for k in CLOSED_STORY_KEYS if k in story} | {"log": []},
+        "log": {k: log[k] for k in CLOSED_LOG_KEYS if k in log},
+    }
 
 
 def _public(card: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -688,6 +837,19 @@ class DemoState:
         ut av takt.
         """
         with self._lock:
+            # Taket foerst: et kort vi ikke har plass til skal ikke rekke aa
+            # skrive en logglinje. Se MAX_CARDS.
+            if len(self.order) >= MAX_CARDS:
+                return {
+                    "ok": False,
+                    "error": (
+                        f"Lonewatch holder {MAX_CARDS} kort, og de er fulle. "
+                        "Trykk «Nullstill» for å arkivere loggen og begynne på "
+                        "nytt. Taket finnes for at ingen skal kunne fylle køen "
+                        "slik at det ene kortet som betyr noe blir borte i "
+                        "mengden."
+                    ),
+                }
             try:
                 kind = ActionType(action_type)
             except ValueError:

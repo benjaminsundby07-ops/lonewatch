@@ -872,7 +872,11 @@ def test_sending_recipient_known_over_http_is_refused(server):
         {"action_type": "send_email", "recipient": "noen@ukjent.example", "recipient_known": True}
     ).encode()
     req = urllib.request.Request(
-        server + "/api/custom", data=data, headers={"Content-Type": "application/json"}
+        server + "/api/custom",
+        data=data,
+        # Menneskenoekkelen maa med: /api/custom ligger bak den (H25). Det
+        # testen maaler er valideringen, ikke porten.
+        headers={"Content-Type": "application/json", HUMAN_KEY_HEADER: HUMAN_KEY},
     )
     try:
         with urllib.request.urlopen(req, timeout=5) as res:
@@ -893,7 +897,11 @@ def test_too_long_fields_are_refused_without_a_500(server, felt):
     body[felt] = "x" * 9000
     data = json.dumps(body).encode()
     req = urllib.request.Request(
-        server + "/api/custom", data=data, headers={"Content-Type": "application/json"}
+        server + "/api/custom",
+        data=data,
+        # Menneskenoekkelen maa med: /api/custom ligger bak den (H25). Det
+        # testen maaler er valideringen, ikke porten.
+        headers={"Content-Type": "application/json", HUMAN_KEY_HEADER: HUMAN_KEY},
     )
     try:
         with urllib.request.urlopen(req, timeout=5) as res:

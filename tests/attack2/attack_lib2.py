@@ -106,9 +106,10 @@ class Client:
         except urllib.error.HTTPError as exc:
             return exc.code, exc.read()[:800].decode("utf-8", "replace")
 
-    def get_resp(self, path: str):
+    def get_resp(self, path: str, headers: dict[str, str] | None = None):
         """Hele svaret, slik at hodene kan inspiseres."""
-        return urllib.request.urlopen(self.base + path, timeout=15)
+        request = urllib.request.Request(self.base + path, headers=headers or {}, method="GET")
+        return urllib.request.urlopen(request, timeout=15)
 
     def post(
         self,
@@ -132,15 +133,24 @@ class Client:
 
     # -- hjelpere -------------------------------------------------------
     def drain_feed(self) -> None:
+        """Fyller koeen. Menneskenoekkelen er med fordi /api/feed/step SKRIVER
+        og ligger bak den (A12/H25). Oppsett, ikke angrep."""
         for _ in range(500):
-            _, body = self.post("/api/feed/step")
+            _, body = self.post("/api/feed/step", headers=human_headers())
             if not isinstance(body, dict) or body.get("card") is None:
                 return
         raise AssertionError("stroemmen stoppet ikke")
 
     def waiting(self) -> list[dict]:
-        _, snap = self.get("/api/state")
+        """Koeen slik et INNLOGGET menneske ser den - hele kortet. Uten
+        noekkelen gir /api/state det minimerte synet (A1)."""
+        _, snap = self.get("/api/state", headers=human_headers())
         return list(snap["waiting"])
+
+    def custom(self, body: dict) -> tuple[int, Any]:
+        """"Prøv selv" med menneskenoekkelen. /api/custom ligger bak den (H25:
+        en allow herfra utfoeres paa ekte)."""
+        return self.post("/api/custom", body, headers=human_headers())
 
 
 # Delt hemmelighet for den ekte agenten (MCP). Settes i prosessen foer appen
@@ -176,8 +186,9 @@ def live_app():
 
     client = Client(f"http://127.0.0.1:{port}")
     # ui.app.state er en singleton som deles mellom tester. Nullstill foer hver
-    # test, slik at ett angrep ikke arver kort fra det forrige.
-    client.post("/api/reset")
+    # test, slik at ett angrep ikke arver kort fra det forrige. Noekkelen maa
+    # med: /api/reset ligger bak menneskenoekkelen etter runde to (A12).
+    client.post("/api/reset", headers=human_headers())
     try:
         yield client
     finally:

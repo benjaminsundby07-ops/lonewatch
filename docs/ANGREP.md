@@ -38,21 +38,22 @@ regresjonstester for alle tre står nå i `tests/attack/`.
 
 | # | Angrep | Resultat | Hva som ville fikset det |
 |---|--------|----------|--------------------------|
-| 1 | **Godkjenne selv.** Kalle `/api/respond` rett, uten nettleser | **LUKKET** (ett hull igjen) | Gjort: egen menneskenøkkel foran `/api/respond`, tid målt på tjeneren, pseudonym som følger nøkkelen. Igjen: nøkkelen ligger på maskinen, og `/api/reset` er fortsatt åpen |
+| 1 | **Godkjenne selv.** Kalle `/api/respond` rett, uten nettleser | **LUKKET** (ett hull igjen) | Gjort: egen menneskenøkkel foran `/api/respond`, tid målt på tjeneren, pseudonym som følger nøkkelen. `/api/reset` er lukket i runde 3. Igjen: nøkkelen ligger på maskinen, og en agent med Bash kan lese den |
 | 2 | **Beløpsporten.** Mellomrom, tusenskille, unicode-sifre, negative, desimaler, tomt, API-kall | **HOLDER** (ett delvis hull) | Selve tolkningen er riktig. Men porten gjelder bare `transfer_money` — også persondata ut av huset bør kreve at mennesket skriver noe |
 | 3 | **Dele opp en stor overføring** i mange små under grensen | **HOLDER NÅ** på staving og på tilbakedatering. Fortsatt hull på mange kontoer og lange vinduer | Normaliseringen og tidsaksen er fikset (H6, H7). Igjen: en sum per agent-id (H9), flere vinduer (H8), og at `history` er frivillig (H10) |
 | 4 | **Gjenbruke en godkjenning** på en annen handling eller et endret beløp | **HOLDER** | Ingenting å fikse i dag. Men det finnes ingen utførende del her, så gjenbruk har ingenting å rette seg mot — i et ekte produkt må billetten signeres, bindes til én handling og utløpe |
 | 5 | **Lur tekst i dokumenter** (skjulte instruksjoner, «endre kontonummer til», HTML-kommentarer) | **DELVIS**: avgjørelsen holder, oppdagelsen gjør det ikke | Skann innholdet i dokumentet som leses, ikke `doc_id`. Se etter skjulemekanismen (usynlig CSS, kommentarer, nullbredde-tegn), ikke etter fire faste strenger |
 | 6 | **Agentens påstander.** `recipient_known`, `contains_personal_data`, `reversible` — og `recipient` | **HULL** på de tre bryterne. **HOLDER NÅ** på `recipient` og på `kalender:` | De tre bryterne krever et kontoregister, en innholdsklassifisering og en handlingstype utledet av verktøykallet — alt utenfor `gateway/`. `recipient` (H20/H21) og `kalender:` (H22) er fikset |
 | 7 | **Svikt skal ikke åpne.** Ugyldige felt, `None`, `inf`, svært lange tekster | **HOLDER**, og de to delvise er lukket | `evaluate()` svarer nå `block` i stedet for å kaste (H23), og «aldri spurt» og «ikke testet» er to ulike setninger (H24) |
-| 8 | **Agentverktøyene (MCP)**, og de to skriverutene agenten eier | **DELVIS**: to hull funnet og fikset | `abandon` og `status` svarte på kort agenten aldri hadde sendt, og `abandon` kunne fylle notislisten. Begge fikset. Igjen: ingen grense på hvor mange forespørsler en agent kan sende |
-| 9 | **Utføreren koblet inn.** Kan en uautentisert skriverute utløse en ekte handling? | **NY**: ett hull | `/api/custom` og `/api/feed/step` er uautentiserte, og en `allow` utfører nå på ekte. Autentisering foran dem, eller en liste over hvem utføreren får kontakte |
+| 8 | **Agentverktøyene (MCP)**, og de to skriverutene agenten eier | **LUKKET** på de tre som hørte til `ui/` | `abandon` og `status` svarte på kort agenten aldri hadde sendt, og `abandon` kunne fylle notislisten. Begge fikset i runde 2. Grensen på antall forespørsler (H27) er satt i runde 3: 30 per minutt per agentnøkkel, 429 over. Igjen: H26 (MCP-svaret sier `UTFØRT (simulert)` uten å spørre utføreren) |
+| 9 | **Utføreren koblet inn.** Kan en uautentisert skriverute utløse en ekte handling? | **LUKKET i runde 3** | `/api/custom`, `/api/feed/step` og `/api/story/*` krever nå menneskenøkkelen, som `/api/respond`. Ingen vei til utføreren står åpen, og `SimulatedExecutor` er standard — bare `LONEWATCH_EXECUTOR=smtp` nøyaktig skrevet slår på den ekte |
 
-**24 hull ved første runde. Ni er nå helt lukket** (H1–H3 i `ui/`, H6, H7 og H20–H23 i
-`gateway/`) **og ett delvis** (H24). **14 står igjen.** Runde 2 fant i tillegg nye hull
-(H25 og utover, se under). 12 av de 24 var nye i runde 1 — de sto ikke i
-`docs/REDTEAM.md` og ikke i noen `LIMITS.md`. De øvrige er forbehold prosjektet alt har
-skrevet ned; her er de målt og gjort kjørbare.
+**24 hull ved første runde. Elleve er nå helt lukket** (H1–H4 i `ui/`, H6, H7 og
+H20–H23 i `gateway/`) **og ett delvis** (H24). **12 står igjen.** Runde 2 fant tre
+nye (H25–H27); **to av dem er lukket i runde 3** (H25 og H27), og H26 står igjen.
+12 av de 24 var nye i runde 1 — de sto ikke i `docs/REDTEAM.md` og ikke i noen
+`LIMITS.md`. De øvrige er forbehold prosjektet alt har skrevet ned; her er de målt
+og gjort kjørbare.
 
 ---
 
@@ -250,7 +251,7 @@ beviser det.
 | H1 | 1 | **kritisk** | ja | **LUKKET** | `/api/respond` krever menneskenøkkel (`ui/human_key.py`). Uten nøkkel: 403. Med agentnøkkelen: 403. Uten nøkkel i miljøet: 503 |
 | H2 | 1 | **høy** | ja | **LUKKET** | Betenkningstiden måles av tjeneren (`DemoState._seconds_in_queue()`). Feltet i kroppen gir 422 |
 | H3 | 1 | høy | ja | **LUKKET** (innenfor nøkkelmodellen) | Pseudonymet følger nøkkelen som kom inn (`operator_id()` → `pseudonymize()`). Med én delt nøkkel vet loggen fortsatt ikke hvem av de som deler den. Helt lukket krever egen enhet eller konto per person |
-| H4 | 1 | middels | nei (F6) | **HULL** | `/api/reset` er uautentisert.  |
+| H4 | 1 | middels | nei (F6) | **LUKKET** (runde 3) | `/api/reset` krever menneskenøkkelen, og det gjør også `/api/custom`, `/api/feed/step`, `/api/story/*` og den nye `/api/tamper`. Agentnøkkelen avvises på alle. Ruten arkiverer fortsatt (sletter ikke), så et ventende rødt kort kan ikke lenger spoles ut av køen av noen uten nøkkelen |
 | H5 | 2 | middels | ja | **HULL** | `requires_typed_amount` settes bare for `transfer_money`. Et rødt kort som deler hele kundebasen godkjennes med `{"approved": true}`. Ligger i `gateway/`, men er en ny regel om hva mennesket må SKRIVE — ikke bedt om i denne runden |
 | H6 | 3 | **høy** | ja | **LUKKET** | `normalize_recipient` fjerner nå alt som ikke er bokstav/siffer. Fire stavinger av samme konto er én nøkkel, og 196 000 kr blir rødt fra den andre betalingen |
 | H7 | 3 | **høy** | ja | **LUKKET** | Vinduet slutter på det nyeste tidspunktet Lonewatch kjenner, ikke på agentens `ts`. Tilbakedatering gjør ingenting, og et `ts` langt fra historikken slår vinduet av og summerer alt |
@@ -262,7 +263,7 @@ beviser det.
 | H13 | 5 | lav | ja | **HULL** | Bare metadata-nøkkelen `x-lw-instruction` gjenkjennes. Hører til `agents/` |
 | H14 | 6 | **kritisk** | nei (LIMITS) | **HULL** | `recipient_known=True` på en ukjent konto kjøper hele båndet 0–49 999,99 kr. Krever et kontoregister Lonewatch eier — ikke noe `gateway/` kan finne på selv |
 | H15 | 6 | **kritisk** | nei (LIMITS) | **HULL** | `contains_personal_data=False` kjøper 3 poeng. Krever en klassifisering av innholdet |
-| H16 | 6 | høy | ja | **HULL** | Samme løgn er nåbar fra «Prøv selv»-skjemaet. Hører til `ui/` |
+| H16 | 6 | høy | ja | **HULL** (smalere) | Samme løgn er nåbar fra «Prøv selv»-skjemaet. `/api/custom` krever nå menneskenøkkelen, så den som lyver må ha nøkkelen — men løgnen virker fortsatt, fordi den hviler på de tre bryterne i H14/H15/H17. Skjemaet regner selv ut `recipient_known` og `reversible`; `contains_personal_data` kan fortsatt benektes, og det krever en innholdsklassifisering `ui/` ikke har |
 | H17 | 6 | **kritisk** | nei (LIMITS) | **HULL** | `reversible=True` på en sletting fjerner `destructive_change`. Krever at reversibilitet utledes fra verktøykallet |
 | H18 | 6 | lav | ja | **HULL** | `reversible=True` på en installasjon fjerner `irreversible` fra loggen. Samme som H17 |
 | H19 | 6 | **kritisk** | nei (LIMITS) | **HULL** | De tre løgnene sammen: 49 999,99 kr til en vilkårlig konto, med persondata, stille gjennom. H6 er lukket, så ulik staving av samme konto hjelper ikke lenger — men H9 (mange kontoer) står igjen |
@@ -277,11 +278,37 @@ beviser det.
 Alle tre kommer av at **noe nå faktisk skjer**. Før utførte Lonewatch ingenting,
 og da kunne et åpent endepunkt bare lage en linje i en logg.
 
-| id | Angrep | Alvor | Hva slipper gjennom | Fiks |
+| id | Angrep | Alvor | Hva slipper gjennom — eller hva som lukket det | Fiks |
 |---|---|---|---|---|
-| H25 | 9 | **høy** | `/api/custom` og `/api/feed/step` er uautentiserte skriveruter, og en `allow` utføres nå på ekte. Med `LONEWATCH_EXECUTOR=smtp` kan et uautentisert lokalt kall utløse en ekte e-post til én av demoens tolv kjente (oppdiktede) mottakere. Alt annet blir `unknown_recipient` → rødt → krever menneskenøkkelen | Autentisering foran skriverutene, eller en liste over hvilke adresser utføreren får kontakte |
-| H26 | 8 | middels | MCP-tjeneren svarer `UTFØRT (simulert)` uten å spørre hva utføreren faktisk gjorde. Ble handlingen nektet - feil oppsett, innhold endret etter godkjenningen, alt forsøkt før - tror agenten likevel at den gikk gjennom. Loggen og dashbordet vet det riktige | Send utførerens svar tilbake gjennom `/api/agent/status/{id}` |
-| H27 | 8 | middels | Ingen grense på hvor mange forespørsler en agent kan sende. 40 kall fyller godkjenningskøen, og mennesket må gå gjennom alle for å finne den ene som betyr noe. Tjenestenekt mot mennesket, ikke mot appen | Tak per agent per minutt, og sammenslåing av like forespørsler |
+| H25 | 9 | **høy** | **LUKKET i runde 3.** Var: `/api/custom` og `/api/feed/step` var uautentiserte skriveruter, og en `allow` utføres på ekte, så et uautentisert lokalt kall kunne utløse en ekte e-post med `LONEWATCH_EXECUTOR=smtp` | Gjort: menneskenøkkelen foran alle skriverutene. Målt i `tests/attack2/test_attack_executor_gate.py`: ingen vei til utføreren svarer noe annet enn 403 uten nøkkel |
+| H26 | 8 | middels | **STÅR IGJEN.** MCP-tjeneren svarer `UTFØRT (simulert)` uten å spørre hva utføreren faktisk gjorde. Ble handlingen nektet - feil oppsett, innhold endret etter godkjenningen, alt forsøkt før - tror agenten likevel at den gikk gjennom. Loggen og dashbordet vet det riktige | Send utførerens svar tilbake gjennom `/api/agent/status/{id}` |
+| H27 | 8 | middels | **LUKKET i runde 3.** Var: ingen grense på hvor mange forespørsler en agent kunne sende; 40 kall fylte godkjenningskøen | Gjort: 30 per minutt per agentnøkkel (`AGENT_SUBMITS_PER_MINUTE`, 429 + `Retry-After`) og et tak på 200 aktive kort (`MAX_CARDS`). Sammenslåing av like forespørsler er IKKE gjort. Fartsgrensen gjelder bare over HTTP — se `ui/LIMITS.md` punkt 11 |
+
+### Runde 3: hva som ble lukket i `ui/`
+
+Runde 3 gikk løs på det `docs/ANGREP.md` og `docs/ANGREP2.md` hadde pekt på i
+`ui/`, og bygget «Bryt loggen»-knappene. Alt under er målt i
+`tests/attack/` og `tests/attack2/`.
+
+| Hull | Var | Nå | Testet i |
+|---|---|---|---|
+| **H4 / A12** | `POST /api/reset` krevde ingenting. Ett kall arkiverte loggen og tømte køen, inkludert et rødt kort som ventet | Menneskenøkkel. Og det samme for `/api/custom`, `/api/feed/step`, `/api/story/start`, `/api/story/step` og den nye `/api/tamper`. Agentnøkkelen avvises på alle seks | `tests/attack2/test_attack_routes.py` (18 tester), `tests/attack/test_attack_agent_tools.py::test_every_writing_route_is_behind_the_human_key` |
+| **H25** | En `allow` fra en uautentisert rute ble utført på ekte | Ingen vei til utføreren er åpen. `SimulatedExecutor` er standard, og bare `LONEWATCH_EXECUTOR` nøyaktig lik `smtp` slår på den ekte | `tests/attack2/test_attack_executor_gate.py` (18 tester) |
+| **H27** | Ingen grense på antall forespørsler fra en agent | 30 per minutt per agentnøkkel (429), og 200 aktive kort i alt | `tests/attack2/test_attack_dos.py` |
+| **A1** | `/api/state` ga full mottaker, full `summary` og de interne regelnavnene til hvem som helst | To nivåer. Uten nøkkel: en allowliste med tellere, status, risiko og **maskert** mottaker (samme funksjon loggen bruker) | `tests/attack2/test_attack_infoleak.py` |
+| **A10** | Ingen grense på kroppsstørrelse; 3 MB søppel ble tatt imot med 200 | 64 KB, håndhevet av en ASGI-middleware som også teller byte når `Content-Length` mangler eller lyver | `tests/attack2/test_attack_dos.py` |
+| **A11** | Ingen grense på antall kort | 200, og taket **nekter** — det kaster aldri et gammelt kort for å gi plass | `tests/attack2/test_attack_dos.py` |
+
+Og én ting som ble funnet mens det ble bygget, og fikset i samme runde:
+
+| Hva som ble funnet | Fiks |
+|---|---|
+| `TamperDemoError` navngir loggfilen med **full sti**, og `/api/tamper` sendte den teksten rett ut i et HTTP-svar. Riktig i en terminal, et informasjonslekk i en nettleser | `ui.app._no_paths` kutter absolutte stier til filnavnet på vei ut. `vault/tamper_demo.py` er uendret — terminalmeldingen skal fortsatt navngi filen |
+
+Tallene står i `ui/LIMITS.md` punkt 11, med begrunnelsen for hvert av dem.
+Det som IKKE er lukket, står i punkt 4 og 10 der: låsen er den samme strengen på
+maskinen, så en agent med Bash kan fortsatt gjøre alt på listen. `GET /api/trail`
+er ikke delt i to nivåer.
 
 ### Hull funnet og FIKSET i runde 2
 
@@ -411,13 +438,20 @@ Dette er like viktig som funnene. Alt under er **uprøvd denne runden** — ikke
 - **Utføreren mot en ekte postserver.** Alt er kjørt mot postfangeren på
   127.0.0.1. `LONEWATCH_SMTP_STARTTLS=1` er fortsatt uprøvd kode, og
   `LONEWATCH_SMTP_ALLOW_REMOTE=1` er aldri satt mot noe ekte.
-- **Menneskenøkkelen mot gjetting.** Det finnes ingen forsøksgrense på
-  `/api/respond`. Nøkkelen er 43 tegn tilfeldig, så gjetting er ikke veien inn -
-  men ingen har målt hvor fort endepunktet kan kalles.
-- **Last og tjenestenekt.** Bevisst ikke testet utover 100 forsøk mot ett kort.
-- **De øvrige endepunktene.** `/api/story/*`, `/api/custom/help`,
-  `/api/trail/{id}`, `/api/overview`, `/api/after`, `/api/verify` fikk ingen
-  angrep.
+- **Menneskenøkkelen mot gjetting.** Det finnes **fortsatt** ingen forsøksgrense
+  på `/api/respond` eller på de andre menneskerutene. Fartsgrensen i runde 3
+  gjelder `/api/agent/submit`, ikke godkjenningen. Nøkkelen er 43 tegn
+  tilfeldig, så gjetting er ikke veien inn - men ingen har målt hvor fort
+  endepunktet kan kalles, og et mislykket forsøk logges ikke.
+- **Last og tjenestenekt.** Testet i runde 2 (`tests/attack2/test_attack_dos.py`)
+  og lukket i runde 3: 64 KB kropp, 200 kort, 30 kall per minutt per agentnøkkel.
+  Det som fortsatt ikke er målt, er gigabyte over socket og når appen faktisk
+  faller.
+- **De øvrige endepunktene.** Angrepet i runde 2
+  (`tests/attack2/test_attack_routes.py`) og runde 3. `GET /api/trail/{id}` er
+  **ikke** delt i to nivåer som `/api/state`: den svarer fra minnet uten
+  menneskenøkkel. Den gir «hva samme agent gjorde rett før» for en id man alt
+  kjenner, altså ikke mer enn `/api/state` gjorde før — men det står igjen.
 - **`ui/static/amount.js` mot de nye nyttelastene.** Unicode-sifrene og
   nullbredde-tegnene i angrep 2 er kjørt mot Python-siden. `tests/test_amount.py`
   holder de to i takt på sitt eget sett, men ikke på mitt.
@@ -434,8 +468,8 @@ tre angrepsfilene for angrep 3, 6 og 7. Alt under står igjen, med eier:
 
 | id | Hull | Hører til |
 |---|---|---|
-| H1, H2, H3, H4 | Uautentisert `/api/respond` og `/api/reset`, klientoppgitt `seconds_to_decide`, pseudonym som er en konstant | `ui/` |
-| H16 | «Prøv selv»-skjemaet lar den som skriver benekte persondata | `ui/` |
+| H1, H2, H3, H4 | ~~Uautentisert `/api/respond` og `/api/reset`~~, ~~klientoppgitt `seconds_to_decide`~~, ~~pseudonym som er en konstant~~ — alle fire LUKKET i `ui/` | `ui/` (gjort) |
+| H16 | «Prøv selv»-skjemaet lar den som skriver benekte persondata. Skjemaet krever nå menneskenøkkelen, men løgnen virker fortsatt: `contains_personal_data` kan ikke utledes uten en innholdsklassifisering | `ui/` for porten (gjort), `gateway/`+en klassifisering for selve løgnen |
 | H5 | Skrevet bekreftelse kreves bare for `transfer_money`, ikke for persondata ut av huset | `gateway/`, men en ny regel om hva mennesket må skrive. Ikke bedt om i denne runden, og den er ikke målt mot blindsettene |
 | H8 | Vinduet er 24 timer; tålmodighet virker | `gateway/`, men en ny regel (flere vinduer eller tak per periode) med egen falsk-alarm-kostnad. Ikke målt |
 | H9 | Summen er bare per mottaker, ikke per agent | `gateway/`, samme sak: ny regel, ikke målt |

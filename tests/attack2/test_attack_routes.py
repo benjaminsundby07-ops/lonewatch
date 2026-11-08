@@ -8,9 +8,11 @@ kan den slette den ekte loggen?
   HOLDER: lese-rutene endrer ikke loggen og laekker ingen noekkel. /api/reset
           ARKIVERER (gir ny fil), den SLETTER ikke - den gamle loggen beholdes
           og stien vises i UI.
-  HULL (dokumentert H4 / LIMITS punkt 10): /api/reset er uautentisert. Hvem som
-          helst med tilgang til porten kan "spole historien" og toemme en ventende
-          roed koe. Appen binder bare 127.0.0.1, det er hele forsvaret.
+  LUKKET i runde tre (var A12 / H4 / vault/LIMITS.md punkt 10): /api/reset er
+          ikke lenger uautentisert. Alle de skrivende rutene - /api/reset,
+          /api/custom, /api/feed/step, /api/story/start, /api/story/step og den
+          nye /api/tamper - krever menneskenoekkelen. Agentnoekkelen duger ikke
+          paa noen av dem. Testene under maaler at de ER lukket.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from pathlib import Path
 import pytest
 from attack_lib2 import refuse_to_touch_real_log  # noqa: F401  (autouse: aldri roer den ekte loggen)
 
-from attack_lib2 import live_app
+from attack_lib2 import human_headers, live_app
 
 
 READONLY_GETS = [
@@ -74,7 +76,7 @@ def test_reset_archives_the_log_it_does_not_delete_it(live_app):
     _, before = live_app.get("/api/state")
     assert before["log"]["lines"] > 0
 
-    _, snap = live_app.post("/api/reset")
+    _, snap = live_app.post("/api/reset", headers=human_headers())
     archived = snap["log"]["archived"]
     assert archived, "reset oppga ingen arkivsti"
     # Den gamle loggen finnes fortsatt, under nytt navn, med innhold.
@@ -85,25 +87,68 @@ def test_reset_archives_the_log_it_does_not_delete_it(live_app):
 
 
 # ---------------------------------------------------------------------------
-# HULL (dokumentert): /api/reset er uautentisert.
+# LUKKET: alle de skrivende rutene krever menneskenoekkelen.
+#
+# Var A12 i denne filen og H4 i docs/ANGREP.md: /api/reset krevde ingenting.
+# Testen under var `xfail(strict=True)` og passerer naa, saa den er en vanlig
+# test. Den er samtidig utvidet fra én rute til alle seks, for at det ikke skal
+# kunne lukkes for reset og staa aapent for de andre.
 # ---------------------------------------------------------------------------
 
+# Rutene som SKRIVER: de endrer loggen, koeen eller begge. /api/tamper skriver
+# ikke, men leser og dekrypterer hele loggen med loggnoekkelen.
+SKRIVERUTER = [
+    ("/api/reset", {}),
+    ("/api/feed/step", {}),
+    ("/api/story/start", {}),
+    ("/api/story/step", {}),
+    ("/api/custom", {"action_type": "read_document", "summary": "hei"}),
+    ("/api/tamper", {"attack": "endre"}),
+]
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "HULL (docs/ANGREP.md H4, vault/LIMITS.md punkt 10): POST /api/reset "
-        "krever ingen innlogging, ingen token og ingen noekkel. Ett kall "
-        "arkiverer loggen, toemmer koen og starter en ny, tom kjede - inkludert "
-        "et roedt kort som ventet paa et menneske. Til forskjell fra "
-        "/api/agent/* (som krever LONEWATCH_AGENT_KEY) staar reset helt aapen. "
-        "Eneste forsvar: appen binder 127.0.0.1. Alvor: middels. Reset SLETTER "
-        "riktignok ikke (den arkiverer), saa ingenting forsvinner i det skjulte "
-        "- men en uautentisert 'start ny logg'-knapp er et problem i seg selv. "
-        "Fiks: innlogging foran alt som skriver eller nullstiller."
-    ),
-)
-def test_reset_requires_authentication(live_app):
-    """Forventningen (som IKKE innfris): reset uten noekkel skal avvises."""
+AGENT_NOEKKEL_HODE = {"X-Lonewatch-Agent-Key": "attack2-agent-key-local-only"}
+
+
+@pytest.mark.parametrize("path,body", SKRIVERUTER)
+def test_writing_routes_refuse_without_the_human_key(live_app, path, body):
+    """Uten noekkel: 403. Ingen av dem gjoer noe.
+
+    Dette er det A12 ba om. Ett kall mot /api/reset arkiverte loggen og toemte
+    koeen - inkludert et roedt kort som ventet paa et menneske.
+    """
+    status, _ = live_app.post(path, body)
+    assert status == 403, f"uautentisert {path} svarte {status}"
+
+
+@pytest.mark.parametrize("path,body", SKRIVERUTER)
+def test_writing_routes_refuse_the_agent_key(live_app, path, body):
+    """Og agentnoekkelen duger ikke.
+
+    Den staar i `.mcp.json`, altsaa i en fil agenten selv leser. Kunne den
+    styre demoen, ville agenten kunnet nullstille loggen over seg selv.
+    """
+    status, _ = live_app.post(path, body, headers=AGENT_NOEKKEL_HODE)
+    assert status == 403, f"{path} godtok agentnoekkelen ({status})"
+
+
+@pytest.mark.parametrize("path,body", SKRIVERUTER)
+def test_writing_routes_work_with_the_human_key(live_app, path, body):
+    """Og med noekkelen virker de. En laas som laaser alt er ingen laas.
+
+    /api/tamper svarer 409 paa en tom logg (den nekter aa kjoere en demo den
+    ikke kan kjoere ærlig), saa den godtas her ogsaa - det vi maaler er at
+    noekkelen slapp forbi porten, ikke at loggen var lang nok.
+    """
+    status, _ = live_app.post(path, body, headers=human_headers())
+    assert status in (200, 409), f"{path} med riktig noekkel svarte {status}"
+
+
+def test_a_red_card_cannot_be_flushed_out_of_the_queue_without_the_key(live_app):
+    """Det A12 faktisk handlet om: et roedt kort som venter skal ikke kunne
+    spoles bort av noen uten noekkelen."""
+    live_app.drain_feed()
+    assert live_app.waiting(), "demoen skal ha roede kort som venter"
+
     status, _ = live_app.post("/api/reset")
-    assert status in (401, 403, 503), f"uautentisert /api/reset svarte {status}"
+    assert status == 403
+    assert live_app.waiting(), "koeen ble toemt av et uautentisert kall"

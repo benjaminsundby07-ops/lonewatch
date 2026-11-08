@@ -30,7 +30,7 @@ from pathlib import Path
 
 import pytest
 
-from attack_lib import live_app
+from attack_lib import human_headers, live_app
 from conftest import HUMAN_KEY
 
 from ui.human_key import HUMAN_KEY_HEADER
@@ -56,7 +56,9 @@ def agent(live_app, monkeypatch):
     strengen i `.mcp.json`.
     """
     monkeypatch.setenv("LONEWATCH_AGENT_KEY", AGENTNOEKKEL)
-    live_app.post("/api/reset")
+    # Menneskenoekkelen maa med: /api/reset ligger bak den etter runde to
+    # (H4 i docs/ANGREP.md). Agentnoekkelen duger ikke - det er poenget.
+    live_app.post("/api/reset", headers=human_headers())
     return live_app
 
 
@@ -207,7 +209,7 @@ def test_submit_cannot_choose_its_own_identity_or_id(agent):
     request_id = svar["request_id"]
     assert request_id.startswith("agent_")
 
-    _, snap = agent.get("/api/state")
+    _, snap = agent.get("/api/state", headers=human_headers())
     kort = [
         c
         for c in snap["waiting"] + snap["blocked"] + snap["answered"] + snap["calm"]
@@ -258,7 +260,7 @@ def test_abandon_cannot_touch_a_card_the_agent_did_not_send(agent):
     fremmede = [c["request"]["id"] for c in agent.waiting()]
     assert fremmede, "koen skal ha roede kort fra demoen"
 
-    _, foer = agent.get("/api/state")
+    _, foer = agent.get("/api/state", headers=human_headers())
     notiser_foer = len(foer["notices"])
 
     for request_id in fremmede:
@@ -268,7 +270,7 @@ def test_abandon_cannot_touch_a_card_the_agent_did_not_send(agent):
         assert status == 200
         assert svar["noted"] is False, request_id
 
-    _, etter = agent.get("/api/state")
+    _, etter = agent.get("/api/state", headers=human_headers())
     assert len(etter["notices"]) == notiser_foer, "abandon skrev en notis om en annens kort"
     # Og kortene staar fortsatt og venter.
     assert {c["request"]["id"] for c in agent.waiting()} >= set(fremmede)
@@ -311,7 +313,7 @@ def test_abandon_cannot_be_used_to_flood_the_notices(agent):
         )
         assert status == 200 and ut["noted"] is True
 
-    _, snap = agent.get("/api/state")
+    _, snap = agent.get("/api/state", headers=human_headers())
     agentnotiser = [n for n in snap["notices"] if n["kind"] == "agent"]
     assert len(agentnotiser) == 1, len(agentnotiser)
 
@@ -326,7 +328,7 @@ def test_abandon_on_an_unknown_id_writes_nothing(agent):
         if status == 200:
             assert svar["noted"] is False, rusk
 
-    _, snap = agent.get("/api/state")
+    _, snap = agent.get("/api/state", headers=human_headers())
     assert not [n for n in snap["notices"] if n["kind"] == "agent"]
 
 
@@ -464,6 +466,7 @@ def test_no_other_http_endpoint_writes_a_human_response():
         "/api/respond",
         "/api/story/start",
         "/api/story/step",
+        "/api/tamper",
     ], f"ny POST-rute uten angrepsdekning: {poster}"
 
     state_kilde = (PROSJEKT / "ui" / "state.py").read_text(encoding="utf-8")
@@ -472,13 +475,60 @@ def test_no_other_http_endpoint_writes_a_human_response():
     )
 
 
-def test_the_approval_route_is_the_only_one_behind_the_human_key():
-    """Og den ene ruten som godkjenner er den ene som krever menneskenoekkelen."""
-    from ui import app as app_modul
+def test_every_writing_route_is_behind_the_human_key():
+    """Ingen POST-rute utenom agentbroen staar uten menneskenoekkelen.
 
-    kilde = inspect.getsource(app_modul)
-    assert kilde.count("_human_guard") == 3, "menneskevakten skal staa paa to ruter"
-    assert "def api_respond(body: RespondIn, operator: str = Depends(_human_guard))" in kilde
+    Skrevet om i runde tre. Foer sto noekkelen bare foran `/api/respond`, og
+    `/api/reset`, `/api/custom`, `/api/feed/step` og `/api/story/*` var aapne
+    (H4/H25 i docs/ANGREP.md, A12 i docs/ANGREP2.md). Naa er regelen enklere og
+    strammere: EN POST-rute hoerer antingen til agentbroen (`_agent_guard`,
+    egen noekkel) eller til mennesket (`_human_guard`/`_demo_guard`). Det
+    finnes ingen tredje kategori, og en ny rute som glemmer begge gir en
+    feilende test.
+    """
+    from ui.app import app
+
+    poster = sorted(
+        rute.path for rute in app.routes if "POST" in getattr(rute, "methods", set())
+    )
+    agentruter = {p for p in poster if p.startswith("/api/agent/")}
+    menneskeruter = sorted(set(poster) - agentruter)
+    assert menneskeruter == [
+        "/api/custom",
+        "/api/feed/step",
+        "/api/human/check",
+        "/api/reset",
+        "/api/respond",
+        "/api/story/start",
+        "/api/story/step",
+        "/api/tamper",
+    ], f"ny POST-rute uten en vakt: {menneskeruter}"
+
+    # Og hver av dem har faktisk en vakt i signaturen. Vi leser avhengighetene
+    # FastAPI har registrert, ikke kildekoden: en vakt som staar i en kommentar
+    # eller i en funksjon ingen bruker, teller ikke.
+    from ui.app import _human_gate  # noqa: F401  (det vaktene lages av)
+
+    for rute in app.routes:
+        if "POST" not in getattr(rute, "methods", set()):
+            continue
+        if rute.path.startswith("/api/agent/"):
+            continue
+        navn = [
+            getattr(d.call, "__qualname__", "")
+            for d in rute.dependant.dependencies
+        ]
+        assert any("_human_gate.<locals>.guard" in n for n in navn), (
+            f"{rute.path} har ingen menneskevakt: {navn}"
+        )
+
+    # Og godkjenningen staar fortsatt bak `_human_guard` (den uten
+    # demo-beskjeden), slik at teksten den som blir nektet leser er den
+    # ui/human_key.py skriver om roede kort - ikke den om aa styre demoen.
+    kilde = inspect.getsource(__import__("ui.app", fromlist=["app"]))
+    assert (
+        "def api_respond(body: RespondIn, operator: str = Depends(_human_guard))" in kilde
+    )
 
 
 def test_a_request_field_cannot_carry_an_approval():

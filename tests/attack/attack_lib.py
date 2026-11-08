@@ -49,6 +49,18 @@ def minutes(n: int) -> datetime:
     return T0 + timedelta(minutes=n)
 
 
+def human_headers() -> dict[str, str]:
+    """Menneskenoekkelen testmiljoeet har satt (foerste av flere).
+
+    Staar her og ikke som en fikstur, slik at `Client` kan bruke den uten at
+    hver test maa ta imot noe.
+    """
+    import os
+
+    keys = (os.environ.get("LONEWATCH_HUMAN_KEY") or "").split(",")
+    return {"X-Lonewatch-Human-Key": keys[0].strip()}
+
+
 def free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -61,8 +73,9 @@ class Client:
     def __init__(self, base: str) -> None:
         self.base = base
 
-    def get(self, path: str) -> tuple[int, Any]:
-        with urllib.request.urlopen(self.base + path, timeout=10) as res:
+    def get(self, path: str, headers: dict[str, str] | None = None) -> tuple[int, Any]:
+        request = urllib.request.Request(self.base + path, headers=headers or {}, method="GET")
+        with urllib.request.urlopen(request, timeout=10) as res:
             return res.status, json.loads(res.read())
 
     def post(
@@ -85,15 +98,27 @@ class Client:
     # -- hjelpere for angrepene ------------------------------------------
 
     def drain_feed(self) -> None:
-        """Slipper alle demoforespoerslene gjennom, slik at koen fylles."""
+        """Slipper alle demoforespoerslene gjennom, slik at koen fylles.
+
+        Sender menneskenoekkelen. /api/feed/step er en SKRIVENDE rute og ligger
+        bak den (den var aapen til runde to; se H25 i docs/ANGREP.md). Dette er
+        oppsettet et angrep gjoer FOER angrepet, ikke angrepet - at ruten
+        krever noekkelen maales av `test_demo_write_routes_require_the_human_key`.
+        """
         for _ in range(500):
-            _, body = self.post("/api/feed/step")
+            _, body = self.post("/api/feed/step", headers=human_headers())
             if not isinstance(body, dict) or body.get("card") is None:
                 return
         raise AssertionError("stroemmen stoppet ikke")
 
     def waiting(self) -> list[dict]:
-        _, snap = self.get("/api/state")
+        """Koeen slik et INNLOGGET menneske ser den (hele kortet).
+
+        Uten noekkelen gir /api/state et minimert syn (maskert mottaker, ingen
+        summary, ingen regelnavn - A1 i docs/ANGREP2.md). Angrepene maaler paa
+        hele kortet, saa de leser som mennesket.
+        """
+        _, snap = self.get("/api/state", headers=human_headers())
         return list(snap["waiting"])
 
     def cards_with_amount_gate(self) -> list[dict]:

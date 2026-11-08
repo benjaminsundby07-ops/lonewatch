@@ -235,10 +235,65 @@ function tegnLaas(tilstand, melding) {
     "Den står i .lonewatch-agent-env (LONEWATCH_HUMAN_KEY). Agentnøkkelen duger ikke.";
 }
 
+/* ---------------- porten foran alt som styrer demoen ----------------
+ *
+ * «Spill av hendelsen», «Nullstill», «Prøv selv», stroemmen og «Bryt loggen»
+ * krever naa den samme menneskenoekkelen som godkjenningen: de SKRIVER i
+ * loggen, og en `allow` fra dem gaar til utfoereren. Se `_demo_guard` i
+ * ui/app.py.
+ *
+ * Valget her: knappene blir ikke borte, og de blir ikke graa uten forklaring.
+ * De sier hva som mangler, og de sender deg dit noekkelen skrives inn. En
+ * knapp som ikke gjoer noe er verre enn en knapp som sier hvorfor. */
+
+function krevOpplast(handling) {
+  if (menneskeOk) return true;
+  const b = el("verify-banner");
+  b.classList.remove("hidden");
+  b.classList.add("is-bad");
+  b.textContent =
+    handling + " krever menneskenøkkelen. Lås opp øverst i Godkjenning " +
+    "først — demoen skriver i den låste loggen, og det skal et menneske stå " +
+    "bak.";
+  showTab("queue");
+  const felt = el("human-key");
+  if (felt && !felt.classList.contains("hidden")) felt.focus();
+  return false;
+}
+
+/* Er siden laast, viser vi det én gang, i stedet for at hver knapp sier det
+ * hver gang. `locked` kommer fra /api/state (se ui/app.py).
+ *
+ * IKKE paa «Prøv selv». Der staar beskjeden i skjemaet, rett under knappen man
+ * nettopp trykket (`#c-error`), og det er riktigere sted: den som har fylt ut
+ * et skjema skal lese svaret ved skjemaet. Banneret i tillegg ville bare tatt
+ * tre linjer av en fane som alt er den hoeyeste i appen - se ui/LIMITS.md om
+ * loddrett plass. */
+const LAAST_BANNER_FANER = new Set(["overview", "before", "queue", "after"]);
+
+function renderLaastSide() {
+  const notis = el("locked-banner");
+  if (!notis) return;
+  const laast =
+    Boolean(latest && latest.locked) && LAAST_BANNER_FANER.has(activeTab);
+  notis.classList.toggle("hidden", !laast);
+  if (laast) {
+    /* Kort med vilje: banneret staar over ALLE fem fanene, og hver linje det
+     * tar er en linje mindre til innholdet. Hele begrunnelsen staar under
+     * «Begrensninger» og i ui/LIMITS.md. */
+    notis.textContent =
+      "Låst side: tellere og status, maskert mottaker, ingen fritekst og " +
+      "ingen regelnavn. Lås opp i Godkjenning for hele saken.";
+  }
+}
+
 /* ---------------- den rolige strømmen ---------------- */
 
 function startFeed() {
   stopFeed();
+  /* Uten noekkelen svarer /api/feed/step 403. En timer som spoer hvert andre
+   * sekund og blir nektet hver gang, er stoey - ikke en demo. */
+  if (!menneskeOk) return;
   feedTimer = setInterval(async () => {
     if (latest && latest.feed && latest.feed.done) {
       stopFeed();
@@ -264,6 +319,7 @@ function stopFeed() {
 /* ---------------- hendelsen ---------------- */
 
 async function storyPlay() {
+  if (!krevOpplast("Å spille av hendelsen")) return;
   stopStory();
   const out = await api("/api/story/start", {});
   apply(out.state);
@@ -293,6 +349,7 @@ function stopStory() {
 }
 
 async function storyNext() {
+  if (!krevOpplast("Å gå videre i hendelsen")) return;
   stopStory();
   const out = await api("/api/story/step", {});
   apply(out.state);
@@ -349,6 +406,7 @@ function render() {
   renderCalm(latest.calm, latest.calm_total);
   renderBefore(latest.before);
   renderCustom(latest.custom || []);
+  renderLaastSide();
 
   syncNavCounts();
 
@@ -1270,6 +1328,16 @@ function syncCustomFields() {
 async function sendCustom(ev) {
   ev.preventDefault();
   const feil = el("c-error");
+  if (!menneskeOk) {
+    /* Her staar meldingen i skjemaet og ikke i banneret: brukeren ser paa
+     * feltet de nettopp fylte ut, og skal ikke lure paa om det ble sendt. */
+    feil.classList.remove("hidden");
+    feil.textContent =
+      "Låst. «Prøv selv» sender en ekte forespørsel gjennom Lonewatch og " +
+      "skriver i den låste loggen, så den krever menneskenøkkelen. Lås opp " +
+      "øverst i Godkjenning.";
+    return;
+  }
   const knapp = el("c-send");
   knapp.disabled = true;
   try {
@@ -1582,6 +1650,9 @@ async function loadAfter() {
    * slik den var sist noen trykket paa en knapp. */
   await verifyQuietly();
   renderChainStrip();
+  await hentTamperListe();
+  renderTamperButtons();
+  renderTamperResult();
   await hentLogg();
   renderLogTable();
 
@@ -1592,6 +1663,182 @@ async function loadAfter() {
     return;
   }
   renderAfterTasks(data.view);
+}
+
+/* ---------------- Bryt loggen ----------------
+ *
+ * Fire knapper. Hver kjoerer ETT ekte angrep paa en KOPI av loggen og lar den
+ * vanlige verifiseringen svare. All logikken ligger i vault/tamper_demo.py;
+ * her tegnes svaret.
+ *
+ * Det viktigste valget: «full» (skriv om hele kjeden og signer et nytt anker)
+ * blir IKKE roedt og blir IKKE kalt en feil. Den har `expected_detected=false`
+ * fordi det er sant: den som har loggnoekkelen kan signere ankeret, og da er
+ * en logg som er internt perfekt ikke til aa skille fra en ekte. Det er
+ * grensen, og den staar i vault/LIMITS.md punkt 1 og 12. Aa farge den roed
+ * ville vaert aa late som sjekken feilet; aa skjule den ville vaert verre.
+ * Derfor staar den i sin egen, rolige ramme - med begge hashene ved siden av
+ * hverandre, fordi det er NOEYAKTIG det som avsloerer angrepet hvis du har
+ * skrevet ned den gamle hashen utenfor maskinen. */
+
+let tamperListe = null;      // [{attack, title}] fra /api/tamper
+let tamperKjorer = null;     // navnet paa angrepet som kjoerer naa
+let tamperSvar = {};         // attack -> resultatet (hvilke som er kjoert)
+let tamperSist = null;       // det ene resultatet som vises
+
+/* Ett resultat av gangen, ikke en stabel.
+ *
+ * Fire kort under hverandre gjorde Etter-fanen 1531 px hoey paa 1440x900, og
+ * da maa siden rulle. Rulling er ikke bare stygt her: «Bryt loggen» skal
+ * leses ved siden av «Sjekk loggen» rett over, og de to kan ikke sammenlignes
+ * hvis det ene er utenfor skjermen. Knappene viser hvilke som ER kjoert, saa
+ * ingenting blir borte - man trykker igjen for aa se det. */
+
+async function hentTamperListe() {
+  if (tamperListe) return tamperListe;
+  try {
+    const r = await api("/api/tamper");
+    tamperListe = r.attacks || [];
+  } catch (e) {
+    tamperListe = [];
+  }
+  return tamperListe;
+}
+
+function renderTamperButtons() {
+  const boks = el("tamper-buttons");
+  if (!boks) return;
+  const liste = tamperListe || [];
+  el("tamper-count").textContent = liste.length ? liste.length + " angrep" : "";
+  boks.innerHTML = liste
+    .map((a) => {
+      const kjorer = tamperKjorer === a.attack;
+      const gjort = Object.prototype.hasOwnProperty.call(tamperSvar, a.attack);
+      return (
+        '<button type="button" class="lw-btn lw-btn-quiet app-tamper-btn' +
+        (gjort ? " is-done" : "") + '" data-tamper="' + esc(a.attack) + '"' +
+        (tamperKjorer ? " disabled" : "") + ">" +
+        '<span class="app-tamper-btn-name">' + esc(a.title) + "</span>" +
+        '<span class="app-tamper-btn-state">' +
+        (kjorer ? "kjører …" : gjort ? "kjørt" : "kjør") + "</span>" +
+        "</button>"
+      );
+    })
+    .join("");
+}
+
+/* Hashparet. Begge staar ved siden av hverandre, alltid, ogsaa naar de er
+ * like: det er sammenligningen som er poenget, ikke det ene tallet. */
+function hashPar(r) {
+  const likt = r.head_hash_before === r.head_hash_after;
+  return (
+    '<div class="app-tamper-hashes">' +
+    '<div class="app-tamper-hash"><dt>Siste hash før</dt>' +
+    '<dd><code class="app-hash">' + esc(r.head_hash_before || "–") + "</code></dd></div>" +
+    '<div class="app-tamper-hash' + (likt ? "" : " is-changed") + '">' +
+    "<dt>Siste hash etter</dt>" +
+    '<dd><code class="app-hash">' + esc(r.head_hash_after || "–") + "</code></dd></div>" +
+    "</div>" +
+    '<p class="app-note">' +
+    (likt
+      ? "Hashen står stille: angrepet traff en linje lenger inn i kjeden, og " +
+        "sjekken peker den ut nedenfor."
+      : "Hashen er en annen. Har du skrevet ned den gamle utenfor maskinen, " +
+        "ser du avviket med øyet.") +
+    "</p>"
+  );
+}
+
+function renderTamperResult() {
+  const boks = el("tamper-result");
+  if (!boks) return;
+  if (tamperKjorer) {
+    boks.innerHTML =
+      '<div class="app-tamper-card"><p class="app-note">Kjører angrepet på en ' +
+      "kopi av loggen …</p></div>";
+    return;
+  }
+  if (!tamperSist) {
+    boks.innerHTML =
+      '<p class="app-empty">Ingen angrep kjørt ennå. Trykk en av de fire over.</p>';
+    return;
+  }
+  boks.innerHTML = [tamperSist]
+    .map((n) => {
+      const r = tamperSvar[n];
+      if (r.error) {
+        return (
+          '<div class="app-tamper-card is-note"><h3>' + esc(n) + "</h3>" +
+          '<p class="app-note">' + esc(r.error) + "</p></div>"
+        );
+      }
+      /* Tre utfall, tre farger - og «grensen» er ikke en av de to andre.
+       *   oppdaget og ventet:        gronn (sjekken gjorde jobben)
+       *   ikke oppdaget og ventet:   rolig (den dokumenterte grensen)
+       *   noe annet enn ventet:      rodt (da stemmer ikke dokumentasjonen) */
+      const grense = r.expected_detected === false;
+      const klasse = !r.as_documented
+        ? "is-bad"
+        : grense
+        ? "is-limit"
+        : "is-ok";
+      const merke = !r.as_documented
+        ? "ikke som dokumentert"
+        : grense
+        ? "grensen, sagt ærlig"
+        : "oppdaget";
+      return (
+        '<div class="app-tamper-card ' + klasse + '">' +
+        '<div class="app-tamper-head">' +
+        "<h3>" + esc(r.title) + "</h3>" +
+        '<span class="app-tamper-badge">' + esc(merke) + "</span>" +
+        "</div>" +
+        '<p class="app-tamper-did"><b>Dette gjorde vi</b> ' + esc(r.what_we_did) + "</p>" +
+        '<dl class="app-tamper-facts">' +
+        "<div><dt>Ble det oppdaget?</dt><dd>" +
+        (r.detected ? "Ja" : "Nei") +
+        (r.as_documented ? "" : " — og det var ikke ventet") +
+        "</dd></div>" +
+        "<div><dt>Linjer</dt><dd>" + esc(String(r.lines_before)) + " → " +
+        esc(String(r.lines_after)) + "</dd></div>" +
+        (r.broken_seq != null
+          ? "<div><dt>Første brudd</dt><dd>#" + esc(String(r.broken_seq)) + "</dd></div>"
+          : "") +
+        "<div><dt>Den ekte loggen</dt><dd>" +
+        (r.real_log_untouched
+          ? "ikke rørt — samme navn, samme sha256, samme størrelse før og etter"
+          : "ENDRET — dette er en feil i demoen") +
+        "</dd></div>" +
+        "</dl>" +
+        hashPar(r) +
+        '<p class="app-tamper-why">' +
+        esc(r.explanation || r.verify_text || "").replace(/\n/g, "<br>") +
+        "</p>" +
+        "</div>"
+      );
+    })
+    .join("");
+}
+
+async function kjorTamper(attack) {
+  if (!krevOpplast("Å bryte loggen")) return;
+  if (tamperKjorer) return;
+  tamperKjorer = attack;
+  renderTamperButtons();
+  renderTamperResult();
+  try {
+    tamperSvar[attack] = await api("/api/tamper", { attack: attack });
+  } catch (e) {
+    /* 409 fra tamper_demo: demoen kan ikke kjoeres ærlig akkurat naa (tom
+     * logg, for kort logg, eller en logg som ikke stemmer FOER vi begynner).
+     * Det er ikke en feil i knappen, og teksten sier hvorfor. */
+    tamperSvar[attack] = { error: e.message };
+  } finally {
+    tamperKjorer = null;
+    tamperSist = attack;
+  }
+  renderTamperButtons();
+  renderTamperResult();
 }
 
 /* ---------------- sjekk loggen ---------------- */
@@ -1662,6 +1909,14 @@ document.addEventListener("input", (ev) => {
 document.addEventListener("click", async (ev) => {
   const t = ev.target;
   if (!t.getAttribute) return;
+
+  /* «Bryt loggen». Knappen har tekst i to spenn, saa klikket kan treffe et
+   * barn - derfor closest() og ikke bare target. */
+  const tamperKnapp = t.closest && t.closest("[data-tamper]");
+  if (tamperKnapp) {
+    await kjorTamper(tamperKnapp.getAttribute("data-tamper"));
+    return;
+  }
 
   const approve = t.getAttribute("data-approve");
   const reject = t.getAttribute("data-reject");
@@ -1828,6 +2083,10 @@ function showTab(tab) {
   );
 
   if (history.replaceState) history.replaceState(null, "", VIEW_HASH[tab]);
+  /* Banneret foelger fanen: det staar ikke paa «Prøv selv». Se
+   * LAAST_BANNER_FANER. */
+  renderLaastSide();
+
   if (tab === "after") loadAfter();
   if (tab === "custom") loadCustomHelp();
   if (tab === "overview") refreshOverview();
@@ -1931,6 +2190,16 @@ el("human-form").addEventListener("submit", async (ev) => {
   settMenneskeNokkel(verdi);
   await sjekkMenneskeNokkel();
   if (!menneskeOk) el("human-key").focus();
+  /* Tilstanden vi alt har, er den MINIMERTE: den har ingen summary, ingen
+   * regelnavn og en maskert mottaker. Naa som noekkelen holder, henter vi hele
+   * saken paa nytt, og slipper stroemmen i gang. Uten dette ville siden
+   * staatt med maskerte kort til neste gang noe annet oppdaterte den. */
+  if (menneskeOk) {
+    el("verify-banner").classList.add("hidden");
+    apply(await api("/api/state"));
+    await verifyQuietly();
+    startFeed();
+  }
   if (activeTab === "queue") renderQueueDetail();
 });
 
@@ -1938,7 +2207,12 @@ el("human-logout").addEventListener("click", async () => {
   settMenneskeNokkel("");
   menneskeOk = false;
   menneskePseudonym = null;
+  stopFeed();
+  stopStory();
   await sjekkMenneskeNokkel();
+  /* Og tilbake til det minimerte synet. Hele poenget med aa logge ut er at
+   * det som sto paa skjermen ikke skal staa der etterpaa. */
+  apply(await api("/api/state"));
   if (activeTab === "queue") renderQueueDetail();
 });
 
@@ -1948,6 +2222,7 @@ el("btn-verify").addEventListener("click", verify);
 el("btn-story").addEventListener("click", storyPlay);
 el("btn-story-next").addEventListener("click", storyNext);
 el("btn-reset").addEventListener("click", async () => {
+  if (!krevOpplast("Å nullstille demoen")) return;
   stopStory();
   typed = {};
   shownAt = {};

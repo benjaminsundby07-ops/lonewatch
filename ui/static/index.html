@@ -56,6 +56,7 @@
     <div id="verify-banner" class="app-banner hidden" role="status"></div>
     <div id="log-error" class="app-banner is-bad hidden" role="status"></div>
     <div id="log-note" class="app-banner hidden" role="status"></div>
+    <div id="locked-banner" class="app-banner hidden" role="status"></div>
 
     <section id="story-band" class="app-story hidden" aria-live="polite">
       <div class="app-story-head">
@@ -151,6 +152,25 @@
     <!-- ---------- Etter ---------- -->
     <section id="tab-after" class="app-view hidden">
       <section id="chain-strip" class="lw-panel app-strip" aria-live="polite"></section>
+
+      <!-- Bryt loggen. Fire ekte angrep paa en KOPI av loggen, med den
+           vanlige verifiseringen som dommer. Den ekte loggen og det ekte
+           ankeret roeres aldri - vault/tamper_demo.py tar fingeravtrykk foer
+           og etter og stopper hvis de ikke er like. Se POST /api/tamper. -->
+      <section class="lw-panel app-tamper">
+        <div class="lw-panel-head">
+          <div>
+            <h2 class="lw-panel-title">Bryt loggen</h2>
+            <p class="lw-panel-sub">
+              Tro oss ikke på ordet. Hvert angrep kjøres på en <em>kopi</em>,
+              og det er samme sjekk som over som svarer. Den ekte loggen røres ikke.
+            </p>
+          </div>
+          <span id="tamper-count" class="app-count is-quiet"></span>
+        </div>
+        <div id="tamper-buttons" class="app-tamper-row"></div>
+        <div id="tamper-result" class="app-tamper-out"></div>
+      </section>
 
       <section class="lw-panel">
         <div class="lw-panel-head">

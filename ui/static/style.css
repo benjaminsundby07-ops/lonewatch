@@ -685,7 +685,11 @@ body { font-family: var(--font-sans); }
 .app-filter-n { font-family: ui-monospace, monospace; font-size: 11px; color: var(--ink-faint); }
 .app-filter-btn.is-on .app-filter-n { color: var(--ink-muted); }
 
-.app-table-wrap { overflow-x: auto; max-height: 520px; overflow-y: auto; }
+/* Loggtabellen rullet alt innvendig. Hoeyden er senket fra 520 til 200 px for
+ * aa gi plass til «Bryt loggen» under «Sjekk loggen», slik at hele Etter-fanen
+ * fortsatt staar innenfor 1440x900 uten at SIDEN ruller. 300 px er omtrent
+ * aatte rader - nok til aa se at loggen er en logg, og tabellen ruller videre. */
+.app-table-wrap { overflow-x: auto; max-height: 200px; overflow-y: auto; }
 .app-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .app-table thead th {
   position: sticky; top: 0; z-index: 1; text-align: left; white-space: nowrap;
@@ -1228,3 +1232,95 @@ body { font-family: var(--font-sans); }
   font-size: 12px;
   cursor: pointer;
 }
+
+/* ---------------- Bryt loggen ----------------
+ *
+ * Samme sprak som resten av Etter: en lw-panel, hashene i app-hash, fargene
+ * fra de samme tre tokenene. Én ny ting, og den er med vilje: `.is-limit`.
+ *
+ * `--negative` brukes BARE pa det som faktisk er galt (se toppen av filen).
+ * Angrepet «full» er ikke galt - det er den dokumenterte grensen, og
+ * `expected_detected` er `false` fordi det er sant. Derfor far den en egen,
+ * rolig ramme i `--ink-faint` og ikke rodt: ingenting pa denne siden skal
+ * fortelle en jury at en sjekk feilet nar den ikke gjorde det. */
+
+.app-tamper-row {
+  display: flex; gap: var(--space-2); flex-wrap: nowrap;
+  margin-bottom: var(--space-3);
+}
+/* Fire knapper paa ÉN rad paa 1440 px. Wrapper de til to rader, blir
+ * Etter-fanen for hoey og siden ruller. */
+.app-tamper-btn {
+  display: inline-flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  text-align: left; flex: 1 1 0; min-width: 0; padding: 7px 10px;
+  white-space: normal; line-height: 15px;
+}
+.app-tamper-btn-name { font-size: 11.5px; font-weight: 600; color: var(--ink); }
+.app-tamper-btn-state {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--ink-faint);
+}
+.app-tamper-btn.is-done .app-tamper-btn-state { color: var(--ink-muted); }
+.app-tamper-btn[disabled] { opacity: .55; cursor: default; }
+
+/* Resultatet ruller INNVENDIG. Samme valg som loggtabellen over: siden skal
+ * ikke rulle, men en lang ærlig forklaring skal heller ikke klippes bort. */
+.app-tamper-out {
+  display: grid; gap: var(--space-4);
+  max-height: 92px; overflow-y: auto;
+}
+.app-tamper-card {
+  border: 1px solid var(--line); border-radius: var(--radius-lg);
+  border-left-width: 3px; padding: var(--space-4);
+  background: var(--card-top);
+}
+.app-tamper-card.is-ok { border-left-color: var(--positive); }
+.app-tamper-card.is-bad { border-left-color: var(--negative); }
+.app-tamper-card.is-limit { border-left-color: var(--ink-faint); }
+.app-tamper-card.is-note { border-left-color: var(--ink-faint); }
+.app-tamper-head {
+  display: flex; align-items: baseline; gap: var(--space-3);
+  flex-wrap: wrap; margin-bottom: var(--space-3);
+}
+.app-tamper-head h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--ink); }
+.app-tamper-badge {
+  padding: 2px 8px; border-radius: var(--radius-pill);
+  background: var(--icon-tile); color: var(--ink-muted);
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; font-weight: 600;
+}
+.app-tamper-card.is-ok .app-tamper-badge { color: var(--positive); }
+.app-tamper-card.is-bad .app-tamper-badge { color: var(--negative); }
+.app-tamper-did { margin: 0 0 var(--space-3); font-size: 12.5px; color: var(--ink-muted); line-height: 19px; }
+.app-tamper-did b { color: var(--ink); font-weight: 600; }
+.app-tamper-facts {
+  display: flex; gap: var(--space-5); margin: 0 0 var(--space-3); flex-wrap: wrap;
+}
+.app-tamper-facts dt { font-size: 11px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: .04em; }
+.app-tamper-facts dd { margin: 2px 0 0; font-size: 12.5px; color: var(--ink); }
+
+/* Begge hashene side om side. Det er sammenligningen som er poenget, saa de
+ * star i to kolonner med samme bredde og aldri over hverandre. */
+.app-tamper-hashes {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-3) var(--space-5);
+  padding: var(--space-3); border-radius: var(--radius-lg);
+  background: var(--panel); margin-bottom: var(--space-2);
+}
+.app-tamper-hash dt { font-size: 11px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: .04em; }
+.app-tamper-hash dd { margin: 3px 0 0; overflow-wrap: anywhere; }
+.app-tamper-hash.is-changed dd .app-hash { color: var(--ink); font-weight: 600; }
+.app-tamper-why {
+  margin: var(--space-3) 0 0; font-size: 12.5px; color: var(--ink-muted); line-height: 20px;
+}
+
+/* Oppfoelging ruller innvendig, av samme grunn som loggtabellen og
+ * resultatet over: hele Etter-fanen skal staa innenfor 1440x900 uten at
+ * SIDEN ruller, naa som «Bryt loggen» ogsaa bor her. */
+.app-after { max-height: 96px; overflow-y: auto; }
+
+/* Litt strammere luft i «Bryt loggen» enn i de andre panelene. Grunnen er
+ * den samme som for hoeydene over: Etter-fanen har naa fire seksjoner i
+ * stedet for tre, og den skal staa innenfor 1440x900 uten at siden ruller. */
+.app-tamper { padding-top: var(--space-4); padding-bottom: var(--space-4); }
+.app-tamper .lw-panel-head { margin-bottom: var(--space-3); }
+.app-tamper .lw-panel-sub { font-size: 12px; line-height: 17px; }
