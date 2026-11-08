@@ -197,7 +197,9 @@ def test_zero_is_a_dash_not_an_empty_pill():
 def test_the_three_outcomes_have_three_different_pills():
     for slag in ("is-red", "is-blocked", "is-allow"):
         assert f".app-pill.{slag}" in CSS, slag
-    farger = re.findall(r"\.app-pill\.is-\w+ \{[^}]*color: ([^;]+);", CSS)
+    # Bare grunnreglene, som starter linjen. Agenttabellen overstyrer pillene
+    # til vanlig tekst (`.app-agents .app-pill...`), og de reglene teller ikke her.
+    farger = re.findall(r"^\.app-pill\.is-\w+ \{[^}]*color: ([^;]+);", CSS, re.M)
     assert len(set(farger)) == 3, farger
 
 

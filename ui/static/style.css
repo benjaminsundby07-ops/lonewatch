@@ -1462,3 +1462,20 @@ body { font-family: var(--font-sans); }
 body[data-tab="after"] #verify-banner { display: none; }
 body:not([data-tab="overview"]) #story-band:not(.live) { display: none; }
 
+/* Agenttabellen på Oversikt: vanlige tall, ikke fargede piller.
+ * Tall høyrejusteres så sifrene står under hverandre. Farge ligger på selve
+ * teksten, og bare der det betyr noe: rødt for røde varsler, gult for blokkert.
+ * «Sluppet gjennom» er det normale og får vanlig tekstfarge. Prikken foran
+ * navnet er flat, uten glød, og vises bare når noe venter på et menneske. */
+.app-agents th:not(:first-child),
+.app-agents td:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+.app-agents .app-pill {
+  min-width: 0; padding: 0; border-radius: 0; background: none;
+  font-size: inherit; font-weight: 500;
+}
+.app-agents .app-pill.is-red { color: var(--negative); }
+.app-agents .app-pill.is-blocked { color: var(--example-ink); }
+.app-agents .app-pill.is-allow { color: var(--ink); font-weight: 400; }
+.app-agents .app-status-dot { box-shadow: none; }
+.app-agents .app-status-dot.is-calm { visibility: hidden; }
+
